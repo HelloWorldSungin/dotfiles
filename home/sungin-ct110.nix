@@ -90,6 +90,9 @@ in
       v = "nvim";
       lg = "lazygit";
       rebuild = "~/dotfiles/rebuild.sh";
+      # high-agency claude (Kun's pattern); ccdr resumes the last session
+      ccd = "claude --dangerously-skip-permissions";
+      ccdr = "claude --dangerously-skip-permissions -r";
     };
   };
 
