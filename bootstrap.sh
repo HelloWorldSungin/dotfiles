@@ -58,8 +58,7 @@ command -v opencode >/dev/null 2>&1 || curl -fsSL https://opencode.ai/install | 
 # opencode's installer only patches .bashrc; we run zsh - expose it on the
 # PATH we actually use instead.
 [ -x "$HOME/.opencode/bin/opencode" ] && ln -sf "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode"
-# pi: install manually for now and record the exact command here once
-# the package name is confirmed - then it's part of the bootstrap forever.
+command -v pi >/dev/null 2>&1 || npm install -g @mariozechner/pi-coding-agent
 
 echo
 echo "Done. Open a NEW login shell (or 'exec zsh'), then log in to each"

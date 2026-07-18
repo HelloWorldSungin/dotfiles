@@ -11,7 +11,7 @@ it into every harness's expected location:
 | codex    | `~/.codex/AGENTS.md` | yes |
 | opencode | `~/.config/opencode/AGENTS.md` | yes |
 | (generic)| `~/AGENTS.md` | yes |
-| pi       | confirm path after installing | TODO |
+| pi       | `~/.pi/agent/AGENTS.md` | yes |
 
 Edit the one file; every agent picks it up. The starter content is Kun
 Chen's minimal ruleset. Two disciplines keep it useful:

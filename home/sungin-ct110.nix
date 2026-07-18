@@ -57,8 +57,7 @@ in
   home.file.".claude/CLAUDE.md".source = link "agents/AGENTS.md";
   home.file.".codex/AGENTS.md".source = link "agents/AGENTS.md";
   home.file.".config/opencode/AGENTS.md".source = link "agents/AGENTS.md";
-  # pi: wire its global memory path here once pi is installed and the
-  # location is confirmed on this machine.
+  home.file.".pi/agent/AGENTS.md".source = link "agents/AGENTS.md";
 
   # herdr reads ~/.config/herdr/config.toml; kept in-repo the same way.
   xdg.configFile."herdr/config.toml".source = link "config/herdr/config.toml";
