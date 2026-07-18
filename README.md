@@ -53,6 +53,29 @@ and the agent harnesses. Then log in to each harness once (`claude`, etc.).
 | See what a rebuild would change    | `git diff` before running `rebuild` |
 | Start / reattach sessions          | `ssh ct110` then `herdr` -> [docs/herdr.md](docs/herdr.md) |
 
+## Server privilege model (CT110)
+
+Deliberate separation, because agents here run high-agency (often
+`--dangerously-skip-permissions`) on a box that also runs live trading:
+
+- **`sungin`** — the agent/dev user this repo configures. **No sudo.** Can read
+  the infra (`/opt/ArkNode-AI` is 755) but cannot write it, restart services,
+  or deploy. This is the blast-radius boundary.
+- **`researcher`** — the infra identity that owns the training code, GPUs, and
+  live services. Untouched by this repo.
+- Admin/root tasks go through the `ct110-root` SSH alias, not `sungin`.
+
+Root bootstrap (one-time, run as root — creates the user this repo then configures):
+
+```sh
+adduser --disabled-password --gecos "" sungin
+install -d -m700 -o sungin -g sungin /home/sungin/.ssh
+# add your pubkey to /home/sungin/.ssh/authorized_keys
+chsh -s /home/sungin/.nix-profile/bin/zsh sungin   # after nix/home-manager
+```
+
+Then, as `sungin`: clone this repo to `~/dotfiles` and run `./bootstrap.sh`.
+
 ## Docs
 
 - [docs/nix.md](docs/nix.md) - how the flake and home-manager actually work

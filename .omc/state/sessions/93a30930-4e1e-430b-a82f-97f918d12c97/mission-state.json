@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-18T23:05:22.452Z",
+  "updatedAt": "2026-07-18T23:37:57.754Z",
   "missions": [
     {
       "id": "session:93a30930-4e1e-430b-a82f-97f918d12c97:none",
@@ -7,7 +7,7 @@
       "name": "none",
       "objective": "Session mission",
       "createdAt": "2026-07-18T22:56:37.538Z",
-      "updatedAt": "2026-07-18T23:05:22.452Z",
+      "updatedAt": "2026-07-18T23:37:57.754Z",
       "status": "running",
       "workerCount": 3,
       "taskCounts": {
@@ -27,7 +27,7 @@
           "currentStep": null,
           "latestUpdate": "completed",
           "completedSummary": null,
-          "updatedAt": "2026-07-18T23:01:19.510Z"
+          "updatedAt": "2026-07-18T23:37:57.754Z"
         },
         {
           "name": "audit-hermes-rob:aaudit-",
@@ -74,6 +74,14 @@
           "agent": "cc-deny-check:acc-den",
           "detail": "started cc-deny-check:acc-den",
           "sourceKey": "session-start:acc-deny-check-f5008e22eb85657e"
+        },
+        {
+          "id": "session-stop:abc423d3e8f7f3274:2026-07-18T23:37:57.754Z",
+          "at": "2026-07-18T23:37:57.754Z",
+          "kind": "completion",
+          "agent": "audit-arknode:aaudit-",
+          "detail": "completed",
+          "sourceKey": "session-stop:abc423d3e8f7f3274"
         }
       ]
     }

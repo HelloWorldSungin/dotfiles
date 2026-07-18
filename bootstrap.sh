@@ -41,10 +41,21 @@ export NPM_CONFIG_PREFIX="$HOME/.npm-global"
 export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"
 
 step "3/5 zsh as login shell"
+# This user deliberately has NO sudo (agent/infra privilege separation), so
+# setting the login shell is a one-time ROOT task done at user creation, not
+# here. If it isn't set yet, print the exact command to run via ct110-root
+# rather than failing the bootstrap.
 ZSH_PATH="$HOME/.nix-profile/bin/zsh"
 if [ -x "$ZSH_PATH" ] && [ "$(getent passwd "$USER" | cut -d: -f7)" != "$ZSH_PATH" ]; then
-  grep -qxF "$ZSH_PATH" /etc/shells || echo "$ZSH_PATH" | sudo tee -a /etc/shells >/dev/null
-  sudo chsh -s "$ZSH_PATH" "$USER"
+  if sudo -n true 2>/dev/null; then
+    grep -qxF "$ZSH_PATH" /etc/shells || echo "$ZSH_PATH" | sudo tee -a /etc/shells >/dev/null
+    sudo chsh -s "$ZSH_PATH" "$USER"
+  else
+    echo "  login shell not set and no sudo — run once as root:"
+    echo "    grep -qxF '$ZSH_PATH' /etc/shells || echo '$ZSH_PATH' >> /etc/shells"
+    echo "    chsh -s '$ZSH_PATH' $USER"
+    echo "  (harmless to skip: 'exec zsh' still works; only the default shell is unset)"
+  fi
 fi
 
 step "4/5 herdr (session layer)"

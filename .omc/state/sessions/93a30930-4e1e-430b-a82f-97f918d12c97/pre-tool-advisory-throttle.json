@@ -1,13 +1,13 @@
 {
   "version": 1,
   "entries": {
-    "445ed27a3872b681d98190bae61ccb84954e1bc4e140df5370be958dee776b3a": {
-      "last_emitted_at_ms": 1784416063830,
-      "message": "Verify changes work after editing. Test functionality before marking complete."
-    },
     "79a93d4a2f8f50b95f852280616242fee1855dc99a3c75211917f55e72e95fae": {
-      "last_emitted_at_ms": 1784415924535,
+      "last_emitted_at_ms": 1784418669173,
       "message": "Use parallel execution for independent tasks. Use run_in_background for long operations (npm install, builds, tests)."
+    },
+    "445ed27a3872b681d98190bae61ccb84954e1bc4e140df5370be958dee776b3a": {
+      "last_emitted_at_ms": 1784417676922,
+      "message": "Verify changes work after editing. Test functionality before marking complete."
     },
     "c0ea4987f19419ad90d995750935b4873d753ac76578209808c47cf8932c99f7": {
       "last_emitted_at_ms": 1784415922077,
@@ -26,5 +26,5 @@
       "message": "Read multiple files in parallel when possible for faster analysis."
     }
   },
-  "updated_at": "2026-07-18T23:07:43.830Z"
+  "updated_at": "2026-07-18T23:51:09.173Z"
 }

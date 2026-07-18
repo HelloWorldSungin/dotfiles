@@ -131,11 +131,13 @@
       "agent_type": "cc-deny-check",
       "started_at": "2026-07-18T23:05:22.452Z",
       "parent_mode": "none",
-      "status": "running"
+      "status": "completed",
+      "completed_at": "2026-07-18T23:37:57.754Z",
+      "duration_ms": 1955302
     }
   ],
   "total_spawned": 5,
-  "total_completed": 15,
+  "total_completed": 16,
   "total_failed": 0,
-  "last_updated": "2026-07-18T23:05:22.807Z"
+  "last_updated": "2026-07-18T23:37:58.291Z"
 }

@@ -20,3 +20,4 @@
 {"t":0,"agent":"aaudit-","agent_type":"audit-arknode","event":"agent_stop","success":true,"duration_ms":48251}
 {"t":0,"agent":"acc-den","agent_type":"cc-deny-check","event":"agent_start","parent_mode":"none"}
 {"t":0,"agent":"system","event":"skill_invoked","skill_name":"claude-api"}
+{"t":0,"agent":"abc423d","agent_type":"cc-deny-check","event":"agent_stop","success":true,"duration_ms":1955302}
