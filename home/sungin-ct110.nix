@@ -16,6 +16,7 @@ in
 
   home.packages = with pkgs; [
     gh
+    tea # Gitea CLI - BZ-SIM (and other CT101-hosted repos) track issues there
     lazygit
     nodejs_22 # required by the axi tools (Node 20+) and npm-installed harnesses
     ripgrep
