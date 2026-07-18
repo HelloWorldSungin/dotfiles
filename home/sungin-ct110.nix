@@ -86,6 +86,7 @@ in
       gs = "git status";
       gd = "git diff";
       gl = "git log --oneline -20";
+      gpl = "git pull --rebase";
       v = "nvim";
       lg = "lazygit";
       rebuild = "~/dotfiles/rebuild.sh";
