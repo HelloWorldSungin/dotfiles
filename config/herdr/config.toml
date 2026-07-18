@@ -7,3 +7,6 @@
 #
 # After editing, apply without restarting sessions:
 #   herdr server reload-config
+
+[ui]
+agent_panel_sort = "spaces"
