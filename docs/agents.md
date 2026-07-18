@@ -38,3 +38,19 @@ be. A fresh machine needs each login once after `bootstrap.sh`.
 
 Each gets installed and learned one at a time - the bootstrap records the
 install commands as they're adopted.
+
+## Vendored skills
+
+`skills/vault/SKILL.md` is the OKF vault knowledge-ops skill, vendored verbatim
+from the `HelloWorldSungin/ark-skills` plugin. It is copied in as a **standalone
+skill on purpose** - installing the full ark-skills plugin would also add the
+ark workflow router and `/ark-onboard` / `/ark-health` / `/ark-update` commands,
+a second orchestrator that would compete with firstmate. We want only the vault
+capability, so just the one self-contained file is vendored and symlinked into
+every harness that reads agent-skills (claude `~/.claude/skills/`, pi
+`~/.pi/agent/skills/`, generic `~/.agents/skills/`).
+
+It is a verbatim copy, so it does NOT auto-update with the ark-skills repo -
+re-copy the file when you want a newer version. It expects each vault repo to
+carry its own `vault/_meta/` OKF tooling (they already do); the skill is pure
+instructions.

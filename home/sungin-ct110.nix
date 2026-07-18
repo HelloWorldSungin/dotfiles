@@ -64,6 +64,16 @@ in
   # herdr reads ~/.config/herdr/config.toml; kept in-repo the same way.
   xdg.configFile."herdr/config.toml".source = link "config/herdr/config.toml";
 
+  # --------------------------------------------------- vendored skills
+  # The `vault` skill (OKF knowledge ops) vendored from HelloWorldSungin/
+  # ark-skills. Deliberately vendored as a standalone skill, NOT via the
+  # ark-skills plugin, to avoid pulling in the ark workflow router / /ark-*
+  # commands - firstmate stays the only orchestrator. Symlinked into every
+  # harness that supports agent-skills so it is not claude-only.
+  home.file.".claude/skills/vault/SKILL.md".source = link "skills/vault/SKILL.md";
+  home.file.".pi/agent/skills/vault/SKILL.md".source = link "skills/vault/SKILL.md";
+  home.file.".agents/skills/vault/SKILL.md".source = link "skills/vault/SKILL.md";
+
   # ------------------------------------------------------------------ zsh
   programs.zsh = {
     enable = true;
