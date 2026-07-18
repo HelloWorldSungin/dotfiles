@@ -60,6 +60,18 @@ command -v opencode >/dev/null 2>&1 || curl -fsSL https://opencode.ai/install | 
 [ -x "$HOME/.opencode/bin/opencode" ] && ln -sf "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode"
 command -v pi >/dev/null 2>&1 || npm install -g @mariozechner/pi-coding-agent
 
+step "6/6 agent toolchain (Kun Chen stack)"
+command -v treehouse >/dev/null 2>&1 || curl -fsSL https://kunchenguid.github.io/treehouse/install.sh | sh
+command -v no-mistakes >/dev/null 2>&1 || curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh
+command -v gnhf >/dev/null 2>&1 || npm install -g gnhf
+command -v gh-axi >/dev/null 2>&1 || npm install -g gh-axi
+command -v tasks-axi >/dev/null 2>&1 || npm install -g tasks-axi
+command -v quota-axi >/dev/null 2>&1 || npm install -g quota-axi
+command -v chrome-devtools-axi >/dev/null 2>&1 || npm install -g chrome-devtools-axi
+# firstmate is distributed as a repo you run agents inside, not a binary
+[ -d "$HOME/firstmate" ] || git clone https://github.com/kunchenguid/firstmate.git "$HOME/firstmate"
+
 echo
-echo "Done. Open a NEW login shell (or 'exec zsh'), then log in to each"
-echo "harness once: claude / codex / opencode. See docs/agents.md."
+echo "Done. Open a NEW login shell (or 'exec zsh'), then log in once to each"
+echo "harness (claude / codex / opencode / pi) and 'gh auth login'."
+echo "After gh is authed: 'gh-axi setup hooks'. See docs/agents.md."

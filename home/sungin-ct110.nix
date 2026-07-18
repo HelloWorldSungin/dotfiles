@@ -25,6 +25,7 @@ in
     tree
     htop
     unzip
+    chromium # headless browser for chrome-devtools-axi E2E testing
   ];
 
   home.sessionVariables = {
