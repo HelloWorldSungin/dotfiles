@@ -1,4 +1,4 @@
--- Finding and jumping to things. See docs/nvim.md for the keybind cheatsheet.
+-- Finding and jumping to things. See docs/cheatsheet.md for the keybinds.
 return {
   {
     -- Snacks: a grab-bag of utilities by folke. We use its pickers -
