@@ -69,6 +69,14 @@ in
     autosuggestion.enable = true;   # ghost-text completion from history
     syntaxHighlighting.enable = true;
     history.size = 50000;
+    # .zshenv runs for EVERY zsh (including non-interactive `ssh ct110 cmd`),
+    # so the nix profile is on PATH even without a login shell. The system
+    # nix hook only covers bash on Ubuntu.
+    envExtra = ''
+      if [ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
+        . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+      fi
+    '';
     initContent = ''
       # ctrl-f accepts the ghost-text suggestion (Kun's keybind)
       bindkey '^f' autosuggest-accept
