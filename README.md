@@ -68,6 +68,7 @@ flake.nix              inputs (pinned nixpkgs, home-manager) + machine targets
 home/sungin-ct110.nix  everything about the CT110 user environment
 config/nvim/           neovim: init.lua -> lua/{vim-config,keys}.lua + plugins/
 config/herdr/          herdr config (defaults; grows as preferences form)
+config/wezterm/        Mac client terminal config (symlink ~/.config/wezterm here)
 agents/AGENTS.md       single global memory file for all agent harnesses
 bootstrap.sh           zero -> working machine (idempotent)
 rebuild.sh             apply nix config after editing home/ or flake.nix
