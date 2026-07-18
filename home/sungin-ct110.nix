@@ -110,6 +110,10 @@ in
     extraConfig = {
       init.defaultBranch = "main";
       pull.rebase = true;
+      # gh can't write this itself (this git config is a read-only nix
+      # symlink), so the gh-as-credential-helper wiring lives here.
+      credential."https://github.com".helper = "!gh auth git-credential";
+      credential."https://gist.github.com".helper = "!gh auth git-credential";
     };
   };
 }
