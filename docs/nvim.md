@@ -1,5 +1,9 @@
 # Neovim setup
 
+> New to real vim (not just VS Code keybindings)? Start with
+> [vim-basics.md](vim-basics.md) and nvim's built-in `:Tutor` first -
+> this file covers the plugin layer on top.
+
 Structure (Kun's modular layout - each concern in its own file):
 
 ```
