@@ -106,6 +106,19 @@ in
     enableZshIntegration = true;
   };
 
+  # ------------------------------------------------------------------ ssh
+  # Gitea on CT101 hosts some project repos (BZ-SIM, fast-frequency-card).
+  # The sungin@ct110 pubkey must be registered in Gitea's UI once.
+  programs.ssh = {
+    enable = true;
+    matchBlocks."gitea.arknode" = {
+      hostname = "192.168.68.101";
+      port = 2222;
+      user = "git";
+      identityFile = "~/.ssh/id_ed25519";
+    };
+  };
+
   # ------------------------------------------------------------------ git
   programs.git = {
     enable = true;
