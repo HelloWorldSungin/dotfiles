@@ -60,6 +60,7 @@ and the agent harnesses. Then log in to each harness once (`claude`, etc.).
 - [docs/nvim.md](docs/nvim.md) - every plugin, why it's there, all keybinds
 - [docs/herdr.md](docs/herdr.md) - sessions explained for non-tmux people
 - [docs/agents.md](docs/agents.md) - the shared memory file and harness logins
+- [docs/cheatsheet.md](docs/cheatsheet.md) - every keybind (nvim, zsh, herdr) on one page
 
 ## Layout
 
