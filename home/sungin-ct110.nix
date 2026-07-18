@@ -109,9 +109,9 @@ in
   # ------------------------------------------------------------------ git
   programs.git = {
     enable = true;
-    userName = "Sungin Kim";
-    userEmail = "sunginapp@gmail.com";
-    extraConfig = {
+    settings = {
+      user.name = "Sungin Kim";
+      user.email = "sunginapp@gmail.com";
       init.defaultBranch = "main";
       pull.rebase = true;
       # gh can't write this itself (this git config is a read-only nix
