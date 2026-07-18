@@ -12,11 +12,14 @@ config/nvim/
   lua/vim-config.lua      editor behavior (options only - no keybinds)
   lua/keys.lua            global keybinds not tied to a plugin
   lua/plugins/*.lua       one file per topic; every file = plugin specs
+  lazy-lock.json          generated: the commit each plugin is pinned to
 ```
 
 Plugins are managed by **lazy.nvim**: on first launch it clones everything
 from GitHub automatically, so a fresh machine just works. `:Lazy` opens its
-UI (update/clean plugins from there).
+UI (update/clean plugins from there). `lazy-lock.json` is written by lazy.nvim
+and committed, so a fresh machine gets the same plugin commits this one runs -
+never hand-edit it; update plugins via `:Lazy` and commit the resulting diff.
 
 ## The keybind cheatsheet
 
