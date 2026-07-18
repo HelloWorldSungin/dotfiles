@@ -8,6 +8,15 @@ on:
   push:
     branches: [master]
 
+# Build only - the token never needs to write anything, and fork PRs run this.
+permissions:
+  contents: read
+
+# Superseded cold Nix builds are cancelled instead of running to completion.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     # The only target in flake.nix is x86_64-linux, so one runner is enough.
