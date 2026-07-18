@@ -55,6 +55,9 @@ step "5/5 agent harnesses (fast-moving CLIs - official installers, not Nix)"
 command -v claude >/dev/null 2>&1 || curl -fsSL https://claude.ai/install.sh | bash
 command -v codex >/dev/null 2>&1 || npm install -g @openai/codex
 command -v opencode >/dev/null 2>&1 || curl -fsSL https://opencode.ai/install | bash
+# opencode's installer only patches .bashrc; we run zsh - expose it on the
+# PATH we actually use instead.
+[ -x "$HOME/.opencode/bin/opencode" ] && ln -sf "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode"
 # pi: install manually for now and record the exact command here once
 # the package name is confirmed - then it's part of the bootstrap forever.
 
