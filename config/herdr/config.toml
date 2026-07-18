@@ -1,0 +1,9 @@
+# Herdr configuration - ~/.config/herdr/config.toml is a symlink to this file.
+#
+# Starting from an empty config = herdr defaults (prefix key ctrl+b, tmux-like).
+# To see every available option with its default value, run:
+#   herdr --default-config
+# and copy the sections you want to change into this file.
+#
+# After editing, apply without restarting sessions:
+#   herdr server reload-config
