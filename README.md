@@ -57,9 +57,10 @@ and the agent harnesses. Then log in to each harness once (`claude`, etc.).
 
 - [docs/nix.md](docs/nix.md) - how the flake and home-manager actually work
 - [docs/vim-basics.md](docs/vim-basics.md) - vim from zero (modes, motions, editing)
-- [docs/nvim.md](docs/nvim.md) - every plugin, why it's there, all keybinds
+- [docs/nvim.md](docs/nvim.md) - every plugin and why it's there
 - [docs/herdr.md](docs/herdr.md) - sessions explained for non-tmux people
 - [docs/agents.md](docs/agents.md) - the shared memory file and harness logins
+- [docs/cheatsheet.md](docs/cheatsheet.md) - every keybind (nvim, zsh, herdr) on one page
 
 ## Layout
 

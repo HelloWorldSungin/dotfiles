@@ -21,22 +21,13 @@ UI (update/clean plugins from there). `lazy-lock.json` is written by lazy.nvim
 and committed, so a fresh machine gets the same plugin commits this one runs -
 never hand-edit it; update plugins via `:Lazy` and commit the resulting diff.
 
-## The keybind cheatsheet
+## How you discover keybinds
 
 Leader = **space**. Press space and *pause* - which-key pops up and shows
-what you can press next. That popup is how you learn this list.
+what you can press next. That popup is how you learn the bindings.
 
-| Keys       | What happens | Plugin |
-|------------|--------------|--------|
-| `space f`  | fuzzy-find files by name | snacks |
-| `space s`  | live grep the project | snacks |
-| `space b`  | switch between open buffers | snacks |
-| `gd`       | go to definition | snacks (LSP) |
-| `space e`  | file explorer as editable buffer | oil |
-| `space g`  | git status / stage / commit UI | neogit |
-| `Esc`      | save file (in normal mode) | keys.lua |
-| `Ctrl-a`   | select all | keys.lua |
-| `p` (visual) | paste WITHOUT clobbering the clipboard | keys.lua |
+The full list lives in [cheatsheet.md](cheatsheet.md), which indexes every
+keybind in this repo (nvim, zsh, herdr) on one page.
 
 ## Why each plugin is here
 
