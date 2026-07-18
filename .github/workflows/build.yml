@@ -1,0 +1,30 @@
+name: build
+
+# Verifies the flake still evaluates and the home-manager generation still
+# builds. Build only - CI never activates anything or writes a user profile.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  build:
+    # The only target in flake.nix is x86_64-linux, so one runner is enough.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+
+      - name: Flake check
+        run: nix flake check --print-build-logs
+
+      - name: Build home-manager generation
+        # activationPackage is the generation itself - building it proves the
+        # config is sound without running the activation script.
+        run: |
+          nix build --no-link --print-out-paths --print-build-logs \
+            '.#homeConfigurations."sungin@ct110".activationPackage'
