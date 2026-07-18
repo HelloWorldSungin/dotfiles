@@ -11,10 +11,12 @@ config.color_scheme = "rose-pine-moon"
 config.font = wezterm.font_with_fallback({ "Hack Nerd Font", "Menlo" })
 config.font_size = 15.0
 
--- Frameless-but-resizable window with a bit of translucency (Kun's look).
+-- Frameless-but-resizable window. The translucency look depends as much on
+-- your desktop WALLPAPER as on these numbers - a colorful wallpaper glows
+-- through; a dark one reads nearly solid. Tune opacity to taste.
 config.window_decorations = "RESIZE"
-config.window_background_opacity = 0.92
-config.macos_window_background_blur = 30
+config.window_background_opacity = 0.82
+config.macos_window_background_blur = 50
 config.hide_tab_bar_if_only_one_tab = true
 
 -- The servers have xterm-256color terminfo but not wezterm's own.
