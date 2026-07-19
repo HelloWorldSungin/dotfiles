@@ -58,12 +58,21 @@ and the agent harnesses. Then log in to each harness once (`claude`, etc.).
 Deliberate separation, because agents here run high-agency (often
 `--dangerously-skip-permissions`) on a box that also runs live trading:
 
-- **`sungin`** — the agent/dev user this repo configures. **No sudo.** Can read
-  the infra (`/opt/ArkNode-AI` is 755) but cannot write it, restart services,
-  or deploy. This is the blast-radius boundary.
+- **`sungin`** — the developer account, which is ALSO the account agents run
+  as. It has **password sudo** (`/etc/sudoers.d/sungin`), never NOPASSWD:
+  the human escalates by typing a password; agents can't. `timestamp_timeout=0`
+  disables sudo credential caching so an agent process can't ride a password
+  the human typed moments earlier. It owns nothing under `researcher`, so even
+  before sudo it can read but not write the infra (`/opt/ArkNode-AI` is 755).
 - **`researcher`** — the infra identity that owns the training code, GPUs, and
   live services. Untouched by this repo.
-- Admin/root tasks go through the `ct110-root` SSH alias, not `sungin`.
+- `ct110-root` (root SSH alias) remains the break-glass path and the way to set
+  sungin's sudo password: `ssh ct110-root` then `passwd sungin`.
+
+Why password-not-passwordless matters: `sungin` is shared between you and
+autonomous agents, so any capability the account has, an agent has too. A
+password the agent doesn't know (plus no credential cache) is what keeps sudo
+human-only in practice.
 
 Root bootstrap (one-time, run as root — creates the user this repo then configures):
 
