@@ -10,3 +10,9 @@
 
 [ui]
 agent_panel_sort = "spaces"
+
+[keys]
+# In `herdr --remote`, image paste defaults to ctrl+v — which hijacks normal
+# text paste between panes. Move it to ctrl+shift+v so ctrl+v stays free for
+# text paste. (Inert on the CT110 server; only the Mac --remote client uses it.)
+remote_image_paste = "ctrl+shift+v"
