@@ -27,6 +27,8 @@ in
     htop
     unzip
     chromium # headless browser for chrome-devtools-axi E2E testing
+    ghdl     # open-source VHDL simulator - lets agents compile/simulate FPGA (fast-frequency-card) changes
+    gtkwave  # view GHDL-produced .ghw/.vcd waveforms (headless-generate, inspect on demand)
   ];
 
   home.sessionVariables = {
