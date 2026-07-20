@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"ssh ct110 'set +e\\necho \\\"############ HERMES CLAUDE.md ############\\\"; cat /home/sungin/projects/ark-hermes-agent/CLAUDE.md\\necho; echo \\\"############ HERMES AGENTS.md (root) ############...",
-  "error": "Exit code 1\n############ HERMES CLAUDE.md ############\n# ark-hermes-agent\n\nSelf-hosted Hermes Agent control plane for a single-host Proxmox homelab: LOQ runtime\ninstaller, profile prompts/config, operational docs, and verification scripts. Not a\nconventional package or web app — commands are explicit shell/Python entry points.\n\nThe authoritative codebase map, conventions, and anti-patterns live in\n[`AGENTS.md`](AGENTS.md). Read it before non-trivial work.\n\n## Project Configuration\n\n| Topic | Loc...",
-  "timestamp": "2026-07-18T22:57:19.477Z",
-  "retry_count": 1
-}
