@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# shot2ct110 - bridge a Mac screenshot to a CT110 agent.
+#
+# CT110 agents (claude/codex/pi) can't see the Mac clipboard - the SSH pipe is
+# text only and CT110 is headless. But they DO accept an image file PATH. So
+# this ships the screenshot to CT110 and copies its remote path to your Mac
+# clipboard; you then just Cmd-V the path into the agent.
+#
+# Source, in priority order:
+#   1. an image on the clipboard (Cmd-Ctrl-Shift-4), if `pngpaste` is installed
+#   2. the newest screenshot on ~/Desktop (macOS default Cmd-Shift-4)
+#
+# Usage:  shot2ct110            # newest screenshot / clipboard image -> CT110
+#         shot2ct110 path.png   # a specific local image file
+set -euo pipefail
+
+HOST=ct110
+LOCAL=$(mktemp /tmp/shot2ct110-XXXXXX.png)
+trap 'rm -f "$LOCAL"' EXIT
+
+if [ $# -ge 1 ]; then
+  cp "$1" "$LOCAL"
+elif command -v pngpaste >/dev/null 2>&1 && pngpaste "$LOCAL" 2>/dev/null; then
+  :  # got an image straight off the clipboard
+else
+  SRC=$(ls -t "$HOME"/Desktop/Screenshot*.png "$HOME"/Desktop/Screen\ Shot*.png 2>/dev/null | head -1 || true)
+  [ -n "${SRC:-}" ] || { echo "shot2ct110: no clipboard image (install pngpaste) and no ~/Desktop screenshot" >&2; exit 1; }
+  cp "$SRC" "$LOCAL"
+fi
+
+STAMP=$(date +%Y%m%d-%H%M%S)
+RHOME=$(ssh "$HOST" 'mkdir -p ~/shots && printf %s "$HOME"')
+scp -q "$LOCAL" "$HOST:shots/shot-$STAMP.png"
+
+FULL="$RHOME/shots/shot-$STAMP.png"
+printf %s "$FULL" | pbcopy
+echo "→ $FULL  (path copied to clipboard — paste it into your CT110 agent)"

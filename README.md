@@ -85,6 +85,22 @@ chsh -s /home/sungin/.nix-profile/bin/zsh sungin   # after nix/home-manager
 
 Then, as `sungin`: clone this repo to `~/dotfiles` and run `./bootstrap.sh`.
 
+## Attaching Mac screenshots to a CT110 agent
+
+CT110 agents (claude/codex/pi) can't see your Mac clipboard — the SSH pipe is
+text only and CT110 is headless. Two bridges:
+
+- **`bin/shot2ct110`** (reliable, all agents): ships your newest ~/Desktop
+  screenshot (or clipboard image if `pngpaste` is installed) to
+  `ct110:~/shots/` and copies the remote path to your Mac clipboard — then
+  Cmd-V that path into the agent, which reads the image off CT110 disk.
+  Add to your Mac shell: `alias shot='~/dotfiles/bin/shot2ct110'`.
+  Optional clipboard-image mode: `brew install pngpaste`.
+- **`herdr --remote ct110`** (slicker, verify first): thin-client mode bridges
+  the Mac clipboard incl. image paste into the remote session. Requires
+  `brew install herdr` on the Mac; test that a pasted image actually reaches
+  the agent before relying on it.
+
 ## Docs
 
 - [docs/nix.md](docs/nix.md) - how the flake and home-manager actually work
