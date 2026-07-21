@@ -36,6 +36,10 @@ in
     # npm's default global prefix would be the read-only /nix/store, so
     # global installs (codex, the axi tools) go to a user-writable prefix.
     NPM_CONFIG_PREFIX = "$HOME/.npm-global";
+    # chrome-devtools-axi drives a headless Chrome; inside this LXC the
+    # sandbox can't initialize, so pass the flags that let it launch.
+    # Verified: about:blank snapshot + screenshot succeed with these.
+    CHROME_DEVTOOLS_AXI_CHROME_ARGS = "--no-sandbox --disable-dev-shm-usage --disable-gpu";
   };
 
   home.sessionPath = [
