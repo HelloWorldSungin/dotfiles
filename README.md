@@ -36,7 +36,7 @@ Three layers, each explained in depth in `docs/`:
 ## Fresh machine (or fresh user) to fully working
 
 ```sh
-git clone git@github.com:HelloWorldSungin/dotfiles.git ~/dotfiles
+git clone https://github.com/HelloWorldSungin/dotfiles.git ~/dotfiles
 cd ~/dotfiles && ./bootstrap.sh
 ```
 
