@@ -40,6 +40,8 @@ in
     tea # Gitea CLI - BZ-SIM (and other CT101-hosted repos) track issues there
     lazygit
     nodejs_22 # required by the axi tools (Node 20+) and npm-installed harnesses
+    uv       # Python runner for ark-hermes-agent's stock-runner scripts
+    bats     # runs ark-hermes-agent's .bats shell tests
     ripgrep
     fd
     fzf
@@ -196,6 +198,10 @@ in
       # symlink), so the gh-as-credential-helper wiring lives here.
       credential."https://github.com".helper = "!gh auth git-credential";
       credential."https://gist.github.com".helper = "!gh auth git-credential";
+      # The sungin ed25519 key is not registered with GitHub, so git@ SSH
+      # remotes (e.g. ark-hermes-agent's submodules) fail. Rewrite them to
+      # HTTPS so they use the gh credential helper above.
+      url."https://github.com/".insteadOf = "git@github.com:";
     };
   };
 }
