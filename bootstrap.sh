@@ -9,7 +9,7 @@ FLAKE_TARGET="sungin@ct110"
 
 if [ "$(cd "$(dirname "$0")" && pwd)" != "$DOTFILES" ]; then
   echo "This repo must live at ~/dotfiles (scripts and symlinks assume it):"
-  echo "  git clone git@github.com:HelloWorldSungin/dotfiles.git ~/dotfiles"
+  echo "  git clone https://github.com/HelloWorldSungin/dotfiles.git ~/dotfiles"
   exit 1
 fi
 
