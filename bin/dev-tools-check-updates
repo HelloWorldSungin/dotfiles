@@ -22,6 +22,14 @@
 # (default 15 seconds). A missing command, timeout, non-zero response, or
 # changed response makes only that source unknown. Valid invocations exit 0.
 #
+# Health check:
+#   --health reads CHROME_DEVTOOLS_AXI_CHROME_ARGS from the effective
+#   environment and verifies the Home Manager-persisted flags --no-sandbox,
+#   --disable-dev-shm-usage, and --disable-gpu are all present. It is healthy
+#   when all flags are present, broken when the variable or a flag is missing,
+#   and unknown when the environment cannot be read. This check is local,
+#   read-only, and never contacts the network.
+#
 # Cache:
 #   Path: ${XDG_CACHE_HOME:-$HOME/.cache}/dev-tools-update-checker/cache.json.
 #         DEV_TOOLS_UPDATE_CACHE_PATH overrides the exact file.
@@ -30,9 +38,11 @@
 #
 # Output modes:
 #   default     Five human-readable source summaries.
-#   --json      One JSON object with schema_version=1 and all source results.
-#   --startup   Read only the cache, never use the network, and print one
-#               compact line only when one or more updates are available.
+#   --json      One JSON object with schema_version=1. May be combined with
+#               --health for a machine-readable health result.
+#   --health    Report chrome-devtools-axi headless flag health and exit.
+#   --startup   Read only the update cache, run the local health check, never
+#               use the network, and print only updates or non-healthy wiring.
 #
 # Flags:
 #   --force     Ignore a fresh cache and perform every source check.
@@ -43,6 +53,7 @@
 #   DEV_TOOLS_UPDATE_CURL_BIN, DEV_TOOLS_UPDATE_TREEHOUSE_BIN, and
 #   DEV_TOOLS_UPDATE_NO_MISTAKES_BIN replace command paths.
 #   DEV_TOOLS_UPDATE_NOW_EPOCH replaces the clock.
+#   DEV_TOOLS_HEALTH_PRINTENV_BIN replaces the environment reader.
 set -u
 
 FIRSTMATE_PATH=${DEV_TOOLS_FIRSTMATE_PATH:-${HOME:-.}/firstmate}
@@ -55,10 +66,12 @@ NPM_BIN=${DEV_TOOLS_UPDATE_NPM_BIN:-npm}
 CURL_BIN=${DEV_TOOLS_UPDATE_CURL_BIN:-curl}
 TREEHOUSE_BIN=${DEV_TOOLS_UPDATE_TREEHOUSE_BIN:-${HOME:-.}/.local/bin/treehouse}
 NO_MISTAKES_BIN=${DEV_TOOLS_UPDATE_NO_MISTAKES_BIN:-${HOME:-.}/.local/bin/no-mistakes}
+PRINTENV_BIN=${DEV_TOOLS_HEALTH_PRINTENV_BIN:-printenv}
 NPM_PREFIX=${DEV_TOOLS_UPDATE_NPM_PREFIX:-${HOME:-.}/.npm-global}
 TREEHOUSE_RELEASE_URL=https://api.github.com/repos/kunchenguid/treehouse/releases/latest
 NO_MISTAKES_RELEASE_URL=https://api.github.com/repos/kunchenguid/no-mistakes/releases/latest
 TRACKED_NPM_JSON='["chrome-devtools-axi","gh-axi","gnhf","lavish-axi","quota-axi","tasks-axi"]'
+CHROME_REQUIRED_FLAGS_JSON='["--no-sandbox","--disable-dev-shm-usage","--disable-gpu"]'
 
 usage() {
   sed -n '2,/^set -u$/s/^# \{0,1\}//p' "$0"
@@ -66,10 +79,12 @@ usage() {
 
 MODE=human
 FORCE=0
+HEALTH=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --json) MODE=json ;;
     --startup) MODE=startup ;;
+    --health) HEALTH=1 ;;
     --force) FORCE=1 ;;
     --help|-h) usage; exit 0 ;;
     *) printf 'dev-tools-check-updates: unknown argument: %s\n' "$1" >&2; exit 2 ;;
@@ -98,6 +113,41 @@ run_timed() {
 
 unknown_json() {
   jq -cn --arg detail "$1" '{status:"unknown",detail:$detail}'
+}
+
+check_chrome_health() {
+  local args rc flag missing
+  if ! command -v "$PRINTENV_BIN" >/dev/null 2>&1; then
+    unknown_json "environment reader unavailable"
+    return
+  fi
+  if args=$($PRINTENV_BIN CHROME_DEVTOOLS_AXI_CHROME_ARGS 2>/dev/null); then
+    :
+  else
+    rc=$?
+    if [ "$rc" -eq 1 ]; then
+      jq -cn --argjson required "$CHROME_REQUIRED_FLAGS_JSON" \
+        '{status:"broken",detail:"CHROME_DEVTOOLS_AXI_CHROME_ARGS is unset",required_flags:$required}'
+    else
+      unknown_json "effective environment could not be read"
+    fi
+    return
+  fi
+
+  missing=
+  for flag in --no-sandbox --disable-dev-shm-usage --disable-gpu; do
+    if ! printf '%s\n' "$args" | grep -Eq -- "(^|[[:space:]])${flag}([[:space:]]|$)"; then
+      missing=${missing:+$missing, }$flag
+    fi
+  done
+  if [ -n "$missing" ]; then
+    jq -cn --arg detail "missing required flags: $missing" --arg actual "$args" \
+      --argjson required "$CHROME_REQUIRED_FLAGS_JSON" \
+      '{status:"broken",detail:$detail,required_flags:$required,actual:$actual}'
+  else
+    jq -cn --arg actual "$args" --argjson required "$CHROME_REQUIRED_FLAGS_JSON" \
+      '{status:"healthy",required_flags:$required,actual:$actual}'
+  fi
 }
 
 extract_version() {
@@ -309,9 +359,42 @@ render_startup() {
   '
 }
 
+render_health_human() {
+  printf '%s' "$HEALTH_RESULT" | jq -r '
+    .checks.chrome_devtools_headless as $check
+    | if $check.status == "healthy" then "chrome-devtools headless flags: healthy"
+      else "chrome-devtools headless flags: " + $check.status + " (" + $check.detail + ")"
+      end
+  '
+}
+
+render_health_startup() {
+  printf '%s' "$HEALTH_RESULT" | jq -r '
+    .checks.chrome_devtools_headless as $check
+    | if $check.status == "healthy" then empty
+      else "dev-tools: chrome-devtools headless flags " + $check.status + " - " + $check.detail
+      end
+  '
+}
+
+collect_health() {
+  local chrome
+  chrome=$(check_chrome_health)
+  HEALTH_RESULT=$(jq -cn --argjson chrome "$chrome" \
+    '{schema_version:1,checks:{chrome_devtools_headless:$chrome}}')
+}
+
 if ! command -v jq >/dev/null 2>&1; then
+  if [ "$HEALTH" -eq 1 ]; then
+    if [ "$MODE" = json ]; then
+      printf '%s\n' '{"schema_version":1,"checks":{"chrome_devtools_headless":{"status":"unknown","detail":"jq unavailable"}}}'
+    else
+      printf '%s\n' 'chrome-devtools headless flags: unknown (jq unavailable)'
+    fi
+    exit 0
+  fi
   case "$MODE" in
-    startup) ;;
+    startup) printf '%s\n' 'dev-tools: chrome-devtools headless flags unknown - jq unavailable' ;;
     json)
       printf '{"schema_version":1,"checked_at_epoch":%s,"cache_ttl_seconds":%s,"sources":{"firstmate":{"status":"unknown","detail":"jq unavailable"},"npm_global":{"status":"unknown","detail":"jq unavailable"},"treehouse":{"status":"unknown","detail":"jq unavailable"},"no_mistakes":{"status":"unknown","detail":"jq unavailable"},"nix_pinned":{"status":"excluded","detail":"nix-pinned tools are intentionally not tracked here"}}}\n' "$NOW" "$CACHE_TTL"
       ;;
@@ -324,11 +407,23 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
+if [ "$HEALTH" -eq 1 ]; then
+  collect_health
+  if [ "$MODE" = json ]; then
+    printf '%s\n' "$HEALTH_RESULT" | jq .
+  else
+    render_health_human
+  fi
+  exit 0
+fi
+
 if [ "$MODE" = startup ]; then
   if cache_is_valid; then
     RESULT=$(cat "$CACHE_PATH")
     render_startup
   fi
+  collect_health
+  render_health_startup
   exit 0
 fi
 

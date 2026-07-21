@@ -1,4 +1,4 @@
-{ config, pkgs, ... }:
+{ config, lib, pkgs, ... }:
 
 let
   # All config symlinks point back into this repo clone, so editing
@@ -21,6 +21,11 @@ let
       nodejs_22
     ];
   };
+  devToolsUpdateCheckRun = pkgs.writeShellScript "dev-tools-update-checker-run" ''
+    export CHROME_DEVTOOLS_AXI_CHROME_ARGS=${lib.escapeShellArg config.home.sessionVariables.CHROME_DEVTOOLS_AXI_CHROME_ARGS}
+    ${devToolsUpdateChecker}/bin/dev-tools-check-updates --force --json
+    ${devToolsUpdateChecker}/bin/dev-tools-check-updates --health --json
+  '';
 in
 {
   home.username = "sungin";
@@ -114,8 +119,8 @@ in
       # ctrl-f accepts the ghost-text suggestion (Kun's keybind)
       bindkey '^f' autosuggest-accept
 
-      # The weekly timer refreshes this cache. Login shells only read it, so
-      # opening a shell never waits on the network and stays quiet when current.
+      # The weekly timer refreshes the update cache. Login shells read that
+      # cache and check only local health, so opening one never waits on network.
       if [[ -o login ]]; then
         ${devToolsUpdateChecker}/bin/dev-tools-check-updates --startup
       fi
@@ -146,12 +151,12 @@ in
   };
 
   # ------------------------------------------------ developer-tool updates
-  # Check and cache update availability only. This never applies an update.
+  # Check update availability and local wiring health. Never apply an update.
   systemd.user.services.dev-tools-update-checker = {
-    Unit.Description = "Check for personal developer-tool updates";
+    Unit.Description = "Check personal developer-tool updates and health";
     Service = {
       Type = "oneshot";
-      ExecStart = "${devToolsUpdateChecker}/bin/dev-tools-check-updates --force --json";
+      ExecStart = devToolsUpdateCheckRun;
     };
   };
 

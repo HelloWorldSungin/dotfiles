@@ -3,7 +3,8 @@
 #
 # Every publication source is deterministic. Firstmate fetches from a local
 # file:// bare repository, while npm, curl, treehouse, and no-mistakes are
-# injected executables. No test contacts the network.
+# injected executables. The health check receives a fake environment reader.
+# No test contacts the network or depends on the real login environment.
 set -u
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -83,6 +84,13 @@ SH
 [ "${1:-}" = --version ] || exit 2
 printf '%s\n' "${TEST_FAKE_NO_MISTAKES_VERSION:-no-mistakes version v1.40.0 (fake)}"
 SH
+  cat > "$fakebin/printenv-fixture" <<'SH'
+#!/usr/bin/env bash
+[ "${1:-}" = CHROME_DEVTOOLS_AXI_CHROME_ARGS ] || exit 2
+rc=${TEST_FAKE_PRINTENV_RC:-0}
+[ "$rc" -eq 0 ] || exit "$rc"
+printf '%s\n' "${TEST_FAKE_CHROME_ARGS:-}"
+SH
   chmod +x "$fakebin"/*
   printf '%s\n' "$fakebin"
 }
@@ -107,6 +115,7 @@ run_checker() {
     DEV_TOOLS_UPDATE_CURL_BIN="$TEST_FAKEBIN/curl-fixture" \
     DEV_TOOLS_UPDATE_TREEHOUSE_BIN="$TEST_FAKEBIN/treehouse-fixture" \
     DEV_TOOLS_UPDATE_NO_MISTAKES_BIN="$TEST_FAKEBIN/no-mistakes-fixture" \
+    DEV_TOOLS_HEALTH_PRINTENV_BIN="$TEST_FAKEBIN/printenv-fixture" \
     "$CHECKER" "$@"
 }
 
@@ -123,9 +132,12 @@ configure_fixture() {
   TEST_FAKE_CURL_FAIL=0
   TEST_FAKE_TREEHOUSE_VERSION=v2.0.0
   TEST_FAKE_NO_MISTAKES_VERSION='no-mistakes version v1.40.0 (fake)'
+  TEST_FAKE_PRINTENV_RC=0
+  TEST_FAKE_CHROME_ARGS='--no-sandbox --disable-dev-shm-usage --disable-gpu'
   export TEST_FAKE_CALL_LOG TEST_FAKE_NPM_JSON TEST_FAKE_TREEHOUSE_RELEASE_JSON
   export TEST_FAKE_NO_MISTAKES_RELEASE_JSON TEST_FAKE_NPM_RC TEST_FAKE_CURL_FAIL
   export TEST_FAKE_TREEHOUSE_VERSION TEST_FAKE_NO_MISTAKES_VERSION
+  export TEST_FAKE_PRINTENV_RC TEST_FAKE_CHROME_ARGS
 }
 
 test_source_parsing_and_summaries() {
@@ -252,6 +264,41 @@ test_cache_ttl_force_and_silent_startup() {
   pass "cache honors TTL and force while startup stays cache-only and quiet"
 }
 
+test_chrome_headless_health() {
+  local base human json startup
+  base="$TMP_ROOT/health"
+  TEST_REPO="$base/unused-repo"
+  configure_fixture "$base"
+
+  human=$(run_checker 4000 --health)
+  assert_contains "$human" "chrome-devtools headless flags: healthy" "healthy flags were not reported"
+  [ ! -e "$TEST_FAKE_CALL_LOG" ] || fail "health mode contacted publication sources"
+  json=$(run_checker 4001 --health --json)
+  [ "$(printf '%s' "$json" | jq -r '.checks.chrome_devtools_headless.status')" = healthy ] \
+    || fail "health JSON did not report healthy flags"
+  [ "$(printf '%s' "$json" | jq '.checks.chrome_devtools_headless.required_flags | length')" -eq 3 ] \
+    || fail "health JSON did not preserve the three required flags"
+
+  TEST_FAKE_CHROME_ARGS='--no-sandbox --disable-dev-shm-usage'
+  export TEST_FAKE_CHROME_ARGS
+  human=$(run_checker 4002 --health)
+  assert_contains "$human" "broken (missing required flags: --disable-gpu)" "missing flag was not reported as broken"
+  startup=$(run_checker 4003 --startup)
+  assert_contains "$startup" "dev-tools: chrome-devtools headless flags broken" "startup hid broken headless flags"
+
+  TEST_FAKE_PRINTENV_RC=1
+  export TEST_FAKE_PRINTENV_RC
+  human=$(run_checker 4004 --health)
+  assert_contains "$human" "broken (CHROME_DEVTOOLS_AXI_CHROME_ARGS is unset)" "unset flag environment was not reported as broken"
+
+  TEST_FAKE_PRINTENV_RC=2
+  export TEST_FAKE_PRINTENV_RC
+  json=$(run_checker 4005 --health --json) || fail "unknown health state returned non-zero"
+  [ "$(printf '%s' "$json" | jq -r '.checks.chrome_devtools_headless.status')" = unknown ] \
+    || fail "unreadable environment did not degrade to unknown"
+  pass "chrome-devtools health covers healthy, broken, unknown, and startup visibility"
+}
+
 export GIT_AUTHOR_NAME=dev-tools-test
 export GIT_AUTHOR_EMAIL=dev-tools-test@example.invalid
 export GIT_COMMITTER_NAME=dev-tools-test
@@ -259,3 +306,4 @@ export GIT_COMMITTER_EMAIL=dev-tools-test@example.invalid
 test_source_parsing_and_summaries
 test_fail_soft_unknowns
 test_cache_ttl_force_and_silent_startup
+test_chrome_headless_health
