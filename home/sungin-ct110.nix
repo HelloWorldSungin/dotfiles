@@ -6,6 +6,21 @@ let
   # That keeps every runtime change version-controlled - Kun's core trick.
   dotfiles = "${config.home.homeDirectory}/dotfiles";
   link = path: config.lib.file.mkOutOfStoreSymlink "${dotfiles}/${path}";
+  devToolsUpdateChecker = pkgs.writeShellApplication {
+    name = "dev-tools-check-updates";
+    text = builtins.readFile ../bin/dev-tools-check-updates;
+    bashOptions = [ ]; # The checker deliberately handles source failures itself.
+    runtimeInputs = with pkgs; [
+      coreutils
+      curl
+      gawk
+      git
+      gnugrep
+      gnused
+      jq
+      nodejs_22
+    ];
+  };
 in
 {
   home.username = "sungin";
@@ -15,6 +30,7 @@ in
   programs.home-manager.enable = true; # gives us the `home-manager` CLI
 
   home.packages = with pkgs; [
+    devToolsUpdateChecker
     gh
     tea # Gitea CLI - BZ-SIM (and other CT101-hosted repos) track issues there
     lazygit
@@ -97,6 +113,12 @@ in
     initContent = ''
       # ctrl-f accepts the ghost-text suggestion (Kun's keybind)
       bindkey '^f' autosuggest-accept
+
+      # The weekly timer refreshes this cache. Login shells only read it, so
+      # opening a shell never waits on the network and stays quiet when current.
+      if [[ -o login ]]; then
+        ${devToolsUpdateChecker}/bin/dev-tools-check-updates --startup
+      fi
     '';
     shellAliases = {
       g = "git";
@@ -121,6 +143,27 @@ in
   programs.fzf = {
     enable = true;
     enableZshIntegration = true;
+  };
+
+  # ------------------------------------------------ developer-tool updates
+  # Check and cache update availability only. This never applies an update.
+  systemd.user.services.dev-tools-update-checker = {
+    Unit.Description = "Check for personal developer-tool updates";
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${devToolsUpdateChecker}/bin/dev-tools-check-updates --force --json";
+    };
+  };
+
+  systemd.user.timers.dev-tools-update-checker = {
+    Unit.Description = "Weekly personal developer-tool update check";
+    Timer = {
+      OnCalendar = "weekly";
+      Persistent = true;
+      RandomizedDelaySec = "1h";
+      Unit = "dev-tools-update-checker.service";
+    };
+    Install.WantedBy = [ "timers.target" ];
   };
 
   # ------------------------------------------------------------------ ssh
