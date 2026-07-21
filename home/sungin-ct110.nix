@@ -1,4 +1,4 @@
-{ config, pkgs, ... }:
+{ config, lib, pkgs, ... }:
 
 let
   # All config symlinks point back into this repo clone, so editing
@@ -6,6 +6,26 @@ let
   # That keeps every runtime change version-controlled - Kun's core trick.
   dotfiles = "${config.home.homeDirectory}/dotfiles";
   link = path: config.lib.file.mkOutOfStoreSymlink "${dotfiles}/${path}";
+  devToolsUpdateChecker = pkgs.writeShellApplication {
+    name = "dev-tools-check-updates";
+    text = builtins.readFile ../bin/dev-tools-check-updates;
+    bashOptions = [ ]; # The checker deliberately handles source failures itself.
+    runtimeInputs = with pkgs; [
+      coreutils
+      curl
+      gawk
+      git
+      gnugrep
+      gnused
+      jq
+      nodejs_22
+    ];
+  };
+  devToolsUpdateCheckRun = pkgs.writeShellScript "dev-tools-update-checker-run" ''
+    export CHROME_DEVTOOLS_AXI_CHROME_ARGS=${lib.escapeShellArg config.home.sessionVariables.CHROME_DEVTOOLS_AXI_CHROME_ARGS}
+    ${devToolsUpdateChecker}/bin/dev-tools-check-updates --force --json
+    ${devToolsUpdateChecker}/bin/dev-tools-check-updates --health --json
+  '';
 in
 {
   home.username = "sungin";
@@ -15,6 +35,7 @@ in
   programs.home-manager.enable = true; # gives us the `home-manager` CLI
 
   home.packages = with pkgs; [
+    devToolsUpdateChecker
     gh
     tea # Gitea CLI - BZ-SIM (and other CT101-hosted repos) track issues there
     lazygit
@@ -97,6 +118,12 @@ in
     initContent = ''
       # ctrl-f accepts the ghost-text suggestion (Kun's keybind)
       bindkey '^f' autosuggest-accept
+
+      # The weekly timer refreshes the update cache. Login shells read that
+      # cache and check only local health, so opening one never waits on network.
+      if [[ -o login ]]; then
+        ${devToolsUpdateChecker}/bin/dev-tools-check-updates --startup
+      fi
     '';
     shellAliases = {
       g = "git";
@@ -121,6 +148,27 @@ in
   programs.fzf = {
     enable = true;
     enableZshIntegration = true;
+  };
+
+  # ------------------------------------------------ developer-tool updates
+  # Check update availability and local wiring health. Never apply an update.
+  systemd.user.services.dev-tools-update-checker = {
+    Unit.Description = "Check personal developer-tool updates and health";
+    Service = {
+      Type = "oneshot";
+      ExecStart = devToolsUpdateCheckRun;
+    };
+  };
+
+  systemd.user.timers.dev-tools-update-checker = {
+    Unit.Description = "Weekly personal developer-tool update check";
+    Timer = {
+      OnCalendar = "weekly";
+      Persistent = true;
+      RandomizedDelaySec = "1h";
+      Unit = "dev-tools-update-checker.service";
+    };
+    Install.WantedBy = [ "timers.target" ];
   };
 
   # ------------------------------------------------------------------ ssh

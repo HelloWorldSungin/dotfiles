@@ -1,0 +1,453 @@
+#!/usr/bin/env bash
+# dev-tools-check-updates - read-only visibility into personal developer-tool updates.
+#
+# Derived from Firstmate's fm-check-updates checker and adapted as a standalone
+# dotfiles tool. It checks four independently published sources without
+# applying updates. The only writes are a bounded fetch of the configured
+# Firstmate repository's origin refs and this tool's own atomic XDG cache.
+#
+# Sources:
+#   firstmate   Fetch origin in DEV_TOOLS_FIRSTMATE_PATH (default
+#               ~/firstmate), resolve origin's default branch, and count
+#               HEAD..origin/<default>.
+#   npm-global  Ask npm for outdated versions of chrome-devtools-axi, gh-axi,
+#               lavish-axi, quota-axi, tasks-axi, and gnhf under the configured
+#               global prefix. Other global npm packages are excluded.
+#   treehouse   Compare the installed version with the latest GitHub release.
+#   no-mistakes Compare the installed version with the latest GitHub release.
+#   nix-pinned  Never checked. tea, ghdl, git, and the other Nix packages are
+#               deliberately controlled by this dotfiles repo's flake lock.
+#
+# Every network command is bounded by DEV_TOOLS_UPDATE_NETWORK_TIMEOUT_SECONDS
+# (default 15 seconds). A missing command, timeout, non-zero response, or
+# changed response makes only that source unknown. Valid invocations exit 0.
+#
+# Health check:
+#   --health reads CHROME_DEVTOOLS_AXI_CHROME_ARGS from the effective
+#   environment and verifies the Home Manager-persisted flags --no-sandbox,
+#   --disable-dev-shm-usage, and --disable-gpu are all present. It is healthy
+#   when all flags are present, broken when the variable or a flag is missing,
+#   and unknown when the environment cannot be read. This check is local,
+#   read-only, and never contacts the network.
+#
+# Cache:
+#   Path: ${XDG_CACHE_HOME:-$HOME/.cache}/dev-tools-update-checker/cache.json.
+#         DEV_TOOLS_UPDATE_CACHE_PATH overrides the exact file.
+#   TTL:  14400 seconds, overridable by the positive integer
+#         DEV_TOOLS_UPDATE_CACHE_TTL_SECONDS. --force bypasses a fresh cache.
+#
+# Output modes:
+#   default     Five human-readable source summaries.
+#   --json      One JSON object with schema_version=1. May be combined with
+#               --health for a machine-readable health result.
+#   --health    Report chrome-devtools-axi headless flag health and exit.
+#   --startup   Read only the update cache, run the local health check, never
+#               use the network, and print only updates or non-healthy wiring.
+#
+# Flags:
+#   --force     Ignore a fresh cache and perform every source check.
+#   --help, -h  Print this contract.
+#
+# Test seams:
+#   DEV_TOOLS_UPDATE_GIT_BIN, DEV_TOOLS_UPDATE_NPM_BIN,
+#   DEV_TOOLS_UPDATE_CURL_BIN, DEV_TOOLS_UPDATE_TREEHOUSE_BIN, and
+#   DEV_TOOLS_UPDATE_NO_MISTAKES_BIN replace command paths.
+#   DEV_TOOLS_UPDATE_NOW_EPOCH replaces the clock.
+#   DEV_TOOLS_HEALTH_PRINTENV_BIN replaces the environment reader.
+set -u
+
+FIRSTMATE_PATH=${DEV_TOOLS_FIRSTMATE_PATH:-${HOME:-.}/firstmate}
+CACHE_HOME=${XDG_CACHE_HOME:-${HOME:-.}/.cache}
+CACHE_PATH=${DEV_TOOLS_UPDATE_CACHE_PATH:-$CACHE_HOME/dev-tools-update-checker/cache.json}
+CACHE_TTL=${DEV_TOOLS_UPDATE_CACHE_TTL_SECONDS:-14400}
+NETWORK_TIMEOUT=${DEV_TOOLS_UPDATE_NETWORK_TIMEOUT_SECONDS:-15}
+GIT_BIN=${DEV_TOOLS_UPDATE_GIT_BIN:-git}
+NPM_BIN=${DEV_TOOLS_UPDATE_NPM_BIN:-npm}
+CURL_BIN=${DEV_TOOLS_UPDATE_CURL_BIN:-curl}
+TREEHOUSE_BIN=${DEV_TOOLS_UPDATE_TREEHOUSE_BIN:-${HOME:-.}/.local/bin/treehouse}
+NO_MISTAKES_BIN=${DEV_TOOLS_UPDATE_NO_MISTAKES_BIN:-${HOME:-.}/.local/bin/no-mistakes}
+PRINTENV_BIN=${DEV_TOOLS_HEALTH_PRINTENV_BIN:-printenv}
+NPM_PREFIX=${DEV_TOOLS_UPDATE_NPM_PREFIX:-${HOME:-.}/.npm-global}
+TREEHOUSE_RELEASE_URL=https://api.github.com/repos/kunchenguid/treehouse/releases/latest
+NO_MISTAKES_RELEASE_URL=https://api.github.com/repos/kunchenguid/no-mistakes/releases/latest
+TRACKED_NPM_JSON='["chrome-devtools-axi","gh-axi","gnhf","lavish-axi","quota-axi","tasks-axi"]'
+CHROME_REQUIRED_FLAGS_JSON='["--no-sandbox","--disable-dev-shm-usage","--disable-gpu"]'
+
+usage() {
+  sed -n '2,/^set -u$/s/^# \{0,1\}//p' "$0"
+}
+
+MODE=human
+FORCE=0
+HEALTH=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --json) MODE=json ;;
+    --startup) MODE=startup ;;
+    --health) HEALTH=1 ;;
+    --force) FORCE=1 ;;
+    --help|-h) usage; exit 0 ;;
+    *) printf 'dev-tools-check-updates: unknown argument: %s\n' "$1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+case "$CACHE_TTL" in ''|*[!0-9]*|0) CACHE_TTL=14400 ;; esac
+case "$NETWORK_TIMEOUT" in ''|*[!0-9]*|0) NETWORK_TIMEOUT=15 ;; esac
+NOW=${DEV_TOOLS_UPDATE_NOW_EPOCH:-$(date +%s)}
+case "$NOW" in ''|*[!0-9]*) NOW=$(date +%s) ;; esac
+
+run_timed() {
+  local seconds=$1
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$seconds" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$seconds" "$@"
+  elif command -v perl >/dev/null 2>&1; then
+    perl -e 'my $t = shift; my $pid = fork; die "fork failed" unless defined $pid; if (!$pid) { setpgrp(0, 0); exec @ARGV } local $SIG{ALRM} = sub { kill "TERM", -$pid; select undef, undef, undef, 0.2; kill "KILL", -$pid; waitpid $pid, 0; exit 124 }; alarm $t; waitpid $pid, 0; exit($? >> 8)' "$seconds" "$@"
+  else
+    return 127
+  fi
+}
+
+unknown_json() {
+  jq -cn --arg detail "$1" '{status:"unknown",detail:$detail}'
+}
+
+check_chrome_health() {
+  local args rc flag missing
+  if ! command -v "$PRINTENV_BIN" >/dev/null 2>&1; then
+    unknown_json "environment reader unavailable"
+    return
+  fi
+  if args=$($PRINTENV_BIN CHROME_DEVTOOLS_AXI_CHROME_ARGS 2>/dev/null); then
+    :
+  else
+    rc=$?
+    if [ "$rc" -eq 1 ]; then
+      jq -cn --argjson required "$CHROME_REQUIRED_FLAGS_JSON" \
+        '{status:"broken",detail:"CHROME_DEVTOOLS_AXI_CHROME_ARGS is unset",required_flags:$required}'
+    else
+      unknown_json "effective environment could not be read"
+    fi
+    return
+  fi
+
+  missing=
+  for flag in --no-sandbox --disable-dev-shm-usage --disable-gpu; do
+    if ! printf '%s\n' "$args" | grep -Eq -- "(^|[[:space:]])${flag}([[:space:]]|$)"; then
+      missing=${missing:+$missing, }$flag
+    fi
+  done
+  if [ -n "$missing" ]; then
+    jq -cn --arg detail "missing required flags: $missing" --arg actual "$args" \
+      --argjson required "$CHROME_REQUIRED_FLAGS_JSON" \
+      '{status:"broken",detail:$detail,required_flags:$required,actual:$actual}'
+  else
+    jq -cn --arg actual "$args" --argjson required "$CHROME_REQUIRED_FLAGS_JSON" \
+      '{status:"healthy",required_flags:$required,actual:$actual}'
+  fi
+}
+
+extract_version() {
+  printf '%s\n' "$1" | grep -Eo 'v?[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?' | head -1
+}
+
+version_is_newer() {
+  awk -v latest="$1" -v current="$2" '
+    function parse(v, out, n, parts, i, split_at) {
+      sub(/^v/, "", v)
+      sub(/\+.*/, "", v)
+      split_at = index(v, "-")
+      out[4] = ""
+      if (split_at > 0) {
+        out[4] = substr(v, split_at + 1)
+        v = substr(v, 1, split_at - 1)
+      }
+      n = split(v, parts, ".")
+      if (n != 3) return 0
+      for (i = 1; i <= 3; i++) {
+        if (parts[i] !~ /^[0-9]+$/) return 0
+        out[i] = parts[i] + 0
+      }
+      return 1
+    }
+    BEGIN {
+      if (!parse(latest, a) || !parse(current, b)) exit 2
+      for (i = 1; i <= 3; i++) {
+        if (a[i] > b[i]) exit 0
+        if (a[i] < b[i]) exit 1
+      }
+      if (a[4] == "" && b[4] != "") exit 0
+      if (a[4] != "" && b[4] == "") exit 1
+      if (a[4] > b[4]) exit 0
+      exit 1
+    }
+  '
+}
+
+check_firstmate() {
+  local branch_ref branch ls_remote behind fetch_out
+  if ! command -v "$GIT_BIN" >/dev/null 2>&1; then
+    unknown_json "git unavailable"
+    return
+  fi
+  if ! fetch_out=$(run_timed "$NETWORK_TIMEOUT" env GIT_TERMINAL_PROMPT=0 "$GIT_BIN" -C "$FIRSTMATE_PATH" fetch --quiet origin 2>&1); then
+    unknown_json "git fetch failed or timed out${fetch_out:+: $fetch_out}"
+    return
+  fi
+  branch_ref=$($GIT_BIN -C "$FIRSTMATE_PATH" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
+  branch=${branch_ref#origin/}
+  if [ -z "$branch_ref" ] || [ "$branch" = "$branch_ref" ]; then
+    ls_remote=$(run_timed "$NETWORK_TIMEOUT" env GIT_TERMINAL_PROMPT=0 "$GIT_BIN" -C "$FIRSTMATE_PATH" ls-remote --symref origin HEAD 2>/dev/null || true)
+    branch=$(printf '%s\n' "$ls_remote" | awk '$1 == "ref:" && $3 == "HEAD" {sub(/^refs\/heads\//, "", $2); print $2; exit}')
+  fi
+  if [ -z "$branch" ]; then
+    unknown_json "origin default branch could not be resolved"
+    return
+  fi
+  behind=$($GIT_BIN -C "$FIRSTMATE_PATH" rev-list --count "HEAD..refs/remotes/origin/$branch" 2>/dev/null || true)
+  case "$behind" in
+    ''|*[!0-9]*) unknown_json "origin/$branch could not be compared" ;;
+    0) jq -cn --arg branch "$branch" '{status:"up_to_date",current:"HEAD",latest:("origin/" + $branch),default_branch:$branch,behind:0}' ;;
+    *) jq -cn --arg branch "$branch" --argjson behind "$behind" '{status:"update_available",current:"HEAD",latest:("origin/" + $branch),default_branch:$branch,behind:$behind}' ;;
+  esac
+}
+
+check_npm_global() {
+  local out rc packages count
+  if ! command -v "$NPM_BIN" >/dev/null 2>&1; then
+    unknown_json "npm unavailable"
+    return
+  fi
+  if [ -z "$NPM_PREFIX" ] || [ ! -d "$NPM_PREFIX" ]; then
+    unknown_json "npm prefix unavailable"
+    return
+  fi
+  out=$(run_timed "$NETWORK_TIMEOUT" env NPM_CONFIG_UPDATE_NOTIFIER=false "$NPM_BIN" --prefix "$NPM_PREFIX" outdated -g --json \
+    chrome-devtools-axi gh-axi lavish-axi quota-axi tasks-axi gnhf 2>/dev/null)
+  rc=$?
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
+    unknown_json "npm outdated failed or timed out"
+    return
+  fi
+  if ! printf '%s' "$out" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    unknown_json "npm outdated returned unparseable JSON"
+    return
+  fi
+  packages=$(printf '%s' "$out" | jq -c --argjson tracked "$TRACKED_NPM_JSON" '
+    to_entries
+    | map(select(.key as $key | $tracked | index($key))
+        | {name:.key,current:(.value.current // "unknown"),latest:(.value.latest // "unknown")})
+    | sort_by(.name)
+  ')
+  count=$(printf '%s' "$packages" | jq 'length')
+  if [ "$count" -eq 0 ]; then
+    jq -cn --argjson tracked "$TRACKED_NPM_JSON" '{status:"up_to_date",tracked_packages:$tracked,packages:[]}'
+  else
+    jq -cn --argjson tracked "$TRACKED_NPM_JSON" --argjson packages "$packages" \
+      '{status:"update_available",tracked_packages:$tracked,packages:$packages}'
+  fi
+}
+
+check_release_tool() {
+  local label=$1 binary=$2 suppress_env=$3 release_url=$4 version_out current release latest status version_rc
+  if [ -z "$binary" ] || [ ! -x "$binary" ]; then
+    unknown_json "$label unavailable"
+    return
+  fi
+  if ! version_out=$(run_timed "$NETWORK_TIMEOUT" env "$suppress_env=1" "$binary" --version 2>/dev/null); then
+    unknown_json "$label version command failed or timed out"
+    return
+  fi
+  current=$(extract_version "$version_out" || true)
+  if [ -z "$current" ]; then
+    unknown_json "$label version output changed"
+    return
+  fi
+  if ! command -v "$CURL_BIN" >/dev/null 2>&1; then
+    unknown_json "curl unavailable"
+    return
+  fi
+  if ! release=$(run_timed "$NETWORK_TIMEOUT" "$CURL_BIN" -fsSL --connect-timeout 5 --max-time "$NETWORK_TIMEOUT" \
+    -H 'Accept: application/vnd.github+json' "$release_url" 2>/dev/null); then
+    unknown_json "$label release check failed or timed out"
+    return
+  fi
+  latest=$(printf '%s' "$release" | jq -er '.tag_name | select(type == "string" and length > 0)' 2>/dev/null || true)
+  if [ -z "$latest" ]; then
+    unknown_json "$label release response changed"
+    return
+  fi
+  version_is_newer "$latest" "$current"
+  version_rc=$?
+  case "$version_rc" in
+    0) status=update_available ;;
+    1) status=up_to_date ;;
+    *) unknown_json "$label release version changed"; return ;;
+  esac
+  jq -cn --arg status "$status" --arg current "$current" --arg latest "$latest" \
+    '{status:$status,current:$current,latest:$latest}'
+}
+
+cache_is_valid() {
+  [ -f "$CACHE_PATH" ] || return 1
+  jq -e '.schema_version == 1 and (.checked_at_epoch | type == "number") and (.sources | type == "object")' \
+    "$CACHE_PATH" >/dev/null 2>&1
+}
+
+cache_is_fresh() {
+  local checked age
+  cache_is_valid || return 1
+  checked=$(jq -r '.checked_at_epoch' "$CACHE_PATH" 2>/dev/null) || return 1
+  case "$checked" in ''|*[!0-9]*) return 1 ;; esac
+  age=$((NOW - checked))
+  [ "$age" -ge 0 ] && [ "$age" -lt "$CACHE_TTL" ]
+}
+
+write_cache() {
+  local parent tmp
+  parent=${CACHE_PATH%/*}
+  [ "$parent" != "$CACHE_PATH" ] || parent=.
+  mkdir -p "$parent" 2>/dev/null || return 0
+  tmp=$(mktemp "$parent/.dev-tools-update-cache.XXXXXX" 2>/dev/null) || return 0
+  if printf '%s\n' "$RESULT" > "$tmp"; then
+    chmod 600 "$tmp" 2>/dev/null || true
+    mv -f "$tmp" "$CACHE_PATH" 2>/dev/null || rm -f "$tmp"
+  else
+    rm -f "$tmp"
+  fi
+}
+
+render_human() {
+  printf '%s' "$RESULT" | jq -r '
+    def simple($label; $source):
+      if $source.status == "unknown" then $label + ": unknown (" + $source.detail + ")"
+      elif $source.status == "update_available" then $label + ": " + $source.current + " -> " + $source.latest
+      else $label + ": up to date"
+      end;
+    .sources as $s
+    | [
+        (if $s.firstmate.status == "unknown" then "firstmate: unknown (" + $s.firstmate.detail + ")"
+         elif $s.firstmate.status == "update_available" then "firstmate: " + ($s.firstmate.behind | tostring) + " behind (origin/" + $s.firstmate.default_branch + ")"
+         else "firstmate: up to date (origin/" + $s.firstmate.default_branch + ")"
+         end),
+        (if $s.npm_global.status == "unknown" then "npm-global: unknown (" + $s.npm_global.detail + ")"
+         elif $s.npm_global.status == "update_available" then "npm-global: " + ([$s.npm_global.packages[] | .name + " " + .current + " -> " + .latest] | join(", "))
+         else "npm-global: up to date"
+         end),
+        simple("treehouse"; $s.treehouse),
+        simple("no-mistakes"; $s.no_mistakes),
+        "nix-pinned: nix-pinned tools are intentionally not tracked here"
+      ]
+    | .[]
+  '
+}
+
+render_startup() {
+  printf '%s' "$RESULT" | jq -r '
+    .sources as $s
+    | ([if $s.firstmate.status == "update_available" then "firstmate " + ($s.firstmate.behind | tostring) + " behind" else empty end]
+       + [$s.npm_global.packages[]? | .name + " " + .current + " -> " + .latest]
+       + [if $s.treehouse.status == "update_available" then "treehouse " + $s.treehouse.current + " -> " + $s.treehouse.latest else empty end]
+       + [if $s.no_mistakes.status == "update_available" then "no-mistakes " + $s.no_mistakes.current + " -> " + $s.no_mistakes.latest else empty end]) as $updates
+    | if ($updates | length) > 0
+      then "dev-tools: updates available - " + ($updates | join("; "))
+      else empty
+      end
+  '
+}
+
+render_health_human() {
+  printf '%s' "$HEALTH_RESULT" | jq -r '
+    .checks.chrome_devtools_headless as $check
+    | if $check.status == "healthy" then "chrome-devtools headless flags: healthy"
+      else "chrome-devtools headless flags: " + $check.status + " (" + $check.detail + ")"
+      end
+  '
+}
+
+render_health_startup() {
+  printf '%s' "$HEALTH_RESULT" | jq -r '
+    .checks.chrome_devtools_headless as $check
+    | if $check.status == "healthy" then empty
+      else "dev-tools: chrome-devtools headless flags " + $check.status + " - " + $check.detail
+      end
+  '
+}
+
+collect_health() {
+  local chrome
+  chrome=$(check_chrome_health)
+  HEALTH_RESULT=$(jq -cn --argjson chrome "$chrome" \
+    '{schema_version:1,checks:{chrome_devtools_headless:$chrome}}')
+}
+
+if ! command -v jq >/dev/null 2>&1; then
+  if [ "$HEALTH" -eq 1 ]; then
+    if [ "$MODE" = json ]; then
+      printf '%s\n' '{"schema_version":1,"checks":{"chrome_devtools_headless":{"status":"unknown","detail":"jq unavailable"}}}'
+    else
+      printf '%s\n' 'chrome-devtools headless flags: unknown (jq unavailable)'
+    fi
+    exit 0
+  fi
+  case "$MODE" in
+    startup) printf '%s\n' 'dev-tools: chrome-devtools headless flags unknown - jq unavailable' ;;
+    json)
+      printf '{"schema_version":1,"checked_at_epoch":%s,"cache_ttl_seconds":%s,"sources":{"firstmate":{"status":"unknown","detail":"jq unavailable"},"npm_global":{"status":"unknown","detail":"jq unavailable"},"treehouse":{"status":"unknown","detail":"jq unavailable"},"no_mistakes":{"status":"unknown","detail":"jq unavailable"},"nix_pinned":{"status":"excluded","detail":"nix-pinned tools are intentionally not tracked here"}}}\n' "$NOW" "$CACHE_TTL"
+      ;;
+    *)
+      printf '%s\n' 'firstmate: unknown (jq unavailable)' 'npm-global: unknown (jq unavailable)' \
+        'treehouse: unknown (jq unavailable)' 'no-mistakes: unknown (jq unavailable)' \
+        'nix-pinned: nix-pinned tools are intentionally not tracked here'
+      ;;
+  esac
+  exit 0
+fi
+
+if [ "$HEALTH" -eq 1 ]; then
+  collect_health
+  if [ "$MODE" = json ]; then
+    printf '%s\n' "$HEALTH_RESULT" | jq .
+  else
+    render_health_human
+  fi
+  exit 0
+fi
+
+if [ "$MODE" = startup ]; then
+  if cache_is_valid; then
+    RESULT=$(cat "$CACHE_PATH")
+    render_startup
+  fi
+  collect_health
+  render_health_startup
+  exit 0
+fi
+
+if [ "$FORCE" -eq 0 ] && cache_is_fresh; then
+  RESULT=$(cat "$CACHE_PATH")
+else
+  FIRSTMATE=$(check_firstmate)
+  NPM_GLOBAL=$(check_npm_global)
+  TREEHOUSE=$(check_release_tool treehouse "$TREEHOUSE_BIN" TREEHOUSE_NO_UPDATE_CHECK "$TREEHOUSE_RELEASE_URL")
+  NO_MISTAKES=$(check_release_tool no-mistakes "$NO_MISTAKES_BIN" NO_MISTAKES_NO_UPDATE_CHECK "$NO_MISTAKES_RELEASE_URL")
+  NIX_PINNED=$(jq -cn '{status:"excluded",detail:"nix-pinned tools are intentionally not tracked here"}')
+  RESULT=$(jq -cn \
+    --argjson checked_at_epoch "$NOW" \
+    --argjson cache_ttl_seconds "$CACHE_TTL" \
+    --argjson firstmate "$FIRSTMATE" \
+    --argjson npm_global "$NPM_GLOBAL" \
+    --argjson treehouse "$TREEHOUSE" \
+    --argjson no_mistakes "$NO_MISTAKES" \
+    --argjson nix_pinned "$NIX_PINNED" \
+    '{schema_version:1,checked_at_epoch:$checked_at_epoch,cache_ttl_seconds:$cache_ttl_seconds,sources:{firstmate:$firstmate,npm_global:$npm_global,treehouse:$treehouse,no_mistakes:$no_mistakes,nix_pinned:$nix_pinned}}')
+  write_cache
+fi
+
+case "$MODE" in
+  json) printf '%s\n' "$RESULT" | jq . ;;
+  *) render_human ;;
+esac
