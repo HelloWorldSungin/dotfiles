@@ -57,8 +57,8 @@ The fzf three are bound by `programs.fzf.enableZshIntegration = true`, not
 written out in this repo - they are fzf's defaults, active because the
 integration is on.
 
-Shell aliases (`g`, `gs`, `gd`, `gl`, `gpl`, `v`, `lg`, `rebuild`, `ccd`,
-`ccdr`) are commands, not keybinds - read them straight from the nix file.
+Shell aliases are commands, not keybinds - read them straight from the nix
+file.
 
 ## Herdr
 
