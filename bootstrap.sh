@@ -15,7 +15,7 @@ fi
 
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 
-step "1/5 Nix (Determinate, multi-user daemon)"
+step "1/6 Nix (Determinate, multi-user daemon)"
 if ! command -v nix >/dev/null 2>&1; then
   if [ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
     # Installed but not in this shell's env yet
@@ -27,7 +27,7 @@ if ! command -v nix >/dev/null 2>&1; then
 fi
 nix --version
 
-step "2/5 home-manager switch (packages, zsh, nvim, symlinks)"
+step "2/6 home-manager switch (packages, zsh, nvim, symlinks)"
 if command -v home-manager >/dev/null 2>&1; then
   home-manager switch --flake "$DOTFILES#$FLAKE_TARGET"
 else
@@ -40,7 +40,7 @@ fi
 export NPM_CONFIG_PREFIX="$HOME/.npm-global"
 export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"
 
-step "3/5 zsh as login shell"
+step "3/6 zsh as login shell"
 # This user deliberately has NO sudo (agent/infra privilege separation), so
 # setting the login shell is a one-time ROOT task done at user creation, not
 # here. If it isn't set yet, print the exact command to run via ct110-root
@@ -58,11 +58,11 @@ if [ -x "$ZSH_PATH" ] && [ "$(getent passwd "$USER" | cut -d: -f7)" != "$ZSH_PAT
   fi
 fi
 
-step "4/5 herdr (session layer)"
+step "4/6 herdr (session layer)"
 command -v herdr >/dev/null 2>&1 || curl -fsSL https://herdr.dev/install.sh | sh
 herdr --version
 
-step "5/5 agent harnesses (fast-moving CLIs - official installers, not Nix)"
+step "5/6 agent harnesses (fast-moving CLIs - official installers, not Nix)"
 command -v claude >/dev/null 2>&1 || curl -fsSL https://claude.ai/install.sh | bash
 command -v codex >/dev/null 2>&1 || npm install -g @openai/codex
 command -v opencode >/dev/null 2>&1 || curl -fsSL https://opencode.ai/install | bash
@@ -86,5 +86,5 @@ command -v chrome-devtools-axi >/dev/null 2>&1 || npm install -g chrome-devtools
 
 echo
 echo "Done. Open a NEW login shell (or 'exec zsh'), then log in once to each"
-echo "harness (claude / codex / opencode / pi) and 'gh auth login'."
+echo "harness (claude / codex / opencode / pi / agy / cursor-agent) and 'gh auth login'."
 echo "After gh is authed: 'gh-axi setup hooks'. See docs/agents.md."
