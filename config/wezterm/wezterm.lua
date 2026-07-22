@@ -22,4 +22,19 @@ config.hide_tab_bar_if_only_one_tab = true
 -- The servers have xterm-256color terminfo but not wezterm's own.
 config.term = "xterm-256color"
 
+-- Keybindings for Mac (QuickSelect, Search, and Copy Mode)
+config.keys = {
+  -- QuickSelect (Cmd+Shift+X or Ctrl+Shift+X)
+  { key = "x", mods = "CMD|SHIFT", action = wezterm.action.QuickSelect },
+  { key = "x", mods = "CTRL|SHIFT", action = wezterm.action.QuickSelect },
+
+  -- Search scrollback (Cmd+F or Cmd+Shift+F)
+  { key = "f", mods = "CMD|SHIFT", action = wezterm.action.Search({ CaseSensitiveString = "" }) },
+  { key = "f", mods = "CMD", action = wezterm.action.Search({ CaseSensitiveString = "" }) },
+  { key = "f", mods = "CTRL|SHIFT", action = wezterm.action.Search({ CaseSensitiveString = "" }) },
+
+  -- WezTerm Copy mode (Cmd+Shift+C)
+  { key = "c", mods = "CMD|SHIFT", action = wezterm.action.ActivateCopyMode },
+}
+
 return config

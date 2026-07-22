@@ -16,3 +16,7 @@ agent_panel_sort = "spaces"
 # text paste between panes. Move it to ctrl+shift+v so ctrl+v stays free for
 # text paste. (Inert on the CT110 server; only the Mac --remote client uses it.)
 remote_image_paste = "ctrl+shift+v"
+
+# Custom split pane shortcuts (prefix Ctrl+b, then key)
+split_vertical = "v"
+split_horizontal = "-"

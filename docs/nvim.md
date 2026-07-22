@@ -42,6 +42,7 @@ keybind in this repo (nvim, zsh, herdr) on one page.
   stage what you trust. Gitsigns adds gutter markers + inline blame.
 - **which-key**: the discoverability layer (the space-pause popup).
 - **rose-pine** (moon): same colorscheme as WezTerm - one visual surface.
+- **vim-visual-multi**: VS Code-style multi-cursors. `Ctrl-N` on a word spawns cursors on subsequent occurrences; `Ctrl-Up` / `Ctrl-Down` adds cursors vertically.
 - **render-markdown + treesitter**: replaces raw Markdown punctuation with a
   readable rendered view while editing Markdown files.
 

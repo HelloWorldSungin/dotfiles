@@ -119,6 +119,7 @@ home/sungin-mac.nix    MacBook Air macOS client specific configuration
 config/nvim/           neovim: init.lua -> lua/{vim-config,keys}.lua + plugins/
 config/herdr/          herdr config (defaults; grows as preferences form)
 config/wezterm/        Mac client terminal config (symlink ~/.config/wezterm here)
+config/baby-menu/      baby-menu configs (agents.json & preferences.json)
 agents/AGENTS.md       single global memory file for all agent harnesses
 .github/workflows/     CI: builds the flake on every PR and push to master
 bootstrap.sh           zero -> working machine (idempotent)

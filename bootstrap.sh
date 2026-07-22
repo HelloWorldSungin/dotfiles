@@ -119,6 +119,13 @@ else
   git clone https://github.com/kunchenguid/firstmate.git "$HOME/firstmate"
 fi
 
+if [ -d "$HOME/baby-menu" ]; then
+  echo "  ✓ baby-menu repository is already cloned."
+else
+  echo "  -> Cloning baby-menu repository..."
+  git clone https://github.com/kunchenguid/baby-menu.git "$HOME/baby-menu"
+fi
+
 echo
 echo "Done. Open a NEW login shell (or 'exec zsh'), then log in once to each"
 echo "harness (claude / codex / opencode / pi / agy / cursor-agent) and 'gh auth login'."

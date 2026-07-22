@@ -1,79 +1,118 @@
-# Keybind cheatsheet
+# Keybind & Tool Cheatsheet
 
-One page, every keybind this repo defines. You forgot the key - find it
-here, then follow the link for the why.
+One page reference for every shortcut configured across **WezTerm**, **Herdr**, **Neovim**, and **Zsh**.
 
-## Neovim
+---
 
-Leader = **space** (`config/nvim/lua/vim-config.lua`). Press space and
-*pause*: which-key pops up with everything you can press next.
+## 1. WezTerm (Mac Terminal Client)
 
-Config: [`config/nvim/lua/keys.lua`](../config/nvim/lua/keys.lua) (global),
-[`config/nvim/lua/plugins/`](../config/nvim/lua/plugins) (plugin keys).
-Detail: [nvim.md](nvim.md), [vim-basics.md](vim-basics.md).
+Config: [`config/wezterm/wezterm.lua`](../config/wezterm/wezterm.lua) (live-symlinked to `~/.config/wezterm/wezterm.lua`).
 
-### Find and navigate
+### Window, Tab & Clipboard Shortcuts
 
-| Keys | Does | Source |
-|------|------|--------|
-| `space f` | fuzzy-find files by name | snacks |
-| `space s` | live grep the project | snacks |
-| `space b` | switch between open buffers | snacks |
-| `gd` | go to definition (needs an LSP attached) | snacks |
-| `space e` | file explorer as an editable buffer | oil |
+| Shortcut | Mode / Action | Description |
+| :--- | :--- | :--- |
+| `Cmd` + `n` | New Window | Opens a new WezTerm window |
+| `Cmd` + `t` | New Tab | Opens a new tab |
+| `Cmd` + `w` | Close Tab | Closes current tab or window |
+| `Cmd` + `1` .. `9` | Switch Tab | Jumps directly to tab 1 through 9 |
+| `Cmd` + `c` / `v` | Copy / Paste | Standard macOS text copy and paste |
+| `Cmd` + `Shift` + `x` | **QuickSelect Mode** | Highlights URLs, file paths, and IDs on screen for 1-key copying |
+| `Cmd` + `Shift` + `f` | **Scrollback Search** | Opens interactive text search overlay for current scrollback |
+| `Cmd` + `+` / `Cmd` + `-` | Font Zoom | Increase or decrease font size |
+| `Cmd` + `0` | Reset Zoom | Resets font size to 15.0pt |
 
-### Editing
+---
 
-| Keys | Does | Source |
-|------|------|--------|
-| `Esc` | save the file (normal mode only) | keys.lua |
-| `Ctrl-a` | select all (normal mode only) | keys.lua |
-| `p` | paste WITHOUT clobbering the clipboard (visual mode only) | keys.lua |
+## 2. Herdr (Session Server & Agent Manager)
 
-### Git
+Config: [`config/herdr/config.toml`](../config/herdr/config.toml) (live-symlinked to `~/.config/herdr/config.toml`).
 
-| Keys | Does | Source |
-|------|------|--------|
-| `space g` | git status / diff / stage / commit UI | neogit |
+Herdr uses a **prefix key** (`Ctrl` + `b` by default, tmux-compatible). Press and release `Ctrl+b`, then press the command key.
 
-Gitsigns adds gutter markers and inline blame but binds no keys here.
-Plain vim motions (`hjkl`, `dd`, `ciw`, `Ctrl-w` splits) are vim's own -
-see [vim-basics.md](vim-basics.md).
+### Session & Connection
 
-## Zsh
+| Command / Shortcut | Action | Description |
+| :--- | :--- | :--- |
+| `herdr` | Attach | Connect to active session on CT110 |
+| `herdr --remote ct110` | Remote Thin Client | Connect from Mac with thin-client clipboard & image paste |
+| `Ctrl` + `b`, `q` | **Detach Session** | Detaches screen; all agent sessions keep running on CT110 |
+| `herdr agent list` | Agent Status | List status of all running AI agents (working / blocked / idle / done) |
+| `herdr status` | Server Overview | Show server uptime and active sessions |
 
-Config: [`home/sungin-ct110.nix`](../home/sungin-ct110.nix) (`programs.zsh`
-plus the `programs.fzf` integration). No dedicated doc - the nix file is
-the reference; see [nix.md](nix.md) for how it is applied.
+### Window & Pane Navigation (tmux-style)
 
-| Keys | Does | Source |
-|------|------|--------|
-| `Ctrl-f` | accept the ghost-text autosuggestion | `bindkey` in `initContent` |
-| `Ctrl-r` | fuzzy-search command history | fzf zsh integration |
-| `Ctrl-t` | fuzzy-pick a file path into the command line | fzf zsh integration |
-| `Alt-c` | fuzzy-pick a directory and cd into it | fzf zsh integration |
+| Shortcut | Action | Description |
+| :--- | :--- | :--- |
+| `Ctrl` + `b`, `c` | Create Tab | Opens a new tab |
+| `Ctrl` + `b`, `n` / `p` | Next / Prev Tab | Switch to next or previous tab |
+| `Ctrl` + `b`, `1` .. `9` | Select Tab | Jump to tab 1 through 9 |
+| `Ctrl` + `b`, `v` | Split Vertical | Split current pane side-by-side |
+| `Ctrl` + `b`, `-` | Split Horizontal | Split current pane top-and-bottom |
+| `Ctrl` + `b`, Arrow / `h`/`j`/`k`/`l` | Move Pane | Move focus between split panes |
+| `Ctrl` + `b`, `z` | Zoom Pane | Toggle current pane fullscreen |
+| `Ctrl` + `b`, `x` | Close Pane | Kill current pane |
 
-The fzf three are bound by `programs.fzf.enableZshIntegration = true`, not
-written out in this repo - they are fzf's defaults, active because the
-integration is on.
+### Herdr Copy Mode & Image Paste
 
-Shell aliases are commands, not keybinds - read them straight from the nix
-file.
+| Shortcut | Action | Description |
+| :--- | :--- | :--- |
+| `Ctrl` + `b`, `[` | **Enter Copy Mode** | Scroll back through history using vim keys |
+| `v` or `Space` (in copy mode) | Start Selection | Begin visual text selection |
+| `y` or `Enter` (in copy mode) | Yank / Copy | Copy selected text to clipboard and exit copy mode |
+| `q` or `Esc` (in copy mode) | Exit Copy Mode | Return to normal terminal prompt |
+| `Ctrl` + `Shift` + `v` | **Remote Image Paste** | Pastes image from Mac clipboard into CT110 remote session (configured in `config.toml`) |
 
-## Herdr
+---
 
-Config: [`config/herdr/config.toml`](../config/herdr/config.toml).
-Detail: [herdr.md](herdr.md).
+## 3. Terminal Prompt Line Editing (Inside TUI Agents)
 
-The config file is deliberately empty of overrides, so herdr runs its
-**defaults** (tmux-like): press the prefix, release, then a command key.
+Used inside agent input prompts (Claude Code, Codex, Pi, Agy, Cursor) and Zsh:
 
-| Keys | Does |
-|------|------|
-| `Ctrl-b` | prefix - starts every herdr command |
-| `Ctrl-b` `q` | detach (sessions keep running on the server) |
+| Shortcut | Action | Description |
+| :--- | :--- | :--- |
+| `Ctrl` + `u` | Erase to Start | Erases input line from cursor to beginning |
+| `Ctrl` + `k` | Erase to End | Erases input line from cursor to end |
+| `Ctrl` + `a` then `Ctrl` + `k` | **Select All & Delete** | Wipes the entire input prompt box instantly |
+| `Option` + `Backspace` or `Ctrl` + `w` | Delete Word | Erases the previous word |
+| `Ctrl` + `l` | Clear Screen | Clears the terminal screen buffer |
 
-The full default key table is not duplicated here because this repo does
-not define it. Print it with `herdr --default-config`. To override a key,
-add it to `config/herdr/config.toml` (symlinked live), then
-`herdr server reload-config`.
+---
+
+## 4. Neovim (Shared Editor)
+
+Leader key = **`<Space>`** ([`config/nvim/lua/vim-config.lua`](../config/nvim/lua/vim-config.lua)).
+
+### Global Shortcuts
+
+| Shortcut | Mode | Action | Description |
+| :--- | :--- | :--- | :--- |
+| `Esc` | Normal | **Auto-Save** | Saves current buffer (`:w`) on exit |
+| `Ctrl` + `a` | Normal | **Select All** | Selects entire file content (`ggVG`) |
+| `p` | Visual | **Non-Clobber Paste** | Pastes over selection without clobbering register (`"_dP`) |
+
+### Plugin Shortcuts
+
+| Shortcut | Feature | Plugin | Description |
+| :--- | :--- | :--- | :--- |
+| `<Space>` `f` | Find Files | `snacks.nvim` | Fuzzy search files by name |
+| `<Space>` `s` | Live Grep | `snacks.nvim` | Grep text across codebase |
+| `<Space>` `b` | Buffers | `snacks.nvim` | Switch active buffers |
+| `g` `d` | Definition | `snacks.nvim` | Go to LSP symbol definition |
+| `<Space>` `e` | File Explorer | `oil.nvim` | Editable buffer file tree |
+| `<Space>` `g` | Git UI | `neogit` | Git status, diff, staging, and commit dashboard |
+| `Ctrl` + `n` | Multi-Cursor | `vim-visual-multi` | Select word under cursor & spawn next match cursor |
+| `Ctrl` + `Shift` + `Down` / `Up` | Add Cursor | `vim-visual-multi` | Spawn multi-cursor directly below / above |
+
+---
+
+## 5. Zsh & Shell Shortcuts
+
+Config: [`home/common.nix`](../home/common.nix) & [`home/sungin-mac.nix`](../home/sungin-mac.nix).
+
+| Shortcut | Action | Description |
+| :--- | :--- | :--- |
+| `Ctrl` + `f` | Accept Suggestion | Accepts autosuggested ghost text |
+| `Ctrl` + `r` | History Search | Interactive fzf command history search |
+| `Ctrl` + `t` | Pick File | Interactive fzf file picker |
+| `Alt` + `c` | Pick Directory | Interactive fzf directory picker & `cd` |

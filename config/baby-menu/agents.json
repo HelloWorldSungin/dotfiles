@@ -1,0 +1,20 @@
+[
+  {
+    "name": "cursor",
+    "label": "Cursor",
+    "command": "cursor",
+    "launchCommand": "cursor-agent acp"
+  },
+  {
+    "name": "opencode",
+    "label": "OpenCode",
+    "command": "opencode",
+    "launchCommand": "npx -y opencode-ai acp"
+  },
+  {
+    "name": "omp",
+    "label": "OMP",
+    "command": "omp",
+    "launchCommand": "npx omp-acp"
+  }
+]
