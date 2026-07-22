@@ -1,8 +1,7 @@
 # dotfiles
 
-Reproducible environment for the ArkNode agent host (CT110), Kun Chen-style:
-one repo that can rebuild the whole setup from scratch on any Linux box. A
-Mac client target will be added to the same flake later.
+Reproducible environment for the ArkNode agent host (CT110) and MacBook Air client, Kun Chen-style:
+one repo that rebuilds the whole setup from scratch across both Linux (CT110) and macOS (MacBook Air).
 
 ## The big picture
 
@@ -114,7 +113,9 @@ text only and CT110 is headless. Two bridges:
 
 ```
 flake.nix              inputs (pinned nixpkgs, home-manager) + machine targets
-home/sungin-ct110.nix  everything about the CT110 user environment
+home/common.nix        shared environment (packages, zsh, neovim, git, agent memory)
+home/sungin-ct110.nix  CT110 Linux server specific configuration
+home/sungin-mac.nix    MacBook Air macOS client specific configuration
 config/nvim/           neovim: init.lua -> lua/{vim-config,keys}.lua + plugins/
 config/herdr/          herdr config (defaults; grows as preferences form)
 config/wezterm/        Mac client terminal config (symlink ~/.config/wezterm here)

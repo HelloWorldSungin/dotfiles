@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
-# Bring a fresh Linux machine/user to the full environment. Idempotent -
+# Bring a fresh machine/user to the full environment. Idempotent -
 # safe to re-run any time. This script IS the reproducibility guarantee:
 # if it can't rebuild everything from scratch, that's a bug.
 set -euo pipefail
 
 DOTFILES="$HOME/dotfiles"
-FLAKE_TARGET="sungin@ct110"
+IS_DARWIN=false
+if [ "$(uname -s)" = "Darwin" ]; then
+  IS_DARWIN=true
+  FLAKE_TARGET="sunginkim@macbook"
+else
+  FLAKE_TARGET="sungin@ct110"
+fi
 
 if [ "$(cd "$(dirname "$0")" && pwd)" != "$DOTFILES" ]; then
   echo "This repo must live at ~/dotfiles (scripts and symlinks assume it):"
@@ -15,38 +21,60 @@ fi
 
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 
-step "1/6 Nix (Determinate, multi-user daemon)"
-if ! command -v nix >/dev/null 2>&1; then
-  if [ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
-    # Installed but not in this shell's env yet
-    . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+install_if_missing() {
+  local name="$1"
+  shift
+  if command -v "$name" >/dev/null 2>&1; then
+    echo "  ✓ $name is already installed, skipping."
   else
-    curl -fsSL https://install.determinate.systems/nix | sh -s -- install --no-confirm
-    . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+    echo "  -> Installing $name..."
+    "$@"
   fi
+}
+
+step "1/6 Nix (Determinate, multi-user daemon)"
+if command -v nix >/dev/null 2>&1; then
+  echo "  ✓ Nix is already installed."
+elif [ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
+  echo "  -> Sourcing existing Nix daemon profile..."
+  . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+else
+  echo "  -> Installing Nix via Determinate Systems installer..."
+  curl -fsSL https://install.determinate.systems/nix | sh -s -- install --no-confirm
+  . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
 fi
 nix --version
 
 step "2/6 home-manager switch (packages, zsh, nvim, symlinks)"
 if command -v home-manager >/dev/null 2>&1; then
-  home-manager switch --flake "$DOTFILES#$FLAKE_TARGET"
+  home-manager switch --flake "$DOTFILES#$FLAKE_TARGET" -b backup
 else
   nix run github:nix-community/home-manager/release-25.11 -- \
-    switch --flake "$DOTFILES#$FLAKE_TARGET"
+    switch --flake "$DOTFILES#$FLAKE_TARGET" -b backup
 fi
 
 # Everything below installs into user-writable prefixes; make sure the
 # freshly-configured paths work in this very shell too.
 export NPM_CONFIG_PREFIX="$HOME/.npm-global"
 export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"
+mkdir -p "$HOME/.local/bin" "$HOME/.npm-global/bin"
 
 step "3/6 zsh as login shell"
-# This user deliberately has NO sudo (agent/infra privilege separation), so
-# setting the login shell is a one-time ROOT task done at user creation, not
-# here. If it isn't set yet, print the exact command to run via ct110-root
-# rather than failing the bootstrap.
 ZSH_PATH="$HOME/.nix-profile/bin/zsh"
-if [ -x "$ZSH_PATH" ] && [ "$(getent passwd "$USER" | cut -d: -f7)" != "$ZSH_PATH" ]; then
+CURRENT_SHELL=""
+if $IS_DARWIN; then
+  CURRENT_SHELL=$(dscl . -read "$HOME" UserShell 2>/dev/null | awk '{print $2}' || echo "$SHELL")
+else
+  if command -v getent >/dev/null 2>&1; then
+    CURRENT_SHELL=$(getent passwd "$USER" | cut -d: -f7)
+  else
+    CURRENT_SHELL="$SHELL"
+  fi
+fi
+
+if [ "$CURRENT_SHELL" = "$ZSH_PATH" ] || [ "$CURRENT_SHELL" = "/bin/zsh" ]; then
+  echo "  ✓ zsh is already the login shell."
+elif [ -x "$ZSH_PATH" ]; then
   if sudo -n true 2>/dev/null; then
     grep -qxF "$ZSH_PATH" /etc/shells || echo "$ZSH_PATH" | sudo tee -a /etc/shells >/dev/null
     sudo chsh -s "$ZSH_PATH" "$USER"
@@ -54,35 +82,42 @@ if [ -x "$ZSH_PATH" ] && [ "$(getent passwd "$USER" | cut -d: -f7)" != "$ZSH_PAT
     echo "  login shell not set and no sudo — run once as root:"
     echo "    grep -qxF '$ZSH_PATH' /etc/shells || echo '$ZSH_PATH' >> /etc/shells"
     echo "    chsh -s '$ZSH_PATH' $USER"
-    echo "  (harmless to skip: 'exec zsh' still works; only the default shell is unset)"
   fi
 fi
 
 step "4/6 herdr (session layer)"
-command -v herdr >/dev/null 2>&1 || curl -fsSL https://herdr.dev/install.sh | sh
-herdr --version
+if command -v herdr >/dev/null 2>&1; then
+  echo "  ✓ herdr is already installed."
+else
+  echo "  -> Installing herdr..."
+  curl -fsSL https://herdr.dev/install.sh | sh
+fi
+command -v herdr >/dev/null 2>&1 && herdr --version || true
 
-step "5/6 agent harnesses (fast-moving CLIs - official installers, not Nix)"
-command -v claude >/dev/null 2>&1 || curl -fsSL https://claude.ai/install.sh | bash
-command -v codex >/dev/null 2>&1 || npm install -g @openai/codex
-command -v opencode >/dev/null 2>&1 || curl -fsSL https://opencode.ai/install | bash
-# opencode's installer only patches .bashrc; we run zsh - expose it on the
-# PATH we actually use instead.
+step "5/6 agent harnesses (fast-moving CLIs)"
+install_if_missing claude bash -c "curl -fsSL https://claude.ai/install.sh | bash"
+install_if_missing codex npm install -g @openai/codex
+install_if_missing opencode bash -c "curl -fsSL https://opencode.ai/install | bash"
 [ -x "$HOME/.opencode/bin/opencode" ] && ln -sf "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode"
-command -v pi >/dev/null 2>&1 || npm install -g @mariozechner/pi-coding-agent
-command -v agy >/dev/null 2>&1 || curl -fsSL https://antigravity.google/cli/install.sh | bash
-command -v cursor-agent >/dev/null 2>&1 || curl https://cursor.com/install -fsS | bash
+install_if_missing pi npm install -g @mariozechner/pi-coding-agent
+install_if_missing agy bash -c "curl -fsSL https://antigravity.google/cli/install.sh | bash"
+install_if_missing cursor-agent bash -c "curl https://cursor.com/install -fsS | bash"
 
 step "6/6 agent toolchain (Kun Chen stack)"
-command -v treehouse >/dev/null 2>&1 || curl -fsSL https://kunchenguid.github.io/treehouse/install.sh | sh
-command -v no-mistakes >/dev/null 2>&1 || curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh
-command -v gnhf >/dev/null 2>&1 || npm install -g gnhf
-command -v gh-axi >/dev/null 2>&1 || npm install -g gh-axi
-command -v tasks-axi >/dev/null 2>&1 || npm install -g tasks-axi
-command -v quota-axi >/dev/null 2>&1 || npm install -g quota-axi
-command -v chrome-devtools-axi >/dev/null 2>&1 || npm install -g chrome-devtools-axi
-# firstmate is distributed as a repo you run agents inside, not a binary
-[ -d "$HOME/firstmate" ] || git clone https://github.com/kunchenguid/firstmate.git "$HOME/firstmate"
+install_if_missing treehouse bash -c "curl -fsSL https://kunchenguid.github.io/treehouse/install.sh | sh"
+install_if_missing no-mistakes bash -c "curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh"
+install_if_missing gnhf npm install -g gnhf
+install_if_missing gh-axi npm install -g gh-axi
+install_if_missing tasks-axi npm install -g tasks-axi
+install_if_missing quota-axi npm install -g quota-axi
+install_if_missing chrome-devtools-axi npm install -g chrome-devtools-axi
+
+if [ -d "$HOME/firstmate" ]; then
+  echo "  ✓ firstmate repository is already cloned."
+else
+  echo "  -> Cloning firstmate repository..."
+  git clone https://github.com/kunchenguid/firstmate.git "$HOME/firstmate"
+fi
 
 echo
 echo "Done. Open a NEW login shell (or 'exec zsh'), then log in once to each"
