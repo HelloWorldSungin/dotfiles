@@ -200,17 +200,37 @@ function CheatsheetPage() {
 export default function Layout({ widgets, renderWidget }: BabyMenuLayoutProps) {
   const [currentPage, setCurrentPage] = useState<"quota" | "hardware" | "nvim" | "dotfiles">("quota");
 
-  // Quota Page Widgets: github-status + all LLM quota widgets (excluding kimi-code-quota)
-  const quotaWidgets = useMemo(() => {
-    const list = widgets.filter(
+  // Quota Page Columns:
+  // Left Column: github-status at top, followed by remaining quota widgets
+  // Right Column: claude-code-quota & codex-quota at top, followed by remaining quota widgets
+  const { leftQuotaWidgets, rightQuotaWidgets } = useMemo(() => {
+    const allQuota = widgets.filter(
       (widget) => (widget.id.includes("quota") && widget.id !== "kimi-code-quota") || widget.id === "github-status"
     );
-    list.sort((a, b) => {
-      if (a.id === "github-status") return -1;
-      if (b.id === "github-status") return 1;
-      return a.id.localeCompare(b.id);
+
+    const rightTopIds = ["claude-code-quota", "codex-quota"];
+    const leftTopIds = ["github-status"];
+
+    const rightTop = allQuota.filter((w) => rightTopIds.includes(w.id));
+    const leftTop = allQuota.filter((w) => leftTopIds.includes(w.id));
+    const remaining = allQuota.filter(
+      (w) => !rightTopIds.includes(w.id) && !leftTopIds.includes(w.id)
+    );
+
+    remaining.sort((a, b) => a.id.localeCompare(b.id));
+
+    const left = [...leftTop];
+    const right = [...rightTop];
+
+    remaining.forEach((w, idx) => {
+      if (idx % 2 === 0) {
+        left.push(w);
+      } else {
+        right.push(w);
+      }
     });
-    return list;
+
+    return { leftQuotaWidgets: left, rightQuotaWidgets: right };
   }, [widgets]);
 
   // Hardware Page Widgets: arknode-load, system-usage, and other non-quota/non-cheatsheet widgets
@@ -284,12 +304,12 @@ export default function Layout({ widgets, renderWidget }: BabyMenuLayoutProps) {
         {currentPage === "quota" ? (
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-3">
-              {quotaWidgets.slice(0, Math.ceil(quotaWidgets.length / 2)).map((widget) => (
+              {leftQuotaWidgets.map((widget) => (
                 <div key={widget.id}>{renderWidget(widget.id)}</div>
               ))}
             </div>
             <div className="flex flex-col gap-3">
-              {quotaWidgets.slice(Math.ceil(quotaWidgets.length / 2)).map((widget) => (
+              {rightQuotaWidgets.map((widget) => (
                 <div key={widget.id}>{renderWidget(widget.id)}</div>
               ))}
             </div>

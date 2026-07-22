@@ -17,6 +17,7 @@ in
   home.file.".baby-menu/agents.json".source = link "config/baby-menu/agents.json";
   home.file.".baby-menu/preferences.json".source = link "config/baby-menu/preferences.json";
   home.file.".baby-menu/extensions/layout.tsx".source = link "config/baby-menu/extensions/layout.tsx";
+  home.file.".baby-menu/extensions/arknode-load/components.tsx".source = link "config/baby-menu/extensions/arknode-load/components.tsx";
 
   home.sessionPath = [
     "$HOME/.bun/bin"
