@@ -42,6 +42,8 @@ keybind in this repo (nvim, zsh, herdr) on one page.
   stage what you trust. Gitsigns adds gutter markers + inline blame.
 - **which-key**: the discoverability layer (the space-pause popup).
 - **rose-pine** (moon): same colorscheme as WezTerm - one visual surface.
+- **render-markdown + treesitter**: replaces raw Markdown punctuation with a
+  readable rendered view while editing Markdown files.
 
 ## Relative line numbers (if they look weird at first)
 
@@ -54,4 +56,4 @@ off the gutter instead of counting. A few days of use and it's automatic.
 Add a new file under `lua/plugins/` returning a plugin spec - lazy.nvim
 picks it up on restart. Keep the pattern: options in the spec's `opts`,
 keybinds in its `keys`, one topic per file. Deliberately NOT installed yet
-(add when the need is felt, not before): LSP config, treesitter, completion.
+(add when the need is felt, not before): LSP config, completion.
