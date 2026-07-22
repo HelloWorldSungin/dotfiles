@@ -103,6 +103,12 @@ in
   home.file.".pi/agent/skills/vault/SKILL.md".source = link "skills/vault/SKILL.md";
   home.file.".agents/skills/vault/SKILL.md".source = link "skills/vault/SKILL.md";
 
+  # ------------------------------------------------ vendored pi extensions
+  # fusion-harness — dual-model harness (architect + builder). Vendored so a
+  # fresh `home-manager switch` reproduces the extension instead of relying on
+  # an imperative `pi install -l`.
+  home.file.".pi/agent/extensions/fusion-harness".source = link "pi/extensions/fusion-harness";
+
   # ------------------------------------------------------------------ zsh
   programs.zsh = {
     enable = true;
@@ -139,6 +145,8 @@ in
       # high-agency claude (Kun's pattern); ccdr resumes the last session
       ccd = "claude --dangerously-skip-permissions";
       ccdr = "claude --dangerously-skip-permissions -r";
+      # fusion-harness: dual-model harness with explicit models and thinking levels.
+      pi-fusion = "pi -e $HOME/.pi/agent/extensions/fusion-harness/fusion-harness.ts --architect openai-codex/gpt-5.6-sol --architect-thinking xhigh --builder zai/glm-5.2 --builder-thinking max";
     };
   };
 
