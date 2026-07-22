@@ -1,0 +1,567 @@
+import React, { useState, useMemo, useEffect, useRef } from "react";
+
+interface VimCommand {
+  key: string;
+  desc: string;
+  category: "movement" | "editing" | "clipboard" | "search_replace" | "advanced";
+  subcategory?: string;
+  keywords: string[];
+}
+
+const CHEATSHEET_DATA: VimCommand[] = [
+  // MOVEMENT - Vertical / Directional
+  { key: "gg", desc: "Jump to first line of the file", category: "movement", subcategory: "Vertical", keywords: ["first", "line", "start", "top", "go"] },
+  { key: "G", desc: "Jump to end of file", category: "movement", subcategory: "Vertical", keywords: ["end", "file", "bottom", "go", "last"] },
+  { key: "H", desc: "Move cursor to top of screen (High)", category: "movement", subcategory: "Vertical", keywords: ["top", "screen", "high", "head"] },
+  { key: "M", desc: "Move cursor to middle of screen (Middle)", category: "movement", subcategory: "Vertical", keywords: ["middle", "screen", "center"] },
+  { key: "L", desc: "Move cursor to bottom of screen (Low)", category: "movement", subcategory: "Vertical", keywords: ["bottom", "screen", "low"] },
+  { key: "{", desc: "Jump to beginning of paragraph / block backward", category: "movement", subcategory: "Vertical", keywords: ["beginning", "paragraph", "block", "backward", "prev"] },
+  { key: "}", desc: "Jump to end of paragraph / block forward", category: "movement", subcategory: "Vertical", keywords: ["end", "paragraph", "block", "forward", "next"] },
+  { key: "(", desc: "Jump to beginning of sentence backward", category: "movement", subcategory: "Vertical", keywords: ["beginning", "sentence", "backward", "prev"] },
+  { key: ")", desc: "Jump to end of sentence forward", category: "movement", subcategory: "Vertical", keywords: ["end", "sentence", "forward", "next"] },
+  { key: "#G", desc: "Go to line number # (e.g. 42G)", category: "movement", subcategory: "Vertical", keywords: ["go", "line", "number", "jump"] },
+  { key: "*", desc: "Search forward for word under cursor", category: "movement", subcategory: "Vertical", keywords: ["search", "word", "cursor", "find", "next"] },
+  { key: "#", desc: "Search backward for word under cursor", category: "movement", subcategory: "Vertical", keywords: ["search", "word", "cursor", "find", "prev"] },
+  { key: "n", desc: "Repeat last search in same direction", category: "movement", subcategory: "Vertical", keywords: ["repeat", "search", "next", "direction"] },
+  { key: "N", desc: "Repeat last search in opposite direction", category: "movement", subcategory: "Vertical", keywords: ["repeat", "search", "opposite", "prev", "direction"] },
+
+  // MOVEMENT - Horizontal
+  { key: "0", desc: "Move to hard beginning of current line", category: "movement", subcategory: "Horizontal", keywords: ["start", "beginning", "line", "hard", "zero"] },
+  { key: "^", desc: "Move to soft beginning of line (first non-blank char)", category: "movement", subcategory: "Horizontal", keywords: ["start", "beginning", "line", "soft", "first"] },
+  { key: "$", desc: "Move to hard end of current line", category: "movement", subcategory: "Horizontal", keywords: ["end", "line", "dollar", "last"] },
+  { key: "w", desc: "Move forward to beginning of next word", category: "movement", subcategory: "Horizontal", keywords: ["word", "forward", "next", "start"] },
+  { key: "W", desc: "Move forward to beginning of next word (unlimited/whitespace)", category: "movement", subcategory: "Horizontal", keywords: ["word", "forward", "whitespace", "next"] },
+  { key: "e", desc: "Move forward to end of current word", category: "movement", subcategory: "Horizontal", keywords: ["word", "forward", "end"] },
+  { key: "E", desc: "Move forward to end of current word (unlimited/whitespace)", category: "movement", subcategory: "Horizontal", keywords: ["word", "forward", "end", "whitespace"] },
+  { key: "b", desc: "Move backward to beginning of word", category: "movement", subcategory: "Horizontal", keywords: ["word", "backward", "back", "start"] },
+  { key: "B", desc: "Move backward to beginning of word (unlimited/whitespace)", category: "movement", subcategory: "Horizontal", keywords: ["word", "backward", "back", "whitespace"] },
+  { key: "ge", desc: "Move backward to end of word", category: "movement", subcategory: "Horizontal", keywords: ["word", "backward", "end"] },
+  { key: "gE", desc: "Move backward to end of word (unlimited/whitespace)", category: "movement", subcategory: "Horizontal", keywords: ["word", "backward", "end", "whitespace"] },
+  { key: "f", desc: "Find character forward (inclusive)", category: "movement", subcategory: "Horizontal", keywords: ["find", "character", "forward", "inclusive", "search"] },
+  { key: "F", desc: "Find character backward (inclusive)", category: "movement", subcategory: "Horizontal", keywords: ["find", "character", "backward", "inclusive", "search"] },
+  { key: "t", desc: "Find character forward till (stop before)", category: "movement", subcategory: "Horizontal", keywords: ["find", "character", "forward", "till", "before"] },
+  { key: "T", desc: "Find character backward till (stop before)", category: "movement", subcategory: "Horizontal", keywords: ["find", "character", "backward", "till", "before"] },
+  { key: ";", desc: "Repeat last find command (f, F, t, T)", category: "movement", subcategory: "Horizontal", keywords: ["repeat", "find", "next"] },
+  { key: ",", desc: "Repeat last find command in opposite direction", category: "movement", subcategory: "Horizontal", keywords: ["repeat", "find", "opposite", "prev"] },
+  { key: "%", desc: "Jump to matching bracket (parenthesis, curly, square)", category: "movement", subcategory: "Horizontal", keywords: ["jump", "matching", "bracket", "parenthesis", "brace"] },
+  { key: "<", desc: "Indent line left / shift left", category: "movement", subcategory: "Horizontal", keywords: ["indent", "left", "shift", "format"] },
+  { key: ">", desc: "Indent line right / shift right", category: "movement", subcategory: "Horizontal", keywords: ["indent", "right", "shift", "format"] },
+
+  // MOVEMENT - Screen Movement / Scroll
+  { key: "zz", desc: "Center screen on cursor line", category: "movement", subcategory: "Screen Scroll", keywords: ["center", "screen", "scroll", "cursor", "view"] },
+  { key: "zt", desc: "Scroll cursor line to top of screen", category: "movement", subcategory: "Screen Scroll", keywords: ["top", "screen", "scroll", "cursor", "view"] },
+  { key: "zb", desc: "Scroll cursor line to bottom of screen", category: "movement", subcategory: "Screen Scroll", keywords: ["bottom", "screen", "scroll", "cursor", "view"] },
+  { key: "Ctrl + e", desc: "Scroll screen down by 1 line", category: "movement", subcategory: "Screen Scroll", keywords: ["scroll", "down", "line", "ctrl-e", "view"] },
+  { key: "Ctrl + y", desc: "Scroll screen up by 1 line", category: "movement", subcategory: "Screen Scroll", keywords: ["scroll", "up", "line", "ctrl-y", "view"] },
+  { key: "Ctrl + d", desc: "Scroll screen down by half a page", category: "movement", subcategory: "Screen Scroll", keywords: ["scroll", "down", "half", "page", "ctrl-d"] },
+  { key: "Ctrl + u", desc: "Scroll screen up by half a page", category: "movement", subcategory: "Screen Scroll", keywords: ["scroll", "up", "half", "page", "ctrl-u"] },
+  { key: "Ctrl + f", desc: "Scroll screen down by full page", category: "movement", subcategory: "Screen Scroll", keywords: ["scroll", "down", "full", "page", "ctrl-f"] },
+  { key: "Ctrl + b", desc: "Scroll screen up by full page", category: "movement", subcategory: "Screen Scroll", keywords: ["scroll", "up", "full", "page", "ctrl-b"] },
+
+  // EDITING
+  { key: "r", desc: "Replace a single character under cursor", category: "editing", subcategory: "Insert/Replace", keywords: ["replace", "character", "change"] },
+  { key: "R", desc: "Enter REPLACE mode", category: "editing", subcategory: "Insert/Replace", keywords: ["replace", "mode", "overwrite"] },
+  { key: "i", desc: "Enter Insert mode before cursor", category: "editing", subcategory: "Insert/Replace", keywords: ["insert", "mode", "before", "write"] },
+  { key: "I", desc: "Enter Insert mode at beginning of line", category: "editing", subcategory: "Insert/Replace", keywords: ["insert", "mode", "beginning", "line", "start"] },
+  { key: "a", desc: "Enter Insert mode after cursor (append)", category: "editing", subcategory: "Insert/Replace", keywords: ["append", "insert", "after", "mode"] },
+  { key: "A", desc: "Enter Insert mode at end of line (append)", category: "editing", subcategory: "Insert/Replace", keywords: ["append", "insert", "end", "line", "mode"] },
+  { key: "o", desc: "Open new line below and insert", category: "editing", subcategory: "Insert/Replace", keywords: ["new", "line", "below", "insert", "open"] },
+  { key: "O", desc: "Open new line above and insert", category: "editing", subcategory: "Insert/Replace", keywords: ["new", "line", "above", "insert", "open"] },
+  { key: "ea", desc: "Append at the end of the word", category: "editing", subcategory: "Insert/Replace", keywords: ["append", "end", "word", "insert"] },
+  { key: "#gI", desc: "Insert text # times (e.g. 5gI)", category: "editing", subcategory: "Insert/Replace", keywords: ["insert", "multiple", "times", "repeat"] },
+  { key: "J", desc: "Join line below to current with single space", category: "editing", subcategory: "Lines", keywords: ["join", "line", "combine", "merge"] },
+  { key: "gJ", desc: "Join line below to current with NO spaces", category: "editing", subcategory: "Lines", keywords: ["join", "line", "combine", "merge", "no", "spaces"] },
+  { key: "cc", desc: "Change entire line (clears line and inserts)", category: "editing", subcategory: "Changes", keywords: ["change", "line", "entire", "replace", "insert"] },
+  { key: "C", desc: "Change to the end of the line", category: "editing", subcategory: "Changes", keywords: ["change", "end", "line", "replace"] },
+  { key: "ciw", desc: "Change inner word (deletes word, inserts)", category: "editing", subcategory: "Changes", keywords: ["change", "inner", "word", "replace", "delete"] },
+  { key: "cm", desc: "Change with motion (e.g. cw, c3w)", category: "editing", subcategory: "Changes", keywords: ["change", "motion", "modifier"] },
+  { key: "s", desc: "Delete character and substitute text", category: "editing", subcategory: "Changes", keywords: ["delete", "character", "substitute", "replace", "insert"] },
+  { key: "S", desc: "Delete current line and substitute text", category: "editing", subcategory: "Changes", keywords: ["delete", "line", "substitute", "replace", "insert"] },
+  { key: "xp", desc: "Transpose two letters (swaps char under cursor and next)", category: "editing", subcategory: "Changes", keywords: ["transpose", "swap", "letters", "characters", "fix"] },
+  { key: "u", desc: "Undo last change", category: "editing", subcategory: "History", keywords: ["undo", "history", "back", "revert"] },
+  { key: "Ctrl + r", desc: "Redo last undone change", category: "editing", subcategory: "History", keywords: ["redo", "history", "forward", "revert", "ctrl-r"] },
+  { key: ".", desc: "Repeat last editing command", category: "editing", subcategory: "History", keywords: ["repeat", "dot", "command", "again"] },
+  { key: "~", desc: "Switch character case (upper <-> lower) and move forward", category: "editing", subcategory: "Case", keywords: ["case", "switch", "toggle", "uppercase", "lowercase"] },
+  { key: "VU/u", desc: "Make current line uppercase (VU) or lowercase (Vu)", category: "editing", subcategory: "Case", keywords: ["case", "uppercase", "lowercase", "line"] },
+  { key: "vEU/u", desc: "Make word uppercase (vEu) or lowercase (vEu)", category: "editing", subcategory: "Case", keywords: ["case", "uppercase", "lowercase", "word"] },
+
+  // CLIPBOARD (CUT & PASTE)
+  { key: "yy or Y", desc: "Yank (copy) current line", category: "clipboard", subcategory: "Copy (Yank)", keywords: ["copy", "yank", "line"] },
+  { key: "#Y", desc: "Yank (copy) # lines", category: "clipboard", subcategory: "Copy (Yank)", keywords: ["copy", "yank", "lines", "multiple"] },
+  { key: "yw", desc: "Yank from cursor to start of next word", category: "clipboard", subcategory: "Copy (Yank)", keywords: ["copy", "yank", "word"] },
+  { key: "y#m", desc: "Yank # lines with m movement (e.g. y3j)", category: "clipboard", subcategory: "Copy (Yank)", keywords: ["copy", "yank", "movement", "lines"] },
+  { key: "\"ayy", desc: "Yank current line into named register 'a'", category: "clipboard", subcategory: "Registers", keywords: ["copy", "yank", "register", "named"] },
+  { key: "p", desc: "Paste (put) clipboard contents AFTER cursor", category: "clipboard", subcategory: "Paste (Put)", keywords: ["paste", "put", "after", "clipboard"] },
+  { key: "P", desc: "Paste (put) clipboard contents BEFORE cursor", category: "clipboard", subcategory: "Paste (Put)", keywords: ["paste", "put", "before", "clipboard"] },
+  { key: "\"aP", desc: "Paste (put) contents of register 'a' before cursor", category: "clipboard", subcategory: "Registers", keywords: ["paste", "put", "register", "named"] },
+  { key: "dd", desc: "Delete (cut) current line", category: "clipboard", subcategory: "Delete (Cut)", keywords: ["delete", "cut", "line"] },
+  { key: "#dd", desc: "Delete (cut) # lines downward", category: "clipboard", subcategory: "Delete (Cut)", keywords: ["delete", "cut", "lines", "multiple"] },
+  { key: "#dm", desc: "Delete # lines with movement (e.g. d2j)", category: "clipboard", subcategory: "Delete (Cut)", keywords: ["delete", "cut", "movement", "lines"] },
+  { key: "D", desc: "Delete (cut) from cursor to end of line", category: "clipboard", subcategory: "Delete (Cut)", keywords: ["delete", "cut", "end", "line"] },
+  { key: "dw", desc: "Delete (cut) until beginning of next word", category: "clipboard", subcategory: "Delete (Cut)", keywords: ["delete", "cut", "word"] },
+  { key: "x", desc: "Delete character under cursor", category: "clipboard", subcategory: "Delete (Cut)", keywords: ["delete", "character", "under", "cut"] },
+  { key: "X", desc: "Delete character before cursor (backspace)", category: "clipboard", subcategory: "Delete (Cut)", keywords: ["delete", "character", "before", "backspace"] },
+
+  // SEARCH & REPLACE
+  { key: "/pattern", desc: "Search forward for 'pattern'", category: "search_replace", subcategory: "Search", keywords: ["search", "find", "forward", "pattern"] },
+  { key: "?pattern", desc: "Search backward for 'pattern'", category: "search_replace", subcategory: "Search", keywords: ["search", "find", "backward", "pattern"] },
+  { key: "\\", desc: "Escape/disable special meaning of search char", category: "search_replace", subcategory: "Regex Patterns", keywords: ["escape", "special", "literal"] },
+  { key: "jo[ha]n", desc: "Match 'john' or 'joan' (brackets match char class)", category: "search_replace", subcategory: "Regex Patterns", keywords: ["class", "match", "optional", "brackets"] },
+  { key: "*A", desc: "Match A, AA, AAA (star matches 0 or more)", category: "search_replace", subcategory: "Regex Patterns", keywords: ["wildcard", "multiple", "zero", "more", "star"] },
+  { key: "x|y", desc: "Match x OR y", category: "search_replace", subcategory: "Regex Patterns", keywords: ["or", "either", "pipe", "alternative"] },
+  { key: "r.d", desc: "Match 'rad', 'rod', 'rid' (. matches any single char)", category: "search_replace", subcategory: "Regex Patterns", keywords: ["dot", "wildcard", "single", "character"] },
+  { key: "\\<the", desc: "Match word starting with 'the' (e.g. 'the', 'theater')", category: "search_replace", subcategory: "Regex Patterns", keywords: ["word", "boundary", "start"] },
+  { key: "the\\>", desc: "Match word ending with 'the' (e.g. 'the', 'breathe')", category: "search_replace", subcategory: "Regex Patterns", keywords: ["word", "boundary", "end"] },
+  { key: "\\<the\\>", desc: "Match the exact word 'the' only", category: "search_replace", subcategory: "Regex Patterns", keywords: ["exact", "word", "boundary", "match"] },
+  { key: ":s/old/new", desc: "Replace next occurrence of 'old' with 'new' in current line", category: "search_replace", subcategory: "Substitute (Replace)", keywords: ["substitute", "replace", "line", "single"] },
+  { key: ":s/old/new/g", desc: "Replace ALL occurrences of 'old' with 'new' in current line", category: "search_replace", subcategory: "Substitute (Replace)", keywords: ["substitute", "replace", "line", "global", "all"] },
+  { key: ":%s/old/new/g", desc: "Replace ALL occurrences of 'old' with 'new' in entire file", category: "search_replace", subcategory: "Substitute (Replace)", keywords: ["substitute", "replace", "file", "global", "all"] },
+  { key: ":%s/old/new/gc", desc: "Replace ALL with confirmation prompt for each match", category: "search_replace", subcategory: "Substitute (Replace)", keywords: ["substitute", "replace", "file", "confirm", "ask"] },
+  { key: ":2,9s/x/y/gi", desc: "Replace x with y between lines 2 and 9, ignoring case", category: "search_replace", subcategory: "Substitute (Replace)", keywords: ["substitute", "replace", "range", "lines", "ignore", "case"] },
+  { key: ":g/v/x/d", desc: "Delete lines containing/not containing string x", category: "search_replace", subcategory: "Substitute (Replace)", keywords: ["delete", "lines", "global", "filter", "match"] },
+
+  // ADVANCED (Visual, Macros, Marks, Registers, Misc)
+  { key: "v", desc: "Start character visual mode", category: "advanced", subcategory: "Visual Mode", keywords: ["visual", "select", "mode", "highlight"] },
+  { key: "V", desc: "Start line visual mode", category: "advanced", subcategory: "Visual Mode", keywords: ["visual", "select", "mode", "line", "linewise"] },
+  { key: "Ctrl + v", desc: "Start block visual mode", category: "advanced", subcategory: "Visual Mode", keywords: ["visual", "select", "mode", "block", "column", "ctrl-v"] },
+  { key: "o", desc: "Move cursor to other end of visual selection", category: "advanced", subcategory: "Visual Mode", keywords: ["visual", "selection", "toggle", "end", "cursor"] },
+  { key: "O", desc: "Move cursor to other corner of visual block", category: "advanced", subcategory: "Visual Mode", keywords: ["visual", "selection", "block", "corner"] },
+  { key: "aw", desc: "Select a whole word (in visual mode or with operation)", category: "advanced", subcategory: "Visual Mode", keywords: ["select", "word", "around"] },
+  { key: "ab or aB", desc: "Select a block containing parentheses () or braces {}", category: "advanced", subcategory: "Visual Mode", keywords: ["select", "block", "around", "braces", "parentheses"] },
+  { key: "ib or iB", desc: "Select inner block of parentheses () or braces {}", category: "advanced", subcategory: "Visual Mode", keywords: ["select", "inner", "block", "braces", "parentheses"] },
+  { key: "Esc", desc: "Exit visual, insert, or command mode", category: "advanced", subcategory: "Modes", keywords: ["exit", "clear", "cancel", "escape"] },
+  { key: "qa", desc: "Record macro into register 'a' (press q to stop)", category: "advanced", subcategory: "Macros", keywords: ["record", "macro", "register", "action"] },
+  { key: "q", desc: "Stop recording macro", category: "advanced", subcategory: "Macros", keywords: ["stop", "record", "macro"] },
+  { key: "@a", desc: "Execute macro recorded in register 'a'", category: "advanced", subcategory: "Macros", keywords: ["run", "execute", "macro", "register"] },
+  { key: "@@", desc: "Execute last executed macro", category: "advanced", subcategory: "Macros", keywords: ["run", "execute", "last", "macro", "repeat"] },
+  { key: "mc", desc: "Set mark 'c' at current cursor position", category: "advanced", subcategory: "Marks", keywords: ["set", "mark", "location", "bookmark"] },
+  { key: "`c", desc: "Jump to exact position of mark 'c'", category: "advanced", subcategory: "Marks", keywords: ["jump", "mark", "exact", "location", "backtick"] },
+  { key: "'c", desc: "Jump to start of line containing mark 'c'", category: "advanced", subcategory: "Marks", keywords: ["jump", "mark", "line", "start"] },
+  { key: "''", desc: "Jump back to previous cursor position before jump", category: "advanced", subcategory: "Marks", keywords: ["jump", "back", "previous", "history", "quotes"] },
+  { key: ":marks", desc: "List all active marks", category: "advanced", subcategory: "Marks", keywords: ["list", "marks", "active", "show"] },
+  { key: ":reg", desc: "List all registers and their contents", category: "advanced", subcategory: "Registers", keywords: ["list", "registers", "contents", "show"] },
+  { key: "\"xy", desc: "Yank text into register 'x'", category: "advanced", subcategory: "Registers", keywords: ["yank", "copy", "register", "specific"] },
+  { key: "\"xp", desc: "Paste text from register 'x'", category: "advanced", subcategory: "Registers", keywords: ["paste", "put", "register", "specific"] },
+  { key: ":wq or ZZ", desc: "Write (save) file and quit", category: "advanced", subcategory: "Commands & Config", keywords: ["save", "write", "quit", "exit"] },
+  { key: ":w!", desc: "Force write (save) file overriding protections", category: "advanced", subcategory: "Commands & Config", keywords: ["save", "write", "force", "overwrite"] },
+  { key: ":q!", desc: "Quit without saving changes", category: "advanced", subcategory: "Commands & Config", keywords: ["quit", "discard", "exit", "force"] },
+  { key: ":!command", desc: "Run a shell/UNIX command (e.g. :!ls)", category: "advanced", subcategory: "Commands & Config", keywords: ["shell", "terminal", "run", "command"] },
+  { key: ":r file", desc: "Read file contents and insert below cursor", category: "advanced", subcategory: "Commands & Config", keywords: ["read", "insert", "file", "import"] },
+  { key: ":set [all]", desc: "Show options set by user (or default options)", category: "advanced", subcategory: "Commands & Config", keywords: ["settings", "options", "configuration", "show"] },
+  { key: ":set option", desc: "Enable 'option' (e.g. :set nu)", category: "advanced", subcategory: "Commands & Config", keywords: ["settings", "enable", "option", "toggle"] },
+  { key: ":set option=val", desc: "Assign value to 'option' (e.g. :set tabstop=4)", category: "advanced", subcategory: "Commands & Config", keywords: ["settings", "assign", "value", "option"] },
+  { key: ":set nooption", desc: "Disable 'option' (e.g. :set nonu)", category: "advanced", subcategory: "Commands & Config", keywords: ["settings", "disable", "option", "toggle"] }
+];
+
+function CommandBadge({ cmd }: { cmd: string }) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(cmd);
+      setCopied(true);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // ignore
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      title="Click to copy shortcut"
+      className={`relative inline-flex items-center justify-center min-w-[54px] px-2 py-0.75 text-xs font-mono font-bold rounded border transition-all duration-200 cursor-pointer select-none ${
+        copied
+          ? "bg-signal-live/15 border-signal-live text-signal-live scale-[0.96]"
+          : "bg-ink-soft/5 border-line hover:bg-ink-soft/10 hover:border-signal-live/50 hover:text-signal-live"
+      }`}
+    >
+      <span>{copied ? "copied!" : cmd}</span>
+    </button>
+  );
+}
+
+function DirectionalCompass({ onKeySelect }: { onKeySelect: (key: string) => void }) {
+  const upwardKeys = [
+    { key: "gg", desc: "first line" },
+    { key: "H", desc: "cursor to top of screen" },
+    { key: "{", desc: "start of paragraph" },
+    { key: "(", desc: "start of sentence" },
+    { key: "#", desc: "find word under cursor backward" },
+    { key: "N", desc: "search opposite direction" },
+    { key: "M", desc: "cursor to middle of screen" }
+  ];
+
+  const downwardKeys = [
+    { key: "n", desc: "search same direction" },
+    { key: "*", desc: "find word under cursor forward" },
+    { key: ")", desc: "end of sentence" },
+    { key: "}", desc: "end of paragraph" },
+    { key: "L", desc: "cursor to bottom of screen" },
+    { key: "#G", desc: "go to line #" },
+    { key: "G", desc: "end of file" }
+  ];
+
+  const backwardKeys = [
+    { key: "0", desc: "hard start of line" },
+    { key: "^", desc: "soft start of line" },
+    { key: "<", desc: "shift left" },
+    { key: ",", desc: "repeat find backward" },
+    { key: "F", desc: "inclusive find backward" },
+    { key: "T", desc: "find backward till" },
+    { key: "ge", desc: "word end backward" },
+    { key: "b", desc: "word backward" }
+  ];
+
+  const forwardKeys = [
+    { key: "w", desc: "word forward" },
+    { key: "e", desc: "word end forward" },
+    { key: "t", desc: "find forward till" },
+    { key: "f", desc: "inclusive find forward" },
+    { key: ";", desc: "repeat find forward" },
+    { key: ">", desc: "shift right" },
+    { key: "%", desc: "matching bracket" },
+    { key: "$", desc: "hard end of line" }
+  ];
+
+  const renderKeyPill = (item: { key: string; desc: string }) => (
+    <button
+      key={item.key}
+      type="button"
+      onClick={() => onKeySelect(item.key)}
+      title={item.desc}
+      className="px-1.5 py-0.5 text-xxs font-mono rounded bg-ink-soft/5 hover:bg-signal-live/15 hover:text-signal-live border border-transparent hover:border-signal-live/30 transition-all text-ink cursor-pointer truncate max-w-[65px] text-center"
+    >
+      {item.key}
+    </button>
+  );
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-line-faint bg-ink-soft/5 p-3 select-none">
+      <div className="flex items-center gap-1.5 text-xxs uppercase tracking-caps text-ink-label border-b border-line-faint pb-1.5 mb-1">
+        <span className="text-signal-live font-semibold">🧭 motion compass</span>
+        <span className="text-xxs text-ink-muted lowercase">(click key to highlight/filter)</span>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 py-1 items-center justify-center">
+        <div></div>
+        <div className="flex flex-col items-center gap-1 bg-ink-soft/5 rounded p-1 border border-line-faint/10">
+          <span className="text-[9px] uppercase tracking-caps text-ink-muted">▲ upward</span>
+          <div className="flex flex-wrap gap-1 justify-center max-w-[100px]">
+            {upwardKeys.slice(0, 4).map(renderKeyPill)}
+          </div>
+          <div className="flex flex-wrap gap-1 justify-center max-w-[100px]">
+            {upwardKeys.slice(4).map(renderKeyPill)}
+          </div>
+        </div>
+        <div></div>
+
+        <div className="flex flex-col items-center gap-1 bg-ink-soft/5 rounded p-1 border border-line-faint/10">
+          <span className="text-[9px] uppercase tracking-caps text-ink-muted">◀ backward</span>
+          <div className="grid grid-cols-2 gap-1 max-w-[120px]">
+            {backwardKeys.map(renderKeyPill)}
+          </div>
+        </div>
+
+        <div className="flex flex-col items-center justify-center py-4 bg-ink-soft/10 rounded-full border border-signal-live/20 w-16 h-16 mx-auto shadow-inner">
+          <svg className="w-7 h-7 text-signal-live" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M21.5,12.7c-0.1,0-0.1-0.1-0.2-0.1l-10-8.8C11,3.6,10.6,3.5,10.2,3.7C9.8,3.9,9.5,4.3,9.5,4.8v6l-5.3,3.7c-0.2,0.1-0.3,0.4-0.3,0.6v5.8c0,0.4,0.3,0.8,0.7,0.9c0.4,0.1,0.8-0.1,1-0.4l8.2-11.2c0.2-0.2,0.5-0.3,0.8-0.2c0.3,0.1,0.5,0.3,0.5,0.6v11.8c0,0.4,0.3,0.8,0.7,0.9c0.4,0.1,0.8-0.1,1-0.4l5.3-7.5C21.8,14.6,21.9,13.6,21.5,12.7z" />
+          </svg>
+          <span className="text-[9px] font-bold font-mono tracking-wide text-ink-strong mt-0.5">NVIM</span>
+        </div>
+
+        <div className="flex flex-col items-center gap-1 bg-ink-soft/5 rounded p-1 border border-line-faint/10">
+          <span className="text-[9px] uppercase tracking-caps text-ink-muted">forward ▶</span>
+          <div className="grid grid-cols-2 gap-1 max-w-[120px]">
+            {forwardKeys.map(renderKeyPill)}
+          </div>
+        </div>
+
+        <div></div>
+        <div className="flex flex-col items-center gap-1 bg-ink-soft/5 rounded p-1 border border-line-faint/10">
+          <span className="text-[9px] uppercase tracking-caps text-ink-muted">▼ downward</span>
+          <div className="flex flex-wrap gap-1 justify-center max-w-[100px]">
+            {downwardKeys.slice(0, 4).map(renderKeyPill)}
+          </div>
+          <div className="flex flex-wrap gap-1 justify-center max-w-[100px]">
+            {downwardKeys.slice(4).map(renderKeyPill)}
+          </div>
+        </div>
+        <div></div>
+      </div>
+    </div>
+  );
+}
+
+function VimGrammarCard() {
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-line-faint bg-ink-soft/5 p-4 shadow-sm">
+      <div className="flex items-center gap-1.5 text-xxs uppercase tracking-caps text-ink-label border-b border-line-faint pb-1.5">
+        <span className="text-signal-live font-semibold">🧠 how to think in vim</span>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <p className="text-xs text-ink leading-relaxed">
+          Vim is a language. Don&apos;t memorize keys; write sentences using this structure:
+        </p>
+
+        <div className="flex items-center justify-between bg-ink-soft/10 border border-line/20 rounded px-3 py-2 text-center my-1 select-none font-mono">
+          <div className="flex flex-col">
+            <span className="text-signal-danger font-bold text-sm">verb</span>
+            <span className="text-[9px] text-ink-muted uppercase">action</span>
+          </div>
+          <span className="text-ink-muted">+</span>
+          <div className="flex flex-col">
+            <span className="text-signal-warn font-bold text-sm">modifier</span>
+            <span className="text-[9px] text-ink-muted uppercase">scope</span>
+          </div>
+          <span className="text-ink-muted">+</span>
+          <div className="flex flex-col">
+            <span className="text-ink-strong font-bold text-sm">noun</span>
+            <span className="text-[9px] text-ink-muted uppercase">target</span>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5 mt-1 border-t border-line-faint/10 pt-2 text-xs">
+          <div className="flex justify-between">
+            <span className="font-semibold text-ink-strong">Verbs:</span>
+            <span className="text-ink-muted font-mono"><span className="text-signal-danger">c</span> (change) · <span className="text-signal-danger">d</span> (delete) · <span className="text-signal-danger">y</span> (copy/yank)</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="font-semibold text-ink-strong">Modifiers:</span>
+            <span className="text-ink-muted font-mono"><span className="text-signal-warn">i</span> (inside) · <span className="text-signal-warn">a</span> (around) · <span className="text-signal-warn">t</span> (till) · <span className="text-signal-warn">f</span> (find)</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="font-semibold text-ink-strong">Nouns:</span>
+            <span className="text-ink-muted font-mono"><span className="text-ink-strong">w</span> (word) · <span className="text-ink-strong">s</span> (sentence) · <span className="text-ink-strong">p</span> (paragraph) · <span className="text-ink-strong">b</span> (bracket)</span>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5 mt-2 bg-ink-soft/10 rounded px-2.5 py-2 border border-line-faint/5 font-mono text-[11px] text-ink">
+          <div className="flex items-center gap-2">
+            <span className="text-signal-live font-bold">diw</span>
+            <span className="text-ink-muted">→ delete inside word</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-signal-live font-bold">ci(</span>
+            <span className="text-ink-muted">→ change inside parentheses</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-signal-live font-bold">yap</span>
+            <span className="text-ink-muted">→ copy around paragraph</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function NvimCheatsheetView() {
+  const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<"all" | "movement" | "editing" | "clipboard" | "search_replace" | "advanced">("all");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+      if (e.key === "Escape" && search !== "") {
+        setSearch("");
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [search]);
+
+  const filteredCommands = useMemo(() => {
+    let list = CHEATSHEET_DATA;
+
+    if (search.trim() !== "") {
+      const query = search.toLowerCase().trim();
+      return list.filter(
+        (cmd) =>
+          cmd.key.toLowerCase().includes(query) ||
+          cmd.desc.toLowerCase().includes(query) ||
+          cmd.keywords.some((kw) => kw.includes(query)) ||
+          (cmd.subcategory && cmd.subcategory.toLowerCase().includes(query))
+      );
+    }
+
+    if (activeTab !== "all") {
+      list = list.filter((cmd) => cmd.category === activeTab);
+    }
+
+    return list;
+  }, [search, activeTab]);
+
+  const groupedCommands = useMemo(() => {
+    const groups: Record<string, VimCommand[]> = {};
+    filteredCommands.forEach((cmd) => {
+      const sub = cmd.subcategory || "Other";
+      if (!groups[sub]) groups[sub] = [];
+      groups[sub].push(cmd);
+    });
+    return groups;
+  }, [filteredCommands]);
+
+  const handleKeySelect = (key: string) => {
+    setSearch(key);
+    searchInputRef.current?.focus();
+  };
+
+  return (
+    <div className="flex flex-col gap-4 w-full h-[540px] overflow-hidden select-none">
+      
+      {/* Search Header */}
+      <div className="flex items-center gap-3 shrink-0 border-b border-line-faint/15 pb-3">
+        <div className="relative flex-1">
+          <span className="absolute left-3 top-2.5 text-xs text-ink-muted">🔍</span>
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search commands or descriptors (e.g. 'yank', 'gg', 'scroll')... Press Esc to clear."
+            className="w-full bg-ink-soft/10 border border-line hover:border-line-strong focus:border-signal-live focus:outline-none rounded-md py-2 pl-9 pr-10 text-xs font-medium text-ink-strong transition-all"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-3 top-2.5 text-ink-faint hover:text-ink-strong text-xs font-semibold"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Tabs list (Category selector) */}
+      <div className="flex gap-1.5 shrink-0 overflow-x-auto pb-1 scrollbar-none select-none">
+        {(["all", "movement", "editing", "clipboard", "search_replace", "advanced"] as const).map((tab) => {
+          const isActive = activeTab === tab && !search;
+          const label = tab === "search_replace" ? "Search & Replace" : tab;
+          return (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => {
+                setSearch("");
+                setActiveTab(tab);
+              }}
+              className={`px-3 py-1 text-xxs font-semibold uppercase tracking-caps rounded-md transition-all duration-200 border cursor-pointer ${
+                isActive
+                  ? "bg-signal-live/15 border-signal-live/40 text-signal-live"
+                  : "bg-ink-soft/5 border-transparent text-ink-label hover:bg-ink-soft/10 hover:text-ink-strong"
+              }`}
+            >
+              {label}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => {
+            setSearch("");
+            setActiveTab("all");
+            const container = document.getElementById("cheatsheet-scroll-container");
+            if (container) {
+              container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+            }
+          }}
+          className="px-3 py-1 text-xxs font-semibold uppercase tracking-caps rounded-md bg-ink-soft/5 hover:bg-ink-soft/10 border border-transparent text-ink-label hover:text-ink-strong transition-all cursor-pointer ml-auto"
+        >
+          🧠 grammar
+        </button>
+      </div>
+
+      {/* Main scrollable body */}
+      <div
+        id="cheatsheet-scroll-container"
+        className="flex-1 overflow-y-auto pr-1 pb-4 scrollbar-thin"
+      >
+        {search.trim() !== "" ? (
+          /* Search results layout */
+          <div className="flex flex-col gap-2">
+            <div className="text-xxs uppercase tracking-caps text-ink-label border-b border-line-faint pb-1.5">
+              found {filteredCommands.length} command{filteredCommands.length !== 1 && "s"} matching &quot;{search}&quot;
+            </div>
+            
+            {filteredCommands.length > 0 ? (
+              <div className="grid grid-cols-2 gap-2">
+                {filteredCommands.map((cmd) => (
+                  <div
+                    key={`${cmd.category}-${cmd.key}`}
+                    onClick={() => handleKeySelect(cmd.key)}
+                    className="flex items-center justify-between border border-line-faint hover:border-signal-live/30 bg-ink-soft/5 hover:bg-ink-soft/10 p-2.5 rounded-lg transition-all duration-150 group cursor-pointer"
+                  >
+                    <div className="flex flex-col gap-0.5 truncate pr-2">
+                      <span className="text-[11px] font-semibold text-ink-strong group-hover:text-signal-live transition-colors">
+                        {cmd.desc}
+                      </span>
+                      <span className="text-[9px] uppercase tracking-caps text-ink-faint font-mono">
+                        {cmd.category.replace("_", " & ")} {cmd.subcategory ? `· ${cmd.subcategory}` : ""}
+                      </span>
+                    </div>
+                    <CommandBadge cmd={cmd.key} />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-xs text-ink-muted text-center py-10 bg-ink-soft/5 rounded-lg border border-line-faint/5">
+                No matching Neovim commands found. Try searching for &quot;yank&quot;, &quot;delete&quot;, &quot;insert&quot;, or specific keys.
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Two-column standard layout */
+          <div className="grid grid-cols-12 gap-4 items-start">
+            
+            {/* Left Column: Command grids (takes 7 columns) */}
+            <div className="col-span-7 flex flex-col gap-4">
+              {Object.entries(groupedCommands).map(([subcategory, cmds]) => (
+                <div key={subcategory} className="flex flex-col gap-2">
+                  <div className="text-xxs font-bold uppercase tracking-caps text-ink-label border-b border-line-faint/10 pb-1 mb-1">
+                    {subcategory}
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    {cmds.map((cmd) => (
+                      <div
+                        key={cmd.key}
+                        className="flex items-center justify-between py-1 px-1.5 hover:bg-ink-soft/5 rounded transition-all duration-100 group"
+                      >
+                        <span className="text-xs text-ink-strong font-medium pr-3 line-clamp-2">
+                          {cmd.desc}
+                        </span>
+                        <CommandBadge cmd={cmd.key} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Right Column: Interactive helpers (takes 5 columns) */}
+            <div className="col-span-5 flex flex-col gap-4 sticky top-0">
+              <DirectionalCompass onKeySelect={handleKeySelect} />
+              <VimGrammarCard />
+            </div>
+
+          </div>
+        )}
+      </div>
+
+    </div>
+  );
+}

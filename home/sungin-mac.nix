@@ -13,11 +13,10 @@ in
   # Mac client terminal config (WezTerm)
   xdg.configFile."wezterm".source = link "config/wezterm";
 
-  # baby-menu config & extension layout symlinks
+  # baby-menu config & full extensions directory symlinks
   home.file.".baby-menu/agents.json".source = link "config/baby-menu/agents.json";
   home.file.".baby-menu/preferences.json".source = link "config/baby-menu/preferences.json";
-  home.file.".baby-menu/extensions/layout.tsx".source = link "config/baby-menu/extensions/layout.tsx";
-  home.file.".baby-menu/extensions/arknode-load/components.tsx".source = link "config/baby-menu/extensions/arknode-load/components.tsx";
+  home.file.".baby-menu/extensions".source = link "config/baby-menu/extensions";
 
   home.sessionPath = [
     "$HOME/.bun/bin"
