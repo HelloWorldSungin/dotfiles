@@ -70,6 +70,8 @@ command -v opencode >/dev/null 2>&1 || curl -fsSL https://opencode.ai/install | 
 # PATH we actually use instead.
 [ -x "$HOME/.opencode/bin/opencode" ] && ln -sf "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode"
 command -v pi >/dev/null 2>&1 || npm install -g @mariozechner/pi-coding-agent
+command -v agy >/dev/null 2>&1 || curl -fsSL https://antigravity.google/cli/install.sh | bash
+command -v cursor-agent >/dev/null 2>&1 || curl https://cursor.com/install -fsS | bash
 
 step "6/6 agent toolchain (Kun Chen stack)"
 command -v treehouse >/dev/null 2>&1 || curl -fsSL https://kunchenguid.github.io/treehouse/install.sh | sh
