@@ -184,6 +184,13 @@ in
       user = "git";
       identityFile = "~/.ssh/id_ed25519";
     };
+    # LOQ dev/agent host (ark-dev-server). The sungin@ct110 pubkey is
+    # registered in root's authorized_keys on LOQ. Reach it with `ssh loq`.
+    matchBlocks."loq" = {
+      hostname = "192.168.68.83";
+      user = "root";
+      identityFile = "~/.ssh/id_ed25519";
+    };
   };
 
   # ------------------------------------------------------------------ git
