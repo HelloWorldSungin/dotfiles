@@ -67,7 +67,7 @@ in
 
   home.sessionPath = [
     "$HOME/.npm-global/bin"
-    "$HOME/.local/bin" # herdr and claude install here
+    "$HOME/.local/bin" # official CLI installers use this prefix
   ];
 
   # ---------------------------------------------------------------- neovim

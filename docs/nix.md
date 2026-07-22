@@ -59,7 +59,7 @@ home-manager generations # list previous environments...
 
 ## Why harness CLIs are NOT in Nix
 
-claude/codex/opencode self-update and release weekly; nixpkgs versions lag.
-They're installed by `bootstrap.sh` via their official installers into
-user-writable prefixes (`~/.local/bin`, `~/.npm-global/bin`). The *decision*
-is still recorded in the repo - the script is the manifest.
+Fast-moving agent harness CLIs self-update and release frequently; nixpkgs
+versions lag. They're installed by `bootstrap.sh` via their official
+installers into user-writable prefixes (`~/.local/bin`, `~/.npm-global/bin`).
+The *decision* is still recorded in the repo - the script is the manifest.
