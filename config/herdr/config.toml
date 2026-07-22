@@ -18,5 +18,5 @@ agent_panel_sort = "spaces"
 remote_image_paste = "ctrl+shift+v"
 
 # Custom split pane shortcuts (prefix Ctrl+b, then key)
-split_vertical = "v"
-split_horizontal = "-"
+split_vertical = "prefix+v"
+split_horizontal = "prefix+-"
