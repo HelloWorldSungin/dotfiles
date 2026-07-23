@@ -3,6 +3,10 @@
 
 vim.g.mapleader = " " -- leader = space; every custom keybind hangs off this
 
+-- Disable netrw in favor of oil.nvim
+vim.g.loaded_netrw = 1
+vim.g.loaded_netrwPlugin = 1
+
 vim.opt.expandtab = true   -- tabs become spaces
 vim.opt.shiftwidth = 2     -- one indent level = 2 spaces
 vim.opt.tabstop = 2

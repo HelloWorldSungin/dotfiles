@@ -20,11 +20,11 @@ return {
     },
   },
   {
-    -- Oil: the file tree as an editable buffer. Edit the listing like text
-    -- (dd a line = delete the file, yy+p = copy it), then :w applies the
-    -- changes to the real file system.
+    -- Oil: the file tree as an editable buffer. Replaces netrw for directory browsing.
     "stevearc/oil.nvim",
+    lazy = false,
     opts = {
+      default_file_explorer = true,
       view_options = { show_hidden = true },
     },
     keys = {
