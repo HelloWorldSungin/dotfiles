@@ -386,6 +386,29 @@ test_firstmate_skips_when_not_ff() {
   pass "firstmate refuses anything that is not a clean fast-forward on the default branch"
 }
 
+test_firstmate_reverifies_remote_default_branch() {
+  local base json before after seed remote
+  base="$TMP_ROOT/default-branch-changed"
+  TEST_REPO=$(make_git_world default-branch-changed-git)
+  configure_fixture "$base"
+  write_detection update_available trunk 1 up_to_date '[]'
+  seed="$TMP_ROOT/default-branch-changed-git/seed"
+  remote="$TMP_ROOT/default-branch-changed-git/origin.git"
+  git -C "$seed" branch main
+  git -C "$seed" push -q "file://$remote" main
+  git --git-dir="$remote" symbolic-ref HEAD refs/heads/main
+  before=$(git_head)
+
+  json=$(run_apply --json) || fail "changed remote default returned non-zero"
+  [ "$(printf '%s' "$json" | jq -r '.tiers.firstmate.status')" = skipped ] \
+    || fail "firstmate applied the checker-reported branch after the remote default changed"
+  assert_contains "$(printf '%s' "$json" | jq -r '.tiers.firstmate.detail')" "origin default branch" \
+    "changed remote default skip reason was not explained"
+  after=$(git_head)
+  [ "$before" = "$after" ] || fail "firstmate moved HEAD on a branch that is no longer the remote default"
+  pass "firstmate re-verifies the remote default branch before applying"
+}
+
 test_packaged_help_starts_with_description() {
   local base packaged first
   base="$TMP_ROOT/packaged-help"
@@ -416,4 +439,5 @@ test_late_worker_defers_pending_mutations
 test_dry_run_applies_nothing
 test_idempotent_rerun
 test_firstmate_skips_when_not_ff
+test_firstmate_reverifies_remote_default_branch
 test_packaged_help_starts_with_description

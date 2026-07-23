@@ -202,7 +202,7 @@ run_detection() {
 
 # Firstmate fast-forward tier ----------------------------------------------
 apply_firstmate() {
-  local detection=$1 status branch current behind ref_behind fetch_out merge_out extra
+  local detection=$1 status branch current behind ref_behind remote_head_out remote_default fetch_out merge_out extra
   status=$(printf '%s' "$detection" | jq -r '.sources.firstmate.status // "unknown"')
   branch=$(printf '%s' "$detection" | jq -r '.sources.firstmate.default_branch // ""')
 
@@ -243,6 +243,26 @@ apply_firstmate() {
       return
     fi
   else
+    if ! remote_head_out=$(run_timed "$NETWORK_TIMEOUT" env GIT_TERMINAL_PROMPT=0 \
+      "$GIT_BIN" -C "$FIRSTMATE_PATH" ls-remote --symref origin HEAD 2>&1); then
+      tier_json skipped "origin default branch re-verification failed or timed out${remote_head_out:+: $remote_head_out}" \
+        "$(jq -cn --arg b "$branch" '{default_branch:$b}')"
+      return
+    fi
+    remote_default=$(printf '%s\n' "$remote_head_out" |
+      sed -n 's|^ref: refs/heads/\([^[:space:]]*\)[[:space:]]*HEAD$|\1|p' |
+      sed -n '1p')
+    if [ -z "$remote_default" ]; then
+      tier_json skipped "origin default branch could not be resolved during re-verification" \
+        "$(jq -cn --arg b "$branch" '{default_branch:$b}')"
+      return
+    fi
+    if [ "$remote_default" != "$branch" ]; then
+      tier_json skipped "detected default branch '$branch' no longer matches origin default branch '$remote_default'" \
+        "$(jq -cn --arg b "$branch" --arg r "$remote_default" \
+          '{default_branch:$b,remote_default_branch:$r}')"
+      return
+    fi
     if ! fetch_out=$(run_timed "$NETWORK_TIMEOUT" env GIT_TERMINAL_PROMPT=0 "$GIT_BIN" -C "$FIRSTMATE_PATH" fetch --quiet origin "$branch" 2>&1); then
       tier_json skipped "git fetch failed or timed out${fetch_out:+: $fetch_out}" \
         "$(jq -cn --arg b "$branch" '{default_branch:$b}')"
