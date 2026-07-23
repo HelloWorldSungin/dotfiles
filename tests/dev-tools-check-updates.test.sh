@@ -2,8 +2,8 @@
 # Self-contained behavior tests for bin/dev-tools-check-updates.
 #
 # Every publication source is deterministic. Firstmate fetches from a local
-# file:// bare repository, while npm, curl, treehouse, and no-mistakes are
-# injected executables. The health check receives a fake environment reader.
+# file:// bare repository, while npm, curl, treehouse, no-mistakes, and herdr
+# are injected executables. The health check receives a fake environment reader.
 # No test contacts the network or depends on the real login environment.
 set -u
 

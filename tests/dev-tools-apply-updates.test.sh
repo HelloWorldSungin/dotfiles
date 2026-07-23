@@ -121,7 +121,7 @@ SH
 #   $3 firstmate behind
 #   $4 npm status (update_available|up_to_date|unknown)
 #   $5 npm packages JSON array
-#   $6 (optional) herdr status (update_available|up_to_date|unknown) — default
+#   $6 (optional) herdr status (update_available|up_to_date|unknown) - default
 #       update_available so a hostile or stale detection cannot accidentally
 #       look like an honored herdr update.
 write_detection() {
