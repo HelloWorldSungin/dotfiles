@@ -82,6 +82,13 @@ if [ -n "${TEST_CREATE_LANE_DURING_DETECTION:-}" ]; then
 fi
 cat "$FAKE_CHECKER_JSON"
 SH
+  cat > "$fakebin/herdr-fixture" <<'SH'
+#!/usr/bin/env bash
+# herdr is report-only: apply-updates MUST NEVER invoke it. If this fixture
+# ever runs, the test gate has been breached and we fail loud.
+printf 'herdr invoked: %s\n' "$*" >> "$TEST_HERDR_INVOCATION_LOG"
+exit 127
+SH
   cat > "$fakebin/git-fixture" <<'SH'
 #!/usr/bin/env bash
 is_fetch=0
@@ -114,16 +121,27 @@ SH
 #   $3 firstmate behind
 #   $4 npm status (update_available|up_to_date|unknown)
 #   $5 npm packages JSON array
+#   $6 (optional) herdr status (update_available|up_to_date|unknown) - default
+#       update_available so a hostile or stale detection cannot accidentally
+#       look like an honored herdr update.
 write_detection() {
+  local herdr_status=${6:-update_available} herdr_current herdr_latest
+  case "$herdr_status" in
+    update_available) herdr_current=0.7.4; herdr_latest=v0.7.5 ;;
+    up_to_date)       herdr_current=0.7.5; herdr_latest=v0.7.5 ;;
+    *)                herdr_current=unknown; herdr_latest=unknown ;;
+  esac
   jq -cn \
     --arg fm_status "$1" --arg branch "$2" --argjson behind "$3" \
-    --arg npm_status "$4" --argjson packages "$5" '
+    --arg npm_status "$4" --argjson packages "$5" \
+    --arg herdr_status "$herdr_status" --arg herdr_current "$herdr_current" --arg herdr_latest "$herdr_latest" '
     {schema_version:1,
      sources:{
        firstmate:{status:$fm_status,default_branch:$branch,behind:$behind},
        npm_global:{status:$npm_status,packages:$packages},
        treehouse:{status:"up_to_date"},
        no_mistakes:{status:"up_to_date"},
+       herdr:{status:$herdr_status,current:$herdr_current,latest:$herdr_latest},
        nix_pinned:{status:"excluded"}}}' > "$FAKE_CHECKER_JSON"
   jq '.sources.npm_global.packages | map({key:.name,value:.latest}) | from_entries' \
     "$FAKE_CHECKER_JSON" > "$TEST_NPM_LATEST_JSON"
@@ -138,6 +156,7 @@ run_apply() {
     DEV_TOOLS_UPDATE_GIT_BIN="$TEST_GIT_BIN" \
     DEV_TOOLS_UPDATE_NPM_BIN="$TEST_FAKEBIN/npm-fixture" \
     DEV_TOOLS_UPDATE_NPM_PREFIX="$TEST_NPM_PREFIX" \
+    DEV_TOOLS_UPDATE_HERDR_BIN="$TEST_FAKEBIN/herdr-fixture" \
     "$APPLY" "$@"
 }
 
@@ -151,16 +170,18 @@ configure_fixture() {
   FAKE_CHECKER_JSON="$base/detection.json"
   TEST_NPM_LOG="$base/npm.log"
   TEST_NPM_LATEST_JSON="$base/npm-latest.json"
+  TEST_HERDR_INVOCATION_LOG="$base/herdr.log"
   TEST_REAL_GIT=$(command -v git)
   TEST_GIT_BIN=$TEST_REAL_GIT
   TEST_SWITCH_BRANCH_AFTER_FETCH=
   TEST_SWITCH_BRANCH_MARKER="$base/switched-branch"
   : > "$TEST_NPM_LOG"
+  : > "$TEST_HERDR_INVOCATION_LOG"
   printf '{}\n' > "$TEST_NPM_LATEST_JSON"
   TEST_NPM_RC=0
   TEST_CREATE_LANE_DURING_DETECTION=
   TEST_CREATE_LANE_AFTER_NPM_INSTALL=
-  export FAKE_CHECKER_JSON TEST_NPM_LOG TEST_NPM_LATEST_JSON TEST_NPM_RC
+  export FAKE_CHECKER_JSON TEST_NPM_LOG TEST_NPM_LATEST_JSON TEST_HERDR_INVOCATION_LOG TEST_NPM_RC
   export TEST_CREATE_LANE_DURING_DETECTION TEST_CREATE_LANE_AFTER_NPM_INSTALL
   export TEST_REAL_GIT TEST_GIT_BIN TEST_SWITCH_BRANCH_AFTER_FETCH TEST_SWITCH_BRANCH_MARKER
 }
@@ -476,6 +497,46 @@ test_packaged_help_starts_with_description() {
   pass "packaged help starts with the command description"
 }
 
+test_herdr_is_never_applied() {
+  # Belt-and-braces: even when the checker reports herdr as update_available,
+  # this tool MUST NOT touch herdr - it is a report-only tier. The herdr
+  # fixture binary fails loudly if invoked (exit 127 + a log line), so any
+  # accidental invocation during apply-updates would surface here.
+  local base json contract
+  base="$TMP_ROOT/herdr-never"
+  TEST_REPO=$(make_git_world herdr-never-git)
+  configure_fixture "$base"
+  write_detection update_available trunk 1 up_to_date '[]'
+
+  json=$(run_apply --json) || fail "apply returned non-zero on a clean non-herdr update"
+  [ -s "$TEST_HERDR_INVOCATION_LOG" ] && fail "herdr binary was invoked: $(cat "$TEST_HERDR_INVOCATION_LOG")"
+  if printf '%s' "$json" | jq -e '.tiers.herdr' >/dev/null 2>&1; then
+    fail "apply output should not contain a herdr tier"
+  fi
+  if printf '%s' "$json" | jq -e '.. | objects | select(has("herdr"))' >/dev/null 2>&1; then
+    fail "apply output should not reference herdr anywhere"
+  fi
+
+  # And dry-run should still not invoke herdr.
+  write_detection update_available trunk 1 update_available \
+    '[{"name":"quota-axi","current":"0.1.6","latest":"0.1.9"}]'
+  : > "$TEST_HERDR_INVOCATION_LOG"
+  json=$(run_apply --dry-run --json) || fail "dry-run returned non-zero"
+  [ -s "$TEST_HERDR_INVOCATION_LOG" ] && fail "herdr binary was invoked during dry-run: $(cat "$TEST_HERDR_INVOCATION_LOG")"
+  if printf '%s' "$json" | jq -e '.tiers.herdr' >/dev/null 2>&1; then
+    fail "dry-run output should not contain a herdr tier"
+  fi
+
+  # The contract itself must call out the report-only nature so an operator
+  # reading --help cannot miss it.
+  contract=$(sed -n '2,/^set -u$/s/^# \{0,1\}//p' "$APPLY")
+  assert_contains "$contract" "REPORT ONLY" "apply --help did not call out herdr as report-only"
+  assert_contains "$contract" "MUST NEVER restart" "apply --help did not forbid restarting herdr"
+  assert_contains "$contract" "herdr update" "apply --help did not direct operators to herdr's own installer"
+
+  pass "herdr is never invoked, applied, or surfaced as a tier by apply-updates"
+}
+
 export GIT_AUTHOR_NAME=dev-tools-test
 export GIT_AUTHOR_EMAIL=dev-tools-test@example.invalid
 export GIT_COMMITTER_NAME=dev-tools-test
@@ -492,3 +553,4 @@ test_firstmate_skips_when_not_ff
 test_firstmate_reverifies_remote_default_branch
 test_firstmate_rechecks_current_branch_before_merge
 test_packaged_help_starts_with_description
+test_herdr_is_never_applied

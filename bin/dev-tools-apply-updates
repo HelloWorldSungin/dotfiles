@@ -4,8 +4,8 @@
 # Companion to dev-tools-check-updates. The checker only reports; this tool
 # applies, but only the two tiers whose update is a mechanically safe, reversible
 # advance, and only when no Firstmate worker is active. It never applies the
-# GitHub-release binaries (treehouse, no-mistakes) and never touches nix-pinned
-# packages: those stay reported-only in the checker.
+# GitHub-release binaries (treehouse, no-mistakes, herdr) and never touches
+# nix-pinned packages: those stay reported-only in the checker.
 #
 # Safe tiers (the only things this tool will ever apply):
 #   firstmate   Fast-forward the configured Firstmate repository's default branch
@@ -21,6 +21,17 @@
 #
 # Deliberate exclusions (reported by the checker, never applied here):
 #   treehouse, no-mistakes   GitHub-release binaries. Left reported-only.
+#   herdr                    GitHub-release binary AND a live session provider for
+#                            the firstmate fleet. herdr version bumps have
+#                            historically shipped breaking keybinding/protocol
+#                            changes (e.g. composer interaction was broken by
+#                            0.7.4), which can disrupt in-flight workers. herdr
+#                            is therefore REPORT ONLY: the checker surfaces it,
+#                            the captain decides when to apply it manually with
+#                            `herdr update` (herdr's own installer handles the
+#                            stop/restart dance). This tool MUST NEVER restart
+#                            herdr, install a new herdr release, or touch the
+#                            herdr binary on disk.
 #   nix-pinned               tea, ghdl, git, and friends are controlled by this
 #                            dotfiles repo's flake lock. Never touched.
 #
