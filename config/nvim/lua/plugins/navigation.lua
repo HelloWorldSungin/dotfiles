@@ -9,7 +9,7 @@ return {
     lazy = false,
     opts = {
       picker = { enabled = true },
-      notifier = { enabled = true },
+      notifier = { enabled = false }, -- Disabled for Neovim 0.9.5 compatibility
       input = { enabled = true },
     },
     keys = {
