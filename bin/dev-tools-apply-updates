@@ -37,8 +37,9 @@
 #   DEV_TOOLS_FIRSTMATE_STATE_DIR overrides the directory (default
 #   $DEV_TOOLS_FIRSTMATE_PATH/state). The guard is presence-based and clock-free:
 #   a spawned lane blocks whether or not its harness is mid-turn, because the
-#   worktree it holds is what a fast-forward could disrupt. When in doubt it
-#   defers - deferral is always non-destructive.
+#   worktree it holds is what a fast-forward could disrupt. It is checked before
+#   detection and re-evaluated immediately before every merge or install. When in
+#   doubt it defers - deferral is always non-destructive.
 #
 # Safety properties:
 #   - Each tier applies independently; a skip or failure in one never blocks the
@@ -261,6 +262,11 @@ apply_firstmate() {
     tier_json would_apply "would fast-forward '$branch' by $behind commit(s) to origin/$branch" "$extra"
     return
   fi
+  detect_workers
+  if [ "$WG_STATUS" = active ]; then
+    tier_json deferred "workers active" "$extra"
+    return
+  fi
   if merge_out=$(run_timed "$APPLY_TIMEOUT" env GIT_TERMINAL_PROMPT=0 "$GIT_BIN" -C "$FIRSTMATE_PATH" merge --ff-only "refs/remotes/origin/$branch" 2>&1); then
     tier_json applied "fast-forwarded '$branch' by $behind commit(s) to origin/$branch" "$extra"
   else
@@ -317,6 +323,22 @@ apply_npm() {
       results=$(printf '%s' "$results" | jq -c --arg n "$name" --arg c "$current" --arg l "$latest" \
         '. + [{name:$n,current:$c,latest:$l,status:"would_apply"}]')
     else
+      detect_workers
+      if [ "$WG_STATUS" = active ]; then
+        results=$(jq -cn \
+          --argjson results "$results" \
+          --argjson allowed "$allowed" \
+          --argjson start "$i" '
+          $results + ($allowed[$start:] | map({
+            name:.name,
+            current:(.current // "unknown"),
+            latest:(if (.latest | type) == "string" then .latest else "" end),
+            status:"deferred",
+            detail:"workers active"
+          }))
+        ')
+        break
+      fi
       if run_timed "$APPLY_TIMEOUT" env NPM_CONFIG_UPDATE_NOTIFIER=false "$NPM_BIN" --prefix "$NPM_PREFIX" install -g "$name@$latest" >/dev/null 2>&1; then
         results=$(printf '%s' "$results" | jq -c --arg n "$name" --arg c "$current" --arg l "$latest" \
           '. + [{name:$n,current:$c,latest:$l,status:"applied"}]')
@@ -330,8 +352,9 @@ apply_npm() {
     i=$((i + 1))
   done
 
-  local applied failed would n_detail overall
+  local applied deferred failed would n_detail overall
   applied=$(printf '%s' "$results" | jq '[.[] | select(.status=="applied")] | length')
+  deferred=$(printf '%s' "$results" | jq '[.[] | select(.status=="deferred")] | length')
   failed=$(printf '%s' "$results" | jq '[.[] | select(.status=="failed")] | length')
   would=$(printf '%s' "$results" | jq '[.[] | select(.status=="would_apply")] | length')
   n_detail=$(printf '%s' "$results" | jq -r '
@@ -339,12 +362,12 @@ apply_npm() {
       + (if .detail then " (" + .detail + ")" else "" end)]
     | join(", ")
   ')
-  if [ "$would" -gt 0 ]; then
+  if [ "$failed" -gt 0 ]; then
+    overall=failed
+  elif [ "$deferred" -gt 0 ]; then
+    overall=deferred
+  elif [ "$would" -gt 0 ]; then
     overall=would_apply
-  elif [ "$failed" -gt 0 ] && [ "$applied" -gt 0 ]; then
-    overall=failed
-  elif [ "$failed" -gt 0 ]; then
-    overall=failed
   elif [ "$applied" -gt 0 ]; then
     overall=applied
   else

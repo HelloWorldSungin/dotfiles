@@ -59,15 +59,21 @@ make_git_world() {
 make_fixture_tools() {
   local base=$1 fakebin="$1/fakebin"
   mkdir -p "$fakebin"
-  cat > "$fakebin/checker-fixture" <<'SH'
-#!/usr/bin/env bash
-# Ignores --json/--force; emits the prepared detection object.
-cat "$FAKE_CHECKER_JSON"
-SH
   cat > "$fakebin/npm-fixture" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$TEST_NPM_LOG"
+if [ -n "${TEST_CREATE_LANE_AFTER_NPM_INSTALL:-}" ] && [ ! -e "$TEST_CREATE_LANE_AFTER_NPM_INSTALL" ]; then
+  printf 'worktree=/somewhere\n' > "$TEST_CREATE_LANE_AFTER_NPM_INSTALL"
+fi
 exit "${TEST_NPM_RC:-0}"
+SH
+  cat > "$fakebin/checker-fixture" <<'SH'
+#!/usr/bin/env bash
+# Ignores --json/--force; emits the prepared detection object.
+if [ -n "${TEST_CREATE_LANE_DURING_DETECTION:-}" ]; then
+  printf 'worktree=/somewhere\n' > "$TEST_CREATE_LANE_DURING_DETECTION"
+fi
+cat "$FAKE_CHECKER_JSON"
 SH
   chmod +x "$fakebin"/*
   printf '%s\n' "$fakebin"
@@ -115,7 +121,10 @@ configure_fixture() {
   TEST_NPM_LOG="$base/npm.log"
   : > "$TEST_NPM_LOG"
   TEST_NPM_RC=0
+  TEST_CREATE_LANE_DURING_DETECTION=
+  TEST_CREATE_LANE_AFTER_NPM_INSTALL=
   export FAKE_CHECKER_JSON TEST_NPM_LOG TEST_NPM_RC
+  export TEST_CREATE_LANE_DURING_DETECTION TEST_CREATE_LANE_AFTER_NPM_INSTALL
 }
 
 git_head() {
@@ -221,6 +230,46 @@ test_worker_active_defers() {
   pass "an active worker defers every tier without mutating anything"
 }
 
+test_late_worker_defers_pending_mutations() {
+  local base json before after
+  base="$TMP_ROOT/late-before-merge"
+  TEST_REPO=$(make_git_world late-before-merge-git)
+  configure_fixture "$base"
+  write_detection update_available trunk 1 up_to_date '[]'
+  TEST_CREATE_LANE_DURING_DETECTION="$TEST_STATE_DIR/late.meta"
+  export TEST_CREATE_LANE_DURING_DETECTION
+  before=$(git_head)
+
+  json=$(run_apply --json) || fail "late worker before merge returned non-zero"
+  [ "$(printf '%s' "$json" | jq -r '.worker_guard.status')" = clear ] \
+    || fail "the up-front worker guard did not run before detection"
+  [ "$(printf '%s' "$json" | jq -r '.tiers.firstmate.status')" = deferred ] \
+    || fail "a worker appearing before merge did not defer firstmate"
+  assert_contains "$(printf '%s' "$json" | jq -r '.tiers.firstmate.detail')" "workers active" \
+    "late firstmate deferral did not explain the active worker"
+  after=$(git_head)
+  [ "$before" = "$after" ] || fail "firstmate merged after a late worker appeared"
+
+  base="$TMP_ROOT/late-between-installs"
+  TEST_REPO=$(make_git_world late-between-installs-git)
+  configure_fixture "$base"
+  write_detection up_to_date trunk 0 update_available \
+    '[{"name":"chrome-devtools-axi","current":"1.0.0","latest":"1.1.0"},{"name":"gh-axi","current":"1.0.0","latest":"1.1.0"},{"name":"tasks-axi","current":"1.0.0","latest":"1.1.0"}]'
+  TEST_CREATE_LANE_AFTER_NPM_INSTALL="$TEST_STATE_DIR/late.meta"
+  export TEST_CREATE_LANE_AFTER_NPM_INSTALL
+
+  json=$(run_apply --json) || fail "late worker between npm installs returned non-zero"
+  [ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.status')" = deferred ] \
+    || fail "late worker did not defer the npm tier"
+  [ "$(printf '%s' "$json" | jq '[.tiers.npm_global.packages[] | select(.status == "applied")] | length')" -eq 1 ] \
+    || fail "npm did not preserve the one install completed before the worker appeared"
+  [ "$(printf '%s' "$json" | jq '[.tiers.npm_global.packages[] | select(.status == "deferred" and .detail == "workers active")] | length')" -eq 2 ] \
+    || fail "npm did not defer every install pending after the worker appeared"
+  [ "$(wc -l < "$TEST_NPM_LOG")" -eq 1 ] \
+    || fail "npm continued installing after the worker appeared"
+  pass "workers appearing after detection defer every pending mutation"
+}
+
 test_dry_run_applies_nothing() {
   local base json before after before_ref after_ref seed
   base="$TMP_ROOT/dryrun"
@@ -312,6 +361,7 @@ test_safe_tier_apply
 test_allowlist_is_never_widened
 test_unsafe_npm_versions_are_skipped
 test_worker_active_defers
+test_late_worker_defers_pending_mutations
 test_dry_run_applies_nothing
 test_idempotent_rerun
 test_firstmate_skips_when_not_ff
