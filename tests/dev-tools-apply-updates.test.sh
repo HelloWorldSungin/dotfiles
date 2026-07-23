@@ -62,6 +62,13 @@ make_fixture_tools() {
   cat > "$fakebin/npm-fixture" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$TEST_NPM_LOG"
+if [ "${3:-}" = view ]; then
+  name=${4%@latest}
+  latest=$(jq -r --arg name "$name" '.[$name] // empty' "$TEST_NPM_LATEST_JSON")
+  [ -n "$latest" ] || exit 1
+  jq -cn --arg latest "$latest" '$latest'
+  exit 0
+fi
 if [ -n "${TEST_CREATE_LANE_AFTER_NPM_INSTALL:-}" ] && [ ! -e "$TEST_CREATE_LANE_AFTER_NPM_INSTALL" ]; then
   printf 'worktree=/somewhere\n' > "$TEST_CREATE_LANE_AFTER_NPM_INSTALL"
 fi
@@ -96,6 +103,8 @@ write_detection() {
        treehouse:{status:"up_to_date"},
        no_mistakes:{status:"up_to_date"},
        nix_pinned:{status:"excluded"}}}' > "$FAKE_CHECKER_JSON"
+  jq '.sources.npm_global.packages | map({key:.name,value:.latest}) | from_entries' \
+    "$FAKE_CHECKER_JSON" > "$TEST_NPM_LATEST_JSON"
 }
 
 run_apply() {
@@ -119,11 +128,13 @@ configure_fixture() {
   mkdir -p "$TEST_HOME" "$TEST_STATE_DIR" "$TEST_NPM_PREFIX"
   FAKE_CHECKER_JSON="$base/detection.json"
   TEST_NPM_LOG="$base/npm.log"
+  TEST_NPM_LATEST_JSON="$base/npm-latest.json"
   : > "$TEST_NPM_LOG"
+  printf '{}\n' > "$TEST_NPM_LATEST_JSON"
   TEST_NPM_RC=0
   TEST_CREATE_LANE_DURING_DETECTION=
   TEST_CREATE_LANE_AFTER_NPM_INSTALL=
-  export FAKE_CHECKER_JSON TEST_NPM_LOG TEST_NPM_RC
+  export FAKE_CHECKER_JSON TEST_NPM_LOG TEST_NPM_LATEST_JSON TEST_NPM_RC
   export TEST_CREATE_LANE_DURING_DETECTION TEST_CREATE_LANE_AFTER_NPM_INSTALL
 }
 
@@ -176,6 +187,28 @@ test_allowlist_is_never_widened() {
     || fail "the allowlisted package was not the one applied"
   assert_not_contains "$(cat "$TEST_NPM_LOG")" "codex" "a non-allowlisted package was installed"
   pass "npm apply is confined to the allowlist and never widens it"
+}
+
+test_npm_latest_is_reverified_before_install() {
+  local base json npm_log
+  base="$TMP_ROOT/npm-reverify"
+  TEST_REPO=$(make_git_world npm-reverify-git)
+  configure_fixture "$base"
+  write_detection up_to_date trunk 0 update_available \
+    '[{"name":"quota-axi","current":"1.0.0","latest":"1.1.0"}]'
+  printf '{"quota-axi":"1.2.0"}\n' > "$TEST_NPM_LATEST_JSON"
+
+  json=$(run_apply --json) || fail "npm source re-verification returned non-zero"
+  npm_log=$(cat "$TEST_NPM_LOG")
+  assert_contains "$npm_log" "view quota-axi@latest version --json" \
+    "npm latest was not re-verified against the registry"
+  assert_contains "$npm_log" "install -g quota-axi@1.2.0" \
+    "npm did not install the re-verified latest version"
+  assert_not_contains "$npm_log" "install -g quota-axi@1.1.0" \
+    "npm installed the stale checker-reported version"
+  [ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[0].latest')" = 1.2.0 ] \
+    || fail "npm result did not report the re-verified latest version"
+  pass "npm latest is re-verified against the registry before install"
 }
 
 test_unsafe_npm_versions_are_skipped() {
@@ -265,7 +298,7 @@ test_late_worker_defers_pending_mutations() {
     || fail "npm did not preserve the one install completed before the worker appeared"
   [ "$(printf '%s' "$json" | jq '[.tiers.npm_global.packages[] | select(.status == "deferred" and .detail == "workers active")] | length')" -eq 2 ] \
     || fail "npm did not defer every install pending after the worker appeared"
-  [ "$(wc -l < "$TEST_NPM_LOG")" -eq 1 ] \
+  [ "$(grep -c ' install -g ' "$TEST_NPM_LOG")" -eq 1 ] \
     || fail "npm continued installing after the worker appeared"
   pass "workers appearing after detection defer every pending mutation"
 }
@@ -353,15 +386,34 @@ test_firstmate_skips_when_not_ff() {
   pass "firstmate refuses anything that is not a clean fast-forward on the default branch"
 }
 
+test_packaged_help_starts_with_description() {
+  local base packaged first
+  base="$TMP_ROOT/packaged-help"
+  packaged="$base/dev-tools-apply-updates"
+  mkdir -p "$base"
+  {
+    printf '#!/usr/bin/env bash\n'
+    cat "$APPLY"
+  } > "$packaged"
+  chmod +x "$packaged"
+
+  first=$("$packaged" --help | sed -n '1p')
+  [ "$first" = "dev-tools-apply-updates - guarded, opt-in auto-apply for the safe update tiers." ] \
+    || fail "packaged help started with '$first'"
+  pass "packaged help starts with the command description"
+}
+
 export GIT_AUTHOR_NAME=dev-tools-test
 export GIT_AUTHOR_EMAIL=dev-tools-test@example.invalid
 export GIT_COMMITTER_NAME=dev-tools-test
 export GIT_COMMITTER_EMAIL=dev-tools-test@example.invalid
 test_safe_tier_apply
 test_allowlist_is_never_widened
+test_npm_latest_is_reverified_before_install
 test_unsafe_npm_versions_are_skipped
 test_worker_active_defers
 test_late_worker_defers_pending_mutations
 test_dry_run_applies_nothing
 test_idempotent_rerun
 test_firstmate_skips_when_not_ff
+test_packaged_help_starts_with_description

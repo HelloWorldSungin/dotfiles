@@ -110,7 +110,11 @@ APPLY_TIMEOUT=${DEV_TOOLS_APPLY_TIMEOUT_SECONDS:-120}
 ALLOWLIST_NPM_JSON='["chrome-devtools-axi","gh-axi","gnhf","lavish-axi","quota-axi","tasks-axi"]'
 
 usage() {
-  sed -n '2,/^set -u$/s/^# \{0,1\}//p' "$0"
+  sed -n '/^# dev-tools-apply-updates - /,/^set -u$/ {
+    /^set -u$/d
+    s/^# \{0,1\}//
+    p
+  }' "$0"
 }
 
 MODE=human
@@ -276,7 +280,7 @@ apply_firstmate() {
 
 # npm-global tier -----------------------------------------------------------
 apply_npm() {
-  local detection=$1 status allowed count results pkg name latest current rc extra
+  local detection=$1 status allowed count results pkg name latest latest_out current rc extra
   status=$(printf '%s' "$detection" | jq -r '.sources.npm_global.status // "unknown"')
 
   if [ "$status" = unknown ]; then
@@ -323,6 +327,20 @@ apply_npm() {
       results=$(printf '%s' "$results" | jq -c --arg n "$name" --arg c "$current" --arg l "$latest" \
         '. + [{name:$n,current:$c,latest:$l,status:"would_apply"}]')
     else
+      if ! latest_out=$(run_timed "$NETWORK_TIMEOUT" env NPM_CONFIG_UPDATE_NOTIFIER=false \
+        "$NPM_BIN" --prefix "$NPM_PREFIX" view "$name@latest" version --json 2>/dev/null); then
+        results=$(printf '%s' "$results" | jq -c --arg n "$name" --arg c "$current" --arg l "$latest" \
+          '. + [{name:$n,current:$c,latest:$l,status:"skipped",detail:"npm latest re-verification failed"}]')
+        i=$((i + 1))
+        continue
+      fi
+      latest=$(printf '%s' "$latest_out" | jq -er 'select(type == "string")' 2>/dev/null || true)
+      if [[ ! "$latest" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
+        results=$(printf '%s' "$results" | jq -c --arg n "$name" --arg c "$current" --arg l "$latest" \
+          '. + [{name:$n,current:$c,latest:$l,status:"skipped",detail:"unsafe registry version"}]')
+        i=$((i + 1))
+        continue
+      fi
       detect_workers
       if [ "$WG_STATUS" = active ]; then
         results=$(jq -cn \
