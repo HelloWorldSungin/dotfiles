@@ -364,7 +364,7 @@ test_dry_run_applies_nothing() {
 }
 
 test_idempotent_rerun() {
-  local base first second calls_after
+  local base first second
   base="$TMP_ROOT/idempotent"
   TEST_REPO=$(make_git_world idempotent-git)
   configure_fixture "$base"
