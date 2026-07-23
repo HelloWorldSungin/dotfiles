@@ -82,6 +82,28 @@ if [ -n "${TEST_CREATE_LANE_DURING_DETECTION:-}" ]; then
 fi
 cat "$FAKE_CHECKER_JSON"
 SH
+  cat > "$fakebin/git-fixture" <<'SH'
+#!/usr/bin/env bash
+is_fetch=0
+repo=
+previous=
+for arg in "$@"; do
+  if [ "$previous" = -C ]; then
+    repo=$arg
+  fi
+  [ "$arg" = fetch ] && is_fetch=1
+  previous=$arg
+done
+"$TEST_REAL_GIT" "$@"
+rc=$?
+if [ "$rc" -eq 0 ] && [ "$is_fetch" -eq 1 ] &&
+   [ -n "${TEST_SWITCH_BRANCH_AFTER_FETCH:-}" ] &&
+   [ ! -e "$TEST_SWITCH_BRANCH_MARKER" ]; then
+  : > "$TEST_SWITCH_BRANCH_MARKER"
+  "$TEST_REAL_GIT" -C "$repo" checkout -q -b "$TEST_SWITCH_BRANCH_AFTER_FETCH"
+fi
+exit "$rc"
+SH
   chmod +x "$fakebin"/*
   printf '%s\n' "$fakebin"
 }
@@ -113,7 +135,7 @@ run_apply() {
     DEV_TOOLS_FIRSTMATE_PATH="$TEST_REPO" \
     DEV_TOOLS_FIRSTMATE_STATE_DIR="$TEST_STATE_DIR" \
     DEV_TOOLS_APPLY_CHECKER_BIN="$TEST_FAKEBIN/checker-fixture" \
-    DEV_TOOLS_UPDATE_GIT_BIN="$(command -v git)" \
+    DEV_TOOLS_UPDATE_GIT_BIN="$TEST_GIT_BIN" \
     DEV_TOOLS_UPDATE_NPM_BIN="$TEST_FAKEBIN/npm-fixture" \
     DEV_TOOLS_UPDATE_NPM_PREFIX="$TEST_NPM_PREFIX" \
     "$APPLY" "$@"
@@ -129,6 +151,10 @@ configure_fixture() {
   FAKE_CHECKER_JSON="$base/detection.json"
   TEST_NPM_LOG="$base/npm.log"
   TEST_NPM_LATEST_JSON="$base/npm-latest.json"
+  TEST_REAL_GIT=$(command -v git)
+  TEST_GIT_BIN=$TEST_REAL_GIT
+  TEST_SWITCH_BRANCH_AFTER_FETCH=
+  TEST_SWITCH_BRANCH_MARKER="$base/switched-branch"
   : > "$TEST_NPM_LOG"
   printf '{}\n' > "$TEST_NPM_LATEST_JSON"
   TEST_NPM_RC=0
@@ -136,6 +162,7 @@ configure_fixture() {
   TEST_CREATE_LANE_AFTER_NPM_INSTALL=
   export FAKE_CHECKER_JSON TEST_NPM_LOG TEST_NPM_LATEST_JSON TEST_NPM_RC
   export TEST_CREATE_LANE_DURING_DETECTION TEST_CREATE_LANE_AFTER_NPM_INSTALL
+  export TEST_REAL_GIT TEST_GIT_BIN TEST_SWITCH_BRANCH_AFTER_FETCH TEST_SWITCH_BRANCH_MARKER
 }
 
 git_head() {
@@ -409,6 +436,29 @@ test_firstmate_reverifies_remote_default_branch() {
   pass "firstmate re-verifies the remote default branch before applying"
 }
 
+test_firstmate_rechecks_current_branch_before_merge() {
+  local base json trunk_before trunk_after other_after
+  base="$TMP_ROOT/current-branch-changed"
+  TEST_REPO=$(make_git_world current-branch-changed-git)
+  configure_fixture "$base"
+  write_detection update_available trunk 1 up_to_date '[]'
+  TEST_GIT_BIN="$TEST_FAKEBIN/git-fixture"
+  TEST_SWITCH_BRANCH_AFTER_FETCH=other
+  export TEST_GIT_BIN TEST_SWITCH_BRANCH_AFTER_FETCH
+  trunk_before=$(git -C "$TEST_REPO" rev-parse refs/heads/trunk)
+
+  json=$(run_apply --json) || fail "changed current branch returned non-zero"
+  [ "$(printf '%s' "$json" | jq -r '.tiers.firstmate.status')" = skipped ] \
+    || fail "firstmate applied after HEAD changed away from the default branch"
+  assert_contains "$(printf '%s' "$json" | jq -r '.tiers.firstmate.detail')" "not the default branch" \
+    "changed current branch skip reason was not explained"
+  trunk_after=$(git -C "$TEST_REPO" rev-parse refs/heads/trunk)
+  other_after=$(git -C "$TEST_REPO" rev-parse refs/heads/other)
+  [ "$trunk_before" = "$trunk_after" ] || fail "the default branch moved after HEAD changed away from it"
+  [ "$trunk_before" = "$other_after" ] || fail "the replacement branch was fast-forwarded to origin/trunk"
+  pass "firstmate rechecks the current branch immediately before merge"
+}
+
 test_packaged_help_starts_with_description() {
   local base packaged first
   base="$TMP_ROOT/packaged-help"
@@ -440,4 +490,5 @@ test_dry_run_applies_nothing
 test_idempotent_rerun
 test_firstmate_skips_when_not_ff
 test_firstmate_reverifies_remote_default_branch
+test_firstmate_rechecks_current_branch_before_merge
 test_packaged_help_starts_with_description

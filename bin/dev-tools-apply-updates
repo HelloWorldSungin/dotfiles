@@ -291,6 +291,16 @@ apply_firstmate() {
     tier_json deferred "workers active" "$extra"
     return
   fi
+  current=$($GIT_BIN -C "$FIRSTMATE_PATH" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+  if [ -z "$current" ]; then
+    tier_json skipped "HEAD is detached; only the default branch is fast-forwarded" "$extra"
+    return
+  fi
+  if [ "$current" != "$branch" ]; then
+    tier_json skipped "on '$current', not the default branch '$branch'" \
+      "$(printf '%s' "$extra" | jq -c --arg c "$current" '. + {current_branch:$c}')"
+    return
+  fi
   if merge_out=$(run_timed "$APPLY_TIMEOUT" env GIT_TERMINAL_PROMPT=0 "$GIT_BIN" -C "$FIRSTMATE_PATH" merge --ff-only "refs/remotes/origin/$branch" 2>&1); then
     tier_json applied "fast-forwarded '$branch' by $behind commit(s) to origin/$branch" "$extra"
   else
