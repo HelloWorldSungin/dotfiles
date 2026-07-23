@@ -1,6 +1,10 @@
 -- Neovim 0.9.5 Compatibility Layer
 vim.uv = vim.uv or vim.loop
 
+-- Block legacy/system aerial plugin from throwing < 0.10 deprecation error
+package.loaded["aerial"] = { setup = function() end }
+package.loaded["aerial.config"] = { setup = function() end }
+
 -- Polyfill vim.fs.joinpath (introduced in Neovim 0.10)
 if vim.fs and not vim.fs.joinpath then
   vim.fs.joinpath = function(...)
