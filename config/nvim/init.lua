@@ -1,17 +1,6 @@
 -- Neovim 0.9.5 Compatibility Layer
 vim.uv = vim.uv or vim.loop
 
--- Polyfill vim.islist (introduced in Neovim 0.10, was vim.tbl_islist in 0.9)
-vim.islist = vim.islist or vim.tbl_islist or function(t)
-  if type(t) ~= "table" then return false end
-  local i = 1
-  for k in pairs(t) do
-    if t[i] == nil then return false end
-    i = i + 1
-  end
-  return true
-end
-
 -- Block legacy/system aerial plugin from throwing < 0.10 deprecation error
 package.loaded["aerial"] = { setup = function() end }
 package.loaded["aerial.config"] = { setup = function() end }
