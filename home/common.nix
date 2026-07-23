@@ -85,8 +85,9 @@ in
     syntaxHighlighting.enable = true;
     history.size = 50000;
     initContent = ''
-      # ctrl-f accepts the ghost-text suggestion
+      # Accept ghost-text autosuggestions with Ctrl-F or Ctrl-A
       bindkey '^f' autosuggest-accept
+      bindkey '^a' autosuggest-accept
 
       # Source local uncommitted secrets / custom overrides if present
       if [[ -f "$HOME/.zshrc.local" ]]; then

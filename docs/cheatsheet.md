@@ -112,7 +112,7 @@ Config: [`home/common.nix`](../home/common.nix) & [`home/sungin-mac.nix`](../hom
 
 | Shortcut | Action | Description |
 | :--- | :--- | :--- |
-| `Ctrl` + `f` | Accept Suggestion | Accepts autosuggested ghost text |
+| `Ctrl` + `a` / `Ctrl` + `f` | Accept Suggestion | Accepts autosuggested ghost text |
 | `Ctrl` + `r` | History Search | Interactive fzf command history search |
 | `Ctrl` + `t` | Pick File | Interactive fzf file picker |
 | `Alt` + `c` | Pick Directory | Interactive fzf directory picker & `cd` |
