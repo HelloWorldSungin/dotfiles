@@ -1,16 +1,23 @@
--- Markdown rendering: pretty-view markdown files in Neovim instead of
--- staring at raw markup. Treesitter is mandatory per the plugin's docs;
--- the icon provider is optional (we skip it - nvim-web-devicons isn't
--- installed and adding it just for the optional language icon isn't worth
--- the dependency).
+-- Markdown rendering and Treesitter parsing
 return {
   {
-    "MeanderingProgrammer/render-markdown.nvim",
-    dependencies = {
-      "nvim-treesitter/nvim-treesitter",
+    -- Treesitter: mandatory for render-markdown and syntax highlighting.
+    "nvim-treesitter/nvim-treesitter",
+    build = ":TSUpdate",
+    lazy = false,
+    opts = {
+      ensure_installed = { "markdown", "markdown_inline", "lua", "vim", "bash", "json", "yaml" },
+      highlight = { enable = true },
     },
-    -- Defaults are fine: render in normal/command/terminal modes on the
-    -- 'markdown' filetype, modal toggle between rendered and raw.
+    config = function(_, opts)
+      require("nvim-treesitter.configs").setup(opts)
+    end,
+  },
+  {
+    -- Render Markdown: pretty-view markdown files in Neovim instead of raw text.
+    "MeanderingProgrammer/render-markdown.nvim",
+    ft = { "markdown" },
+    dependencies = { "nvim-treesitter/nvim-treesitter" },
     opts = {},
   },
 }

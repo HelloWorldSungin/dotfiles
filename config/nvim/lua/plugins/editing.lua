@@ -5,7 +5,7 @@ return {
     -- Press Ctrl-N on a word to select it and spawn cursors on subsequent matches.
     -- Press Ctrl-Shift-Down / Ctrl-Shift-Up to add cursors directly above or below.
     "mg979/vim-visual-multi",
-    event = "BufReadPost",
+    lazy = false,
     init = function()
       vim.g.VM_theme = "nord"
       vim.g.VM_maps = {
