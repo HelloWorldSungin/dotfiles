@@ -247,9 +247,16 @@ test_cache_ttl_force_and_silent_startup() {
   write_release "$TEST_FAKE_TREEHOUSE_RELEASE_JSON" v2.1.0
   write_release "$TEST_FAKE_NO_MISTAKES_RELEASE_JSON" v1.40.0
   write_release "$TEST_FAKE_HERDR_RELEASE_JSON" v0.7.4
+  printf '%s\n' '{"schema_version":1,"checked_at_epoch":3000,"cache_ttl_seconds":10,"sources":{"firstmate":{"status":"up_to_date"},"npm_global":{"status":"up_to_date","packages":[]},"treehouse":{"status":"up_to_date"},"no_mistakes":{"status":"up_to_date"},"nix_pinned":{"status":"excluded"}}}' \
+    > "$TEST_HOME/cache.json"
 
   first=$(run_checker 3000 --json)
+  [ -e "$TEST_FAKE_CALL_LOG" ] || fail "pre-herdr schema v1 cache was accepted"
   calls_first=$(wc -l < "$TEST_FAKE_CALL_LOG" | tr -d ' ')
+  [ "$(jq -r '.schema_version' "$TEST_HOME/cache.json")" = 2 ] \
+    || fail "fresh cache did not use schema version 2"
+  [ "$(jq -r '.sources.herdr | type' "$TEST_HOME/cache.json")" = object ] \
+    || fail "fresh schema v2 cache omitted herdr"
   printf '{"quota-axi":{"current":"0.1.6","latest":"0.1.10"}}\n' > "$TEST_FAKE_NPM_JSON"
   write_release "$TEST_FAKE_TREEHOUSE_RELEASE_JSON" v2.2.0
   second=$(run_checker 3009 --json)

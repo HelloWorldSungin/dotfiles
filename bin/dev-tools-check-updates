@@ -44,8 +44,8 @@
 #
 # Output modes:
 #   default     Five human-readable source summaries.
-#   --json      One JSON object with schema_version=1. May be combined with
-#               --health for a machine-readable health result.
+#   --json      One JSON object. Update checks use schema_version=2; --health
+#               uses schema_version=1. May be combined with --health.
 #   --health    Report chrome-devtools-axi headless flag health and exit.
 #   --startup   Read only the update cache, run the local health check, never
 #               use the network, and print only updates or non-healthy wiring.
@@ -67,6 +67,7 @@ FIRSTMATE_PATH=${DEV_TOOLS_FIRSTMATE_PATH:-${HOME:-.}/firstmate}
 CACHE_HOME=${XDG_CACHE_HOME:-${HOME:-.}/.cache}
 CACHE_PATH=${DEV_TOOLS_UPDATE_CACHE_PATH:-$CACHE_HOME/dev-tools-update-checker/cache.json}
 CACHE_TTL=${DEV_TOOLS_UPDATE_CACHE_TTL_SECONDS:-14400}
+CACHE_SCHEMA_VERSION=2
 NETWORK_TIMEOUT=${DEV_TOOLS_UPDATE_NETWORK_TIMEOUT_SECONDS:-15}
 GIT_BIN=${DEV_TOOLS_UPDATE_GIT_BIN:-git}
 NPM_BIN=${DEV_TOOLS_UPDATE_NPM_BIN:-npm}
@@ -302,7 +303,8 @@ check_release_tool() {
 
 cache_is_valid() {
   [ -f "$CACHE_PATH" ] || return 1
-  jq -e '.schema_version == 1 and (.checked_at_epoch | type == "number") and (.sources | type == "object")' \
+  jq -e --argjson schema_version "$CACHE_SCHEMA_VERSION" \
+    '.schema_version == $schema_version and (.checked_at_epoch | type == "number") and (.sources | type == "object")' \
     "$CACHE_PATH" >/dev/null 2>&1
 }
 
@@ -407,7 +409,7 @@ if ! command -v jq >/dev/null 2>&1; then
   case "$MODE" in
     startup) printf '%s\n' 'dev-tools: chrome-devtools headless flags unknown - jq unavailable' ;;
     json)
-      printf '{"schema_version":1,"checked_at_epoch":%s,"cache_ttl_seconds":%s,"sources":{"firstmate":{"status":"unknown","detail":"jq unavailable"},"npm_global":{"status":"unknown","detail":"jq unavailable"},"treehouse":{"status":"unknown","detail":"jq unavailable"},"no_mistakes":{"status":"unknown","detail":"jq unavailable"},"herdr":{"status":"unknown","detail":"jq unavailable"},"nix_pinned":{"status":"excluded","detail":"nix-pinned tools are intentionally not tracked here"}}}\n' "$NOW" "$CACHE_TTL"
+      printf '{"schema_version":%s,"checked_at_epoch":%s,"cache_ttl_seconds":%s,"sources":{"firstmate":{"status":"unknown","detail":"jq unavailable"},"npm_global":{"status":"unknown","detail":"jq unavailable"},"treehouse":{"status":"unknown","detail":"jq unavailable"},"no_mistakes":{"status":"unknown","detail":"jq unavailable"},"herdr":{"status":"unknown","detail":"jq unavailable"},"nix_pinned":{"status":"excluded","detail":"nix-pinned tools are intentionally not tracked here"}}}\n' "$CACHE_SCHEMA_VERSION" "$NOW" "$CACHE_TTL"
       ;;
     *)
       printf '%s\n' 'firstmate: unknown (jq unavailable)' 'npm-global: unknown (jq unavailable)' \
@@ -449,6 +451,7 @@ else
   HERDR=$(check_release_tool herdr "$HERDR_BIN" HERDR_NO_UPDATE_CHECK "$HERDR_RELEASE_URL")
   NIX_PINNED=$(jq -cn '{status:"excluded",detail:"nix-pinned tools are intentionally not tracked here"}')
   RESULT=$(jq -cn \
+    --argjson schema_version "$CACHE_SCHEMA_VERSION" \
     --argjson checked_at_epoch "$NOW" \
     --argjson cache_ttl_seconds "$CACHE_TTL" \
     --argjson firstmate "$FIRSTMATE" \
@@ -457,7 +460,7 @@ else
     --argjson no_mistakes "$NO_MISTAKES" \
     --argjson herdr "$HERDR" \
     --argjson nix_pinned "$NIX_PINNED" \
-    '{schema_version:1,checked_at_epoch:$checked_at_epoch,cache_ttl_seconds:$cache_ttl_seconds,sources:{firstmate:$firstmate,npm_global:$npm_global,treehouse:$treehouse,no_mistakes:$no_mistakes,herdr:$herdr,nix_pinned:$nix_pinned}}')
+    '{schema_version:$schema_version,checked_at_epoch:$checked_at_epoch,cache_ttl_seconds:$cache_ttl_seconds,sources:{firstmate:$firstmate,npm_global:$npm_global,treehouse:$treehouse,no_mistakes:$no_mistakes,herdr:$herdr,nix_pinned:$nix_pinned}}')
   write_cache
 fi
 
