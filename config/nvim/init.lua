@@ -5,6 +5,15 @@ vim.uv = vim.uv or vim.loop
 package.loaded["aerial"] = { setup = function() end }
 package.loaded["aerial.config"] = { setup = function() end }
 
+-- Shim vim.fn.has for Neovim 0.10 version checks in modern plugins (like oil.nvim)
+local orig_has = vim.fn.has
+vim.fn.has = function(item)
+  if item == "nvim-0.10" or item == "nvim-0.10.0" or item == "nvim-0.11" then
+    return 1
+  end
+  return orig_has(item)
+end
+
 -- Polyfill vim.fs.joinpath (introduced in Neovim 0.10)
 if vim.fs and not vim.fs.joinpath then
   vim.fs.joinpath = function(...)
