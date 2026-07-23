@@ -46,19 +46,22 @@
 #   - Re-running when already current is a clean no-op (idempotent): detection
 #     reports up-to-date and nothing is applied, and even a redundant npm install
 #     pins the already-installed version.
-#   - Deferral, skip, and dry-run never mutate anything.
+#   - Detection performs a bounded, non-destructive origin fetch and cache refresh.
+#   - Deferral and skip perform no apply-side writes. Dry-run applies nothing and
+#     performs no apply-side writes after detection.
 #   - Every network/command step is bounded (see the timeout knobs below).
 #
 # Detection is delegated to dev-tools-check-updates (--json --force) so the
-# allowlist and source-detection are defined in exactly one place. The apply
-# steps re-verify against git/npm directly, which are the source of truth at
-# apply time.
+# allowlist and source-detection are defined in exactly one place. Forced
+# detection refreshes the git/npm source-of-truth before apply. The apply steps
+# then validate current git refs and exact npm versions before mutating them.
 #
 # Output modes:
 #   default     Worker-guard line plus one applied/skipped/deferred/failed line
 #               per safe tier.
 #   --json      One JSON object with schema_version=1.
-#   --dry-run   Show exactly what would be applied without applying anything.
+#   --dry-run   Show exactly what would be applied. Detection still performs its
+#               bounded origin fetch and cache refresh; no apply-side writes occur.
 #     -n        Alias for --dry-run.
 #   --help, -h  Print this contract.
 #
@@ -194,7 +197,7 @@ run_detection() {
 
 # Firstmate fast-forward tier ----------------------------------------------
 apply_firstmate() {
-  local detection=$1 status branch current behind fetch_out merge_out extra
+  local detection=$1 status branch current behind ref_behind fetch_out merge_out extra
   status=$(printf '%s' "$detection" | jq -r '.sources.firstmate.status // "unknown"')
   branch=$(printf '%s' "$detection" | jq -r '.sources.firstmate.default_branch // ""')
 
@@ -223,15 +226,27 @@ apply_firstmate() {
     return
   fi
 
-  # Re-fetch so the fast-forward decision uses fresh origin refs.
-  if ! fetch_out=$(run_timed "$NETWORK_TIMEOUT" env GIT_TERMINAL_PROMPT=0 "$GIT_BIN" -C "$FIRSTMATE_PATH" fetch --quiet origin "$branch" 2>&1); then
-    tier_json skipped "git fetch failed or timed out${fetch_out:+: $fetch_out}" \
-      "$(jq -cn --arg b "$branch" '{default_branch:$b}')"
-    return
+  if [ "$DRY_RUN" -eq 1 ]; then
+    behind=$(printf '%s' "$detection" | jq -r '.sources.firstmate.behind // ""')
+    ref_behind=$($GIT_BIN -C "$FIRSTMATE_PATH" rev-list --count "HEAD..refs/remotes/origin/$branch" 2>/dev/null || true)
+    case "$behind" in ''|*[!0-9]*) tier_json skipped "detected behind count is unavailable"; return ;; esac
+    case "$ref_behind" in ''|*[!0-9]*) tier_json skipped "origin/$branch could not be compared"; return ;; esac
+    if [ "$behind" -ne "$ref_behind" ]; then
+      tier_json skipped "detection and current origin/$branch ref disagree" \
+        "$(jq -cn --arg b "$branch" --argjson behind "$behind" --argjson ref_behind "$ref_behind" \
+          '{default_branch:$b,behind:$behind,ref_behind:$ref_behind}')"
+      return
+    fi
+  else
+    if ! fetch_out=$(run_timed "$NETWORK_TIMEOUT" env GIT_TERMINAL_PROMPT=0 "$GIT_BIN" -C "$FIRSTMATE_PATH" fetch --quiet origin "$branch" 2>&1); then
+      tier_json skipped "git fetch failed or timed out${fetch_out:+: $fetch_out}" \
+        "$(jq -cn --arg b "$branch" '{default_branch:$b}')"
+      return
+    fi
+    behind=$($GIT_BIN -C "$FIRSTMATE_PATH" rev-list --count "HEAD..refs/remotes/origin/$branch" 2>/dev/null || true)
+    case "$behind" in ''|*[!0-9]*) tier_json skipped "origin/$branch could not be compared"; return ;; esac
   fi
 
-  behind=$($GIT_BIN -C "$FIRSTMATE_PATH" rev-list --count "HEAD..refs/remotes/origin/$branch" 2>/dev/null || true)
-  case "$behind" in ''|*[!0-9]*) tier_json skipped "origin/$branch could not be compared"; return ;; esac
   extra=$(jq -cn --arg b "$branch" --argjson behind "$behind" '{default_branch:$b,behind:$behind}')
 
   if [ "$behind" -eq 0 ]; then
@@ -290,8 +305,14 @@ apply_npm() {
   while [ "$i" -lt "$count" ]; do
     pkg=$(printf '%s' "$allowed" | jq -c ".[$i]")
     name=$(printf '%s' "$pkg" | jq -r '.name')
-    latest=$(printf '%s' "$pkg" | jq -r '.latest // "latest"')
+    latest=$(printf '%s' "$pkg" | jq -r 'if (.latest | type) == "string" then .latest else "" end')
     current=$(printf '%s' "$pkg" | jq -r '.current // "unknown"')
+    if [[ ! "$latest" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
+      results=$(printf '%s' "$results" | jq -c --arg n "$name" --arg c "$current" --arg l "$latest" \
+        '. + [{name:$n,current:$c,latest:$l,status:"skipped",detail:"unsafe version spec"}]')
+      i=$((i + 1))
+      continue
+    fi
     if [ "$DRY_RUN" -eq 1 ]; then
       results=$(printf '%s' "$results" | jq -c --arg n "$name" --arg c "$current" --arg l "$latest" \
         '. + [{name:$n,current:$c,latest:$l,status:"would_apply"}]')
@@ -313,15 +334,21 @@ apply_npm() {
   applied=$(printf '%s' "$results" | jq '[.[] | select(.status=="applied")] | length')
   failed=$(printf '%s' "$results" | jq '[.[] | select(.status=="failed")] | length')
   would=$(printf '%s' "$results" | jq '[.[] | select(.status=="would_apply")] | length')
-  n_detail=$(printf '%s' "$results" | jq -r '[.[] | .name + " " + .current + " -> " + .latest] | join(", ")')
+  n_detail=$(printf '%s' "$results" | jq -r '
+    [.[] | .name + " " + .current + " -> " + .latest
+      + (if .detail then " (" + .detail + ")" else "" end)]
+    | join(", ")
+  ')
   if [ "$would" -gt 0 ]; then
     overall=would_apply
   elif [ "$failed" -gt 0 ] && [ "$applied" -gt 0 ]; then
     overall=failed
   elif [ "$failed" -gt 0 ]; then
     overall=failed
-  else
+  elif [ "$applied" -gt 0 ]; then
     overall=applied
+  else
+    overall=skipped
   fi
   extra=$(jq -cn --argjson allow "$ALLOWLIST_NPM_JSON" --argjson packages "$results" \
     '{allowlist:$allow,packages:$packages}')

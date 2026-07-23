@@ -169,6 +169,29 @@ test_allowlist_is_never_widened() {
   pass "npm apply is confined to the allowlist and never widens it"
 }
 
+test_unsafe_npm_versions_are_skipped() {
+  local base json npm_log
+  base="$TMP_ROOT/unsafe-versions"
+  TEST_REPO=$(make_git_world unsafe-versions-git)
+  configure_fixture "$base"
+  write_detection up_to_date trunk 0 update_available \
+    '[{"name":"chrome-devtools-axi","current":"1.0.0"},{"name":"gh-axi","current":"1.0.0","latest":"latest"},{"name":"gnhf","current":"1.0.0","latest":"1.2.3@npm:other"},{"name":"lavish-axi","current":"1.0.0","latest":"scope/pkg"},{"name":"quota-axi","current":"1.0.0","latest":"v1.2.3-beta.1"}]'
+
+  json=$(run_apply --json) || fail "unsafe npm version specs returned non-zero"
+  [ "$(printf '%s' "$json" | jq '[.tiers.npm_global.packages[] | select(.status == "skipped" and .detail == "unsafe version spec")] | length')" -eq 4 ] \
+    || fail "unsafe npm version specs were not all recorded as skipped"
+  [ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name == "quota-axi") | .status')" = applied ] \
+    || fail "a valid concrete npm version was not applied"
+  npm_log=$(cat "$TEST_NPM_LOG")
+  assert_contains "$npm_log" "install -g quota-axi@v1.2.3-beta.1" \
+    "the valid concrete npm version was not pinned"
+  assert_not_contains "$npm_log" "chrome-devtools-axi" "a missing npm version was installed"
+  assert_not_contains "$npm_log" "gh-axi" "the npm latest tag was installed"
+  assert_not_contains "$npm_log" "gnhf" "an npm alias version spec was installed"
+  assert_not_contains "$npm_log" "lavish-axi" "an npm path version spec was installed"
+  pass "npm apply skips every unsafe version spec and continues safely"
+}
+
 test_worker_active_defers() {
   local base json human before after
   base="$TMP_ROOT/deferred"
@@ -199,10 +222,16 @@ test_worker_active_defers() {
 }
 
 test_dry_run_applies_nothing() {
-  local base json before after
+  local base json before after before_ref after_ref seed
   base="$TMP_ROOT/dryrun"
   TEST_REPO=$(make_git_world dryrun-git)
   configure_fixture "$base"
+  git -C "$TEST_REPO" fetch -q origin trunk
+  before_ref=$(git -C "$TEST_REPO" rev-parse refs/remotes/origin/trunk)
+  seed="$TMP_ROOT/dryrun-git/seed"
+  printf 'three\n' >> "$seed/version.txt"
+  git -C "$seed" commit -qam three
+  git -C "$seed" push -q "file://$TMP_ROOT/dryrun-git/origin.git" trunk
   write_detection update_available trunk 1 update_available \
     '[{"name":"gh-axi","current":"1.0.0","latest":"1.1.0"}]'
   before=$(git_head)
@@ -217,10 +246,12 @@ test_dry_run_applies_nothing() {
   [ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[0].status')" = would_apply ] \
     || fail "dry-run did not preview the npm install"
   after=$(git_head)
+  after_ref=$(git -C "$TEST_REPO" rev-parse refs/remotes/origin/trunk)
   [ "$before" = "$after" ] || fail "dry-run moved firstmate HEAD"
+  [ "$before_ref" = "$after_ref" ] || fail "dry-run fetched and moved the origin tracking ref"
   [ ! -s "$TEST_NPM_LOG" ] || fail "dry-run ran an npm install"
   assert_contains "$(run_apply --dry-run)" "[dry-run]" "human dry-run lost its prefix"
-  pass "dry-run previews both tiers without applying or mutating anything"
+  pass "dry-run previews both tiers without apply-side writes"
 }
 
 test_idempotent_rerun() {
@@ -279,6 +310,7 @@ export GIT_COMMITTER_NAME=dev-tools-test
 export GIT_COMMITTER_EMAIL=dev-tools-test@example.invalid
 test_safe_tier_apply
 test_allowlist_is_never_widened
+test_unsafe_npm_versions_are_skipped
 test_worker_active_defers
 test_dry_run_applies_nothing
 test_idempotent_rerun
