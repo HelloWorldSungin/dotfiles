@@ -1,0 +1,479 @@
+#!/usr/bin/env bash
+# dev-tools-apply-updates - guarded, opt-in auto-apply for the safe update tiers.
+#
+# Companion to dev-tools-check-updates. The checker only reports; this tool
+# applies, but only the two tiers whose update is a mechanically safe, reversible
+# advance, and only when no Firstmate worker is active. It never applies the
+# GitHub-release binaries (treehouse, no-mistakes) and never touches nix-pinned
+# packages: those stay reported-only in the checker.
+#
+# Safe tiers (the only things this tool will ever apply):
+#   firstmate   Fast-forward the configured Firstmate repository's default branch
+#               to origin. Fast-forward ONLY - never a merge commit, rebase, or
+#               force. Skipped unless HEAD is on the default branch and origin is
+#               a strict descendant (a clean fast-forward). git merge --ff-only is
+#               the hard guard; a non-fast-forward is refused, never forced.
+#   npm-global  Reinstall the exact allowlisted axi tools the checker tracks
+#               (chrome-devtools-axi, gh-axi, gnhf, lavish-axi, quota-axi,
+#               tasks-axi) at their published latest, under the configured global
+#               prefix. Never a blanket `npm update -g`; the allowlist is never
+#               widened, even if the checker's output somehow names another package.
+#
+# Deliberate exclusions (reported by the checker, never applied here):
+#   treehouse, no-mistakes   GitHub-release binaries. Left reported-only.
+#   nix-pinned               tea, ghdl, git, and friends are controlled by this
+#                            dotfiles repo's flake lock. Never touched.
+#
+# Worker guard:
+#   A Firstmate fast-forward while a crewmate holds an in-flight worktree can
+#   disrupt live work, so this tool refuses to apply ANY tier while a Firstmate
+#   worker is active. "Active" mirrors Firstmate's own in-flight definition
+#   (bin/fm-supervision-lib.sh): one live worker lane == one state/<id>.meta file
+#   (created at spawn, removed only at teardown). The signal:
+#     - state directory absent            -> no Firstmate orchestration -> clear.
+#     - one or more state/*.meta present  -> workers active -> defer every tier.
+#     - state directory present but not    -> liveness cannot be determined ->
+#       readable                             conservatively treated as active.
+#   DEV_TOOLS_FIRSTMATE_STATE_DIR overrides the directory (default
+#   $DEV_TOOLS_FIRSTMATE_PATH/state). The guard is presence-based and clock-free:
+#   a spawned lane blocks whether or not its harness is mid-turn, because the
+#   worktree it holds is what a fast-forward could disrupt. It is checked before
+#   detection and re-evaluated immediately before every merge or install. When in
+#   doubt it defers - deferral is always non-destructive.
+#
+# Safety properties:
+#   - Each tier applies independently; a skip or failure in one never blocks the
+#     other.
+#   - Re-running when already current is a clean no-op (idempotent): detection
+#     reports up-to-date and nothing is applied, and even a redundant npm install
+#     pins the already-installed version.
+#   - Detection performs a bounded, non-destructive origin fetch and cache refresh.
+#   - Deferral and skip perform no apply-side writes. Dry-run applies nothing and
+#     performs no apply-side writes after detection.
+#   - Every network/command step is bounded (see the timeout knobs below).
+#
+# Detection is delegated to dev-tools-check-updates (--json --force) so the
+# allowlist and source-detection are defined in exactly one place. Forced
+# detection refreshes the git/npm source-of-truth before apply. The apply steps
+# then validate current git refs and exact npm versions before mutating them.
+#
+# Output modes:
+#   default     Worker-guard line plus one applied/skipped/deferred/failed line
+#               per safe tier.
+#   --json      One JSON object with schema_version=1.
+#   --dry-run   Show exactly what would be applied. Detection still performs its
+#               bounded origin fetch and cache refresh; no apply-side writes occur.
+#     -n        Alias for --dry-run.
+#   --help, -h  Print this contract.
+#
+# Exit status:
+#   0  every tier resolved cleanly (applied, up-to-date, skipped, or deferred).
+#   1  at least one tier failed while applying.
+#   2  usage error, or a hard prerequisite (jq) is missing.
+#
+# Timeouts:
+#   DEV_TOOLS_UPDATE_NETWORK_TIMEOUT_SECONDS  bounds detection + the git fetch
+#                                             (default 15, shared with checker).
+#   DEV_TOOLS_APPLY_TIMEOUT_SECONDS           bounds each apply command, e.g. the
+#                                             npm install and the ff merge
+#                                             (default 120).
+#
+# Test seams:
+#   DEV_TOOLS_APPLY_CHECKER_BIN replaces the detection checker.
+#   DEV_TOOLS_FIRSTMATE_STATE_DIR replaces the worker-state directory.
+#   DEV_TOOLS_UPDATE_GIT_BIN, DEV_TOOLS_UPDATE_NPM_BIN, DEV_TOOLS_UPDATE_NPM_PREFIX,
+#   and DEV_TOOLS_FIRSTMATE_PATH replace command paths and locations (shared with
+#   the checker's own seams).
+set -u
+
+SELF_DIR=$(cd "$(dirname "$0")" && pwd)
+FIRSTMATE_PATH=${DEV_TOOLS_FIRSTMATE_PATH:-${HOME:-.}/firstmate}
+STATE_DIR=${DEV_TOOLS_FIRSTMATE_STATE_DIR:-$FIRSTMATE_PATH/state}
+# Detection checker: explicit override wins; else the sibling in this bin/ (the
+# standalone dotfiles layout); else resolve dev-tools-check-updates from PATH (the
+# Nix-packaged layout, where each tool is its own store path).
+if [ -n "${DEV_TOOLS_APPLY_CHECKER_BIN:-}" ]; then
+  CHECKER_BIN=$DEV_TOOLS_APPLY_CHECKER_BIN
+elif [ -x "$SELF_DIR/dev-tools-check-updates" ]; then
+  CHECKER_BIN="$SELF_DIR/dev-tools-check-updates"
+else
+  CHECKER_BIN=dev-tools-check-updates
+fi
+GIT_BIN=${DEV_TOOLS_UPDATE_GIT_BIN:-git}
+NPM_BIN=${DEV_TOOLS_UPDATE_NPM_BIN:-npm}
+NPM_PREFIX=${DEV_TOOLS_UPDATE_NPM_PREFIX:-${HOME:-.}/.npm-global}
+NETWORK_TIMEOUT=${DEV_TOOLS_UPDATE_NETWORK_TIMEOUT_SECONDS:-15}
+APPLY_TIMEOUT=${DEV_TOOLS_APPLY_TIMEOUT_SECONDS:-120}
+# The apply allowlist. Identical to the checker's TRACKED_NPM set; hardcoded here
+# as defense-in-depth so a drifted or hostile checker response can never widen
+# what this tool installs.
+ALLOWLIST_NPM_JSON='["chrome-devtools-axi","gh-axi","gnhf","lavish-axi","quota-axi","tasks-axi"]'
+
+usage() {
+  sed -n '/^# dev-tools-apply-updates - /,/^set -u$/ {
+    /^set -u$/d
+    s/^# \{0,1\}//
+    p
+  }' "$0"
+}
+
+MODE=human
+DRY_RUN=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --json) MODE=json ;;
+    --dry-run|-n) DRY_RUN=1 ;;
+    --help|-h) usage; exit 0 ;;
+    *) printf 'dev-tools-apply-updates: unknown argument: %s\n' "$1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+case "$NETWORK_TIMEOUT" in ''|*[!0-9]*|0) NETWORK_TIMEOUT=15 ;; esac
+case "$APPLY_TIMEOUT" in ''|*[!0-9]*|0) APPLY_TIMEOUT=120 ;; esac
+
+if ! command -v jq >/dev/null 2>&1; then
+  printf 'dev-tools-apply-updates: jq is required\n' >&2
+  exit 2
+fi
+
+run_timed() {
+  local seconds=$1
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$seconds" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$seconds" "$@"
+  elif command -v perl >/dev/null 2>&1; then
+    perl -e 'my $t = shift; my $pid = fork; die "fork failed" unless defined $pid; if (!$pid) { setpgrp(0, 0); exec @ARGV } local $SIG{ALRM} = sub { kill "TERM", -$pid; select undef, undef, undef, 0.2; kill "KILL", -$pid; waitpid $pid, 0; exit 124 }; alarm $t; waitpid $pid, 0; exit($? >> 8)' "$seconds" "$@"
+  else
+    return 127
+  fi
+}
+
+tier_json() {
+  # tier_json <status> <detail> [extra-json-object]
+  local status=$1 detail=$2 extra=${3:-'{}'}
+  jq -cn --arg status "$status" --arg detail "$detail" --argjson extra "$extra" \
+    '{status:$status,detail:$detail} + $extra'
+}
+
+# Worker guard --------------------------------------------------------------
+# Sets WG_STATUS (clear|active), WG_IN_FLIGHT (count), WG_DETAIL.
+detect_workers() {
+  local meta count=0
+  if [ ! -e "$STATE_DIR" ]; then
+    WG_STATUS=clear
+    WG_IN_FLIGHT=0
+    WG_DETAIL="no Firstmate state directory ($STATE_DIR)"
+    return
+  fi
+  if [ ! -d "$STATE_DIR" ] || [ ! -r "$STATE_DIR" ] || [ ! -x "$STATE_DIR" ]; then
+    # Present but not enumerable: liveness cannot be determined -> conservative.
+    WG_STATUS=active
+    WG_IN_FLIGHT=-1
+    WG_DETAIL="state directory not readable; assuming workers may be active"
+    return
+  fi
+  for meta in "$STATE_DIR"/*.meta; do
+    [ -e "$meta" ] || continue
+    count=$((count + 1))
+  done
+  WG_IN_FLIGHT=$count
+  if [ "$count" -gt 0 ]; then
+    WG_STATUS=active
+    WG_DETAIL="$count in-flight worker lane(s)"
+  else
+    WG_STATUS=clear
+    WG_DETAIL="no in-flight worker lanes"
+  fi
+}
+
+# Detection -----------------------------------------------------------------
+run_detection() {
+  # Echoes the checker's JSON on success; empty on failure.
+  local out rc
+  out=$("$CHECKER_BIN" --json --force 2>/dev/null)
+  rc=$?
+  [ "$rc" -eq 0 ] || return 1
+  printf '%s' "$out" | jq -e 'type == "object" and (.sources | type == "object")' >/dev/null 2>&1 || return 1
+  printf '%s' "$out"
+}
+
+# Firstmate fast-forward tier ----------------------------------------------
+apply_firstmate() {
+  local detection=$1 status branch current behind ref_behind remote_head_out remote_default fetch_out merge_out extra
+  status=$(printf '%s' "$detection" | jq -r '.sources.firstmate.status // "unknown"')
+  branch=$(printf '%s' "$detection" | jq -r '.sources.firstmate.default_branch // ""')
+
+  if [ "$status" = unknown ]; then
+    tier_json skipped "detection unknown: $(printf '%s' "$detection" | jq -r '.sources.firstmate.detail // "unavailable"')"
+    return
+  fi
+  if ! command -v "$GIT_BIN" >/dev/null 2>&1; then
+    tier_json skipped "git unavailable"
+    return
+  fi
+  if [ -z "$branch" ]; then
+    tier_json skipped "default branch could not be resolved"
+    return
+  fi
+
+  current=$($GIT_BIN -C "$FIRSTMATE_PATH" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+  if [ -z "$current" ]; then
+    tier_json skipped "HEAD is detached; only the default branch is fast-forwarded" \
+      "$(jq -cn --arg b "$branch" '{default_branch:$b}')"
+    return
+  fi
+  if [ "$current" != "$branch" ]; then
+    tier_json skipped "on '$current', not the default branch '$branch'" \
+      "$(jq -cn --arg b "$branch" --arg c "$current" '{default_branch:$b,current_branch:$c}')"
+    return
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    behind=$(printf '%s' "$detection" | jq -r '.sources.firstmate.behind // ""')
+    ref_behind=$($GIT_BIN -C "$FIRSTMATE_PATH" rev-list --count "HEAD..refs/remotes/origin/$branch" 2>/dev/null || true)
+    case "$behind" in ''|*[!0-9]*) tier_json skipped "detected behind count is unavailable"; return ;; esac
+    case "$ref_behind" in ''|*[!0-9]*) tier_json skipped "origin/$branch could not be compared"; return ;; esac
+    if [ "$behind" -ne "$ref_behind" ]; then
+      tier_json skipped "detection and current origin/$branch ref disagree" \
+        "$(jq -cn --arg b "$branch" --argjson behind "$behind" --argjson ref_behind "$ref_behind" \
+          '{default_branch:$b,behind:$behind,ref_behind:$ref_behind}')"
+      return
+    fi
+  else
+    if ! remote_head_out=$(run_timed "$NETWORK_TIMEOUT" env GIT_TERMINAL_PROMPT=0 \
+      "$GIT_BIN" -C "$FIRSTMATE_PATH" ls-remote --symref origin HEAD 2>&1); then
+      tier_json skipped "origin default branch re-verification failed or timed out${remote_head_out:+: $remote_head_out}" \
+        "$(jq -cn --arg b "$branch" '{default_branch:$b}')"
+      return
+    fi
+    remote_default=$(printf '%s\n' "$remote_head_out" |
+      sed -n 's|^ref: refs/heads/\([^[:space:]]*\)[[:space:]]*HEAD$|\1|p' |
+      sed -n '1p')
+    if [ -z "$remote_default" ]; then
+      tier_json skipped "origin default branch could not be resolved during re-verification" \
+        "$(jq -cn --arg b "$branch" '{default_branch:$b}')"
+      return
+    fi
+    if [ "$remote_default" != "$branch" ]; then
+      tier_json skipped "detected default branch '$branch' no longer matches origin default branch '$remote_default'" \
+        "$(jq -cn --arg b "$branch" --arg r "$remote_default" \
+          '{default_branch:$b,remote_default_branch:$r}')"
+      return
+    fi
+    if ! fetch_out=$(run_timed "$NETWORK_TIMEOUT" env GIT_TERMINAL_PROMPT=0 "$GIT_BIN" -C "$FIRSTMATE_PATH" fetch --quiet origin "$branch" 2>&1); then
+      tier_json skipped "git fetch failed or timed out${fetch_out:+: $fetch_out}" \
+        "$(jq -cn --arg b "$branch" '{default_branch:$b}')"
+      return
+    fi
+    behind=$($GIT_BIN -C "$FIRSTMATE_PATH" rev-list --count "HEAD..refs/remotes/origin/$branch" 2>/dev/null || true)
+    case "$behind" in ''|*[!0-9]*) tier_json skipped "origin/$branch could not be compared"; return ;; esac
+  fi
+
+  extra=$(jq -cn --arg b "$branch" --argjson behind "$behind" '{default_branch:$b,behind:$behind}')
+
+  if [ "$behind" -eq 0 ]; then
+    tier_json up_to_date "already at origin/$branch" "$extra"
+    return
+  fi
+  if ! $GIT_BIN -C "$FIRSTMATE_PATH" merge-base --is-ancestor HEAD "refs/remotes/origin/$branch" 2>/dev/null; then
+    tier_json skipped "origin/$branch is not a clean fast-forward from HEAD" "$extra"
+    return
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    tier_json would_apply "would fast-forward '$branch' by $behind commit(s) to origin/$branch" "$extra"
+    return
+  fi
+  detect_workers
+  if [ "$WG_STATUS" = active ]; then
+    tier_json deferred "workers active" "$extra"
+    return
+  fi
+  current=$($GIT_BIN -C "$FIRSTMATE_PATH" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+  if [ -z "$current" ]; then
+    tier_json skipped "HEAD is detached; only the default branch is fast-forwarded" "$extra"
+    return
+  fi
+  if [ "$current" != "$branch" ]; then
+    tier_json skipped "on '$current', not the default branch '$branch'" \
+      "$(printf '%s' "$extra" | jq -c --arg c "$current" '. + {current_branch:$c}')"
+    return
+  fi
+  if merge_out=$(run_timed "$APPLY_TIMEOUT" env GIT_TERMINAL_PROMPT=0 "$GIT_BIN" -C "$FIRSTMATE_PATH" merge --ff-only "refs/remotes/origin/$branch" 2>&1); then
+    tier_json applied "fast-forwarded '$branch' by $behind commit(s) to origin/$branch" "$extra"
+  else
+    tier_json failed "git merge --ff-only refused or failed${merge_out:+: $merge_out}" "$extra"
+  fi
+}
+
+# npm-global tier -----------------------------------------------------------
+apply_npm() {
+  local detection=$1 status allowed count results pkg name latest latest_out current rc extra
+  status=$(printf '%s' "$detection" | jq -r '.sources.npm_global.status // "unknown"')
+
+  if [ "$status" = unknown ]; then
+    tier_json skipped "detection unknown: $(printf '%s' "$detection" | jq -r '.sources.npm_global.detail // "unavailable"')"
+    return
+  fi
+  if ! command -v "$NPM_BIN" >/dev/null 2>&1; then
+    tier_json skipped "npm unavailable"
+    return
+  fi
+  if [ -z "$NPM_PREFIX" ] || [ ! -d "$NPM_PREFIX" ]; then
+    tier_json skipped "npm prefix unavailable"
+    return
+  fi
+
+  # Intersect the checker's reported packages with our own allowlist. This is the
+  # widening guard: anything outside ALLOWLIST_NPM_JSON is dropped, never installed.
+  allowed=$(printf '%s' "$detection" | jq -c --argjson allow "$ALLOWLIST_NPM_JSON" '
+    (.sources.npm_global.packages // [])
+    | map(select(.name as $n | $allow | index($n)))
+    | sort_by(.name)
+  ')
+  count=$(printf '%s' "$allowed" | jq 'length')
+  if [ "$count" -eq 0 ]; then
+    tier_json up_to_date "no allowlisted packages need updating" \
+      "$(jq -cn --argjson allow "$ALLOWLIST_NPM_JSON" '{allowlist:$allow,packages:[]}')"
+    return
+  fi
+
+  results='[]'
+  local i=0
+  while [ "$i" -lt "$count" ]; do
+    pkg=$(printf '%s' "$allowed" | jq -c ".[$i]")
+    name=$(printf '%s' "$pkg" | jq -r '.name')
+    latest=$(printf '%s' "$pkg" | jq -r 'if (.latest | type) == "string" then .latest else "" end')
+    current=$(printf '%s' "$pkg" | jq -r '.current // "unknown"')
+    if [[ ! "$latest" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
+      results=$(printf '%s' "$results" | jq -c --arg n "$name" --arg c "$current" --arg l "$latest" \
+        '. + [{name:$n,current:$c,latest:$l,status:"skipped",detail:"unsafe version spec"}]')
+      i=$((i + 1))
+      continue
+    fi
+    if [ "$DRY_RUN" -eq 1 ]; then
+      results=$(printf '%s' "$results" | jq -c --arg n "$name" --arg c "$current" --arg l "$latest" \
+        '. + [{name:$n,current:$c,latest:$l,status:"would_apply"}]')
+    else
+      if ! latest_out=$(run_timed "$NETWORK_TIMEOUT" env NPM_CONFIG_UPDATE_NOTIFIER=false \
+        "$NPM_BIN" --prefix "$NPM_PREFIX" view "$name@latest" version --json 2>/dev/null); then
+        results=$(printf '%s' "$results" | jq -c --arg n "$name" --arg c "$current" --arg l "$latest" \
+          '. + [{name:$n,current:$c,latest:$l,status:"skipped",detail:"npm latest re-verification failed"}]')
+        i=$((i + 1))
+        continue
+      fi
+      latest=$(printf '%s' "$latest_out" | jq -er 'select(type == "string")' 2>/dev/null || true)
+      if [[ ! "$latest" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
+        results=$(printf '%s' "$results" | jq -c --arg n "$name" --arg c "$current" --arg l "$latest" \
+          '. + [{name:$n,current:$c,latest:$l,status:"skipped",detail:"unsafe registry version"}]')
+        i=$((i + 1))
+        continue
+      fi
+      detect_workers
+      if [ "$WG_STATUS" = active ]; then
+        results=$(jq -cn \
+          --argjson results "$results" \
+          --argjson allowed "$allowed" \
+          --argjson start "$i" '
+          $results + ($allowed[$start:] | map({
+            name:.name,
+            current:(.current // "unknown"),
+            latest:(if (.latest | type) == "string" then .latest else "" end),
+            status:"deferred",
+            detail:"workers active"
+          }))
+        ')
+        break
+      fi
+      if run_timed "$APPLY_TIMEOUT" env NPM_CONFIG_UPDATE_NOTIFIER=false "$NPM_BIN" --prefix "$NPM_PREFIX" install -g "$name@$latest" >/dev/null 2>&1; then
+        results=$(printf '%s' "$results" | jq -c --arg n "$name" --arg c "$current" --arg l "$latest" \
+          '. + [{name:$n,current:$c,latest:$l,status:"applied"}]')
+      else
+        rc=$?
+        results=$(printf '%s' "$results" | jq -c --arg n "$name" --arg c "$current" --arg l "$latest" \
+          --arg detail "install failed (rc=$rc)" \
+          '. + [{name:$n,current:$c,latest:$l,status:"failed",detail:$detail}]')
+      fi
+    fi
+    i=$((i + 1))
+  done
+
+  local applied deferred failed would n_detail overall
+  applied=$(printf '%s' "$results" | jq '[.[] | select(.status=="applied")] | length')
+  deferred=$(printf '%s' "$results" | jq '[.[] | select(.status=="deferred")] | length')
+  failed=$(printf '%s' "$results" | jq '[.[] | select(.status=="failed")] | length')
+  would=$(printf '%s' "$results" | jq '[.[] | select(.status=="would_apply")] | length')
+  n_detail=$(printf '%s' "$results" | jq -r '
+    [.[] | .name + " " + .current + " -> " + .latest
+      + (if .detail then " (" + .detail + ")" else "" end)]
+    | join(", ")
+  ')
+  if [ "$failed" -gt 0 ]; then
+    overall=failed
+  elif [ "$deferred" -gt 0 ]; then
+    overall=deferred
+  elif [ "$would" -gt 0 ]; then
+    overall=would_apply
+  elif [ "$applied" -gt 0 ]; then
+    overall=applied
+  else
+    overall=skipped
+  fi
+  extra=$(jq -cn --argjson allow "$ALLOWLIST_NPM_JSON" --argjson packages "$results" \
+    '{allowlist:$allow,packages:$packages}')
+  tier_json "$overall" "$n_detail" "$extra"
+}
+
+# Assemble & render ---------------------------------------------------------
+detect_workers
+
+if [ "$WG_STATUS" = active ]; then
+  DEFER=$(tier_json deferred "workers active")
+  FIRSTMATE_RESULT=$DEFER
+  NPM_RESULT=$DEFER
+else
+  DETECTION=$(run_detection || true)
+  if [ -z "$DETECTION" ]; then
+    FAIL=$(tier_json skipped "detection failed (dev-tools-check-updates unavailable)")
+    FIRSTMATE_RESULT=$FAIL
+    NPM_RESULT=$FAIL
+  else
+    FIRSTMATE_RESULT=$(apply_firstmate "$DETECTION")
+    NPM_RESULT=$(apply_npm "$DETECTION")
+  fi
+fi
+
+RESULT=$(jq -cn \
+  --argjson dry_run "$([ "$DRY_RUN" -eq 1 ] && echo true || echo false)" \
+  --arg wg_status "$WG_STATUS" \
+  --argjson wg_in_flight "$WG_IN_FLIGHT" \
+  --arg wg_detail "$WG_DETAIL" \
+  --argjson firstmate "$FIRSTMATE_RESULT" \
+  --argjson npm_global "$NPM_RESULT" \
+  '{schema_version:1,dry_run:$dry_run,
+    worker_guard:{status:$wg_status,in_flight:$wg_in_flight,detail:$wg_detail},
+    tiers:{firstmate:$firstmate,npm_global:$npm_global}}')
+
+render_human() {
+  printf '%s' "$RESULT" | jq -r '
+    def line($label; $t):
+      $label + ": " + $t.status + (if ($t.detail // "") != "" then " (" + $t.detail + ")" else "" end);
+    (if .dry_run then "[dry-run] " else "" end) as $p
+    | ($p + "worker guard: " + .worker_guard.status + " (" + .worker_guard.detail + ")"),
+      ($p + line("firstmate"; .tiers.firstmate)),
+      ($p + line("npm-global"; .tiers.npm_global))
+  '
+}
+
+case "$MODE" in
+  json) printf '%s\n' "$RESULT" | jq . ;;
+  *) render_human ;;
+esac
+
+# Exit 1 if any tier failed while applying; deferral/skip/up-to-date are clean.
+if printf '%s' "$RESULT" | jq -e '[.tiers[] | .status] | index("failed")' >/dev/null 2>&1; then
+  exit 1
+fi
+exit 0
