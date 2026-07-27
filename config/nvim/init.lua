@@ -144,4 +144,3 @@ if not _G.lazy_setup_done then
   -- Load every file in lua/plugins/ as a plugin spec.
   require("lazy").setup("plugins")
 end
-
