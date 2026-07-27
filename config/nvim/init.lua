@@ -45,30 +45,25 @@ end
 -- Shim vim.treesitter query functions for Neovim 0.9.5 compatibility (used by neogit diff_highlights)
 if vim.treesitter then
   local fallback_query = { text = "", captures = {}, info = { patterns = {} } }
-  if vim.treesitter.get_query then
-    local orig_get_query = vim.treesitter.get_query
-    vim.treesitter.get_query = function(...)
-      local res = orig_get_query(...)
-      return res or fallback_query
-    end
-  end
-  if vim.treesitter.query then
-    if vim.treesitter.query.get then
-      local orig_get = vim.treesitter.query.get
-      vim.treesitter.query.get = function(...)
+  local ts_query = rawget(vim.treesitter, "query") or vim.treesitter.query
+  if type(ts_query) == "table" then
+    if ts_query.get then
+      local orig_get = ts_query.get
+      ts_query.get = function(...)
         local res = orig_get(...)
         return res or fallback_query
       end
     end
-    if vim.treesitter.query.get_query then
-      local orig_get_q = vim.treesitter.query.get_query
-      vim.treesitter.query.get_query = function(...)
+    if ts_query.get_query then
+      local orig_get_q = ts_query.get_query
+      ts_query.get_query = function(...)
         local res = orig_get_q(...)
         return res or fallback_query
       end
     end
   end
 end
+
 
 
 -- Polyfill vim.lsp.protocol.Methods & vim.lsp.ms for Neovim 0.9.5 (used by oil.nvim LSP workspace.lua)
