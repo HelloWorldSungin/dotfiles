@@ -12,6 +12,79 @@ vim.islist = vim.islist or vim.tbl_islist or function(t)
   return true
 end
 
+-- Polyfill vim.iter (introduced in Neovim 0.10, used by neogit diff.lua)
+if not vim.iter then
+  local function create_iter(list)
+    local t = {}
+    if type(list) == "table" then
+      local is_arr = true
+      for k in pairs(list) do
+        if type(k) ~= "number" then is_arr = false break end
+      end
+      if is_arr then
+        for _, v in ipairs(list) do table.insert(t, v) end
+      else
+        for _, v in pairs(list) do table.insert(t, v) end
+      end
+    end
+    local iter_obj = {}
+    function iter_obj:totable() return t end
+    function iter_obj:flatten(level)
+      local flat = {}
+      local function do_flatten(arr, depth)
+        for _, item in ipairs(arr) do
+          if type(item) == "table" and (not depth or depth > 0) then
+            do_flatten(item, depth and (depth - 1))
+          else
+            table.insert(flat, item)
+          end
+        end
+      end
+      do_flatten(t, level)
+      return create_iter(flat)
+    end
+    function iter_obj:map(fn)
+      local mapped = {}
+      for i, v in ipairs(t) do
+        local res = fn(v, i)
+        if res ~= nil then table.insert(mapped, res) end
+      end
+      return create_iter(mapped)
+    end
+    function iter_obj:filter(fn)
+      local filtered = {}
+      for i, v in ipairs(t) do
+        if fn(v, i) then table.insert(filtered, v) end
+      end
+      return create_iter(filtered)
+    end
+    function iter_obj:each(fn)
+      for i, v in ipairs(t) do fn(v, i) end
+    end
+    function iter_obj:slice(start, finish)
+      local sliced = {}
+      start = start or 1
+      finish = finish or #t
+      for i = start, finish do
+        if t[i] ~= nil then table.insert(sliced, t[i]) end
+      end
+      return create_iter(sliced)
+    end
+    setmetatable(iter_obj, {
+      __call = function()
+        local idx = 0
+        return function()
+          idx = idx + 1
+          return t[idx]
+        end
+      end,
+    })
+    return iter_obj
+  end
+  vim.iter = function(list) return create_iter(list or {}) end
+end
+
+
 -- Polyfill vim.system (introduced in Neovim 0.10, used by neogit cli.lua)
 if not vim.system then
   vim.system = function(cmd, opts, on_exit)
