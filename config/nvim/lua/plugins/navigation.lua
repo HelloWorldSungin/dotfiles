@@ -25,6 +25,7 @@ return {
     lazy = false,
     opts = {
       default_file_explorer = true,
+      lsp_file_methods = { enabled = false },
       view_options = { show_hidden = true },
     },
     keys = {
