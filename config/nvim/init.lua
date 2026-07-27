@@ -12,6 +12,38 @@ vim.islist = vim.islist or vim.tbl_islist or function(t)
   return true
 end
 
+-- Polyfill vim.system (introduced in Neovim 0.10, used by neogit cli.lua)
+if not vim.system then
+  vim.system = function(cmd, opts, on_exit)
+    if type(opts) == "function" then
+      on_exit = opts
+      opts = nil
+    end
+    opts = opts or {}
+
+    local res = vim.fn.systemlist(cmd)
+    local exit_code = vim.v.shell_error
+    local stdout_str = table.concat(res, "\n")
+    if #res > 0 then stdout_str = stdout_str .. "\n" end
+
+    local completed = {
+      code = exit_code,
+      stdout = stdout_str,
+      stderr = "",
+      wait = function(self)
+        return self
+      end,
+    }
+
+    if on_exit then
+      on_exit(completed)
+    end
+
+    return completed
+  end
+end
+
+
 -- Shim vim.validate for Neovim 0.10 positional argument syntax (e.g. gitsigns.nvim)
 if vim.validate then
   local orig_validate = vim.validate
