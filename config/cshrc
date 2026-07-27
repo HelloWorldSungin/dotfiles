@@ -1,9 +1,18 @@
-# Auto-generate localhost xauth entries for MobaXterm + LSF qsx (CSH / TCSH)
+# Auto-generate localhost xauth entries for all display offsets (CSH / TCSH)
 if ( $?DISPLAY ) then
-    set _disp_num = `echo $DISPLAY | sed 's/.*:\([0-9]*\).*/\1/'`
     set _disp_cookie = `xauth list | grep -m 1 "COOKIE" | awk '{print $3}'`
-    if ( "$_disp_num" != "" && "$_disp_cookie" != "" ) then
-        xauth add localhost/unix:$_disp_num MIT-MAGIC-COOKIE-1 $_disp_cookie >& /dev/null
-        xauth add localhost:$_disp_num.0 MIT-MAGIC-COOKIE-1 $_disp_cookie >& /dev/null
+    if ( "$_disp_cookie" != "" ) then
+        foreach _d ( 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 )
+            xauth add localhost/unix:$_d MIT-MAGIC-COOKIE-1 $_disp_cookie >& /dev/null
+            xauth add localhost:$_d.0 MIT-MAGIC-COOKIE-1 $_disp_cookie >& /dev/null
+            xauth add ems1/unix:$_d MIT-MAGIC-COOKIE-1 $_disp_cookie >& /dev/null
+            xauth add ems1:$_d.0 MIT-MAGIC-COOKIE-1 $_disp_cookie >& /dev/null
+        end
     endif
 endif
+
+if ( $?DISPLAY ) then
+    echo "setenv DISPLAY $DISPLAY" >! ~/.display_env
+endif
+
+alias fixdisplay 'source ~/.display_env'
