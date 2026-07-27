@@ -99,11 +99,18 @@ if not vim.system then
     local stdout_str = table.concat(res, "\n")
     if #res > 0 then stdout_str = stdout_str .. "\n" end
 
+    local dummy_handle = {
+      is_closing = function() return false end,
+      close = function() end,
+      is_active = function() return false end,
+    }
+
     local completed = {
       code = exit_code,
       stdout = stdout_str,
       stderr = "",
       pid = 12345,
+      handle = dummy_handle,
       wait = function(self)
         return self
       end,
@@ -121,6 +128,7 @@ if not vim.system then
         if k == "stdout" then return stdout_str end
         if k == "stderr" then return "" end
         if k == "pid" then return 12345 end
+        if k == "handle" then return dummy_handle end
         return function(self) return self end
       end,
     })
@@ -134,6 +142,7 @@ if not vim.system then
     return completed
   end
 end
+
 
 
 
