@@ -42,6 +42,19 @@ if vim.g.clipboard == nil then
   end
 end
 
+-- Shim vim.treesitter.query.get for Neovim 0.9.5 compatibility (used by neogit diff_highlights)
+if vim.treesitter and vim.treesitter.query and vim.treesitter.query.get then
+  local orig_ts_query_get = vim.treesitter.query.get
+  vim.treesitter.query.get = function(...)
+    local res = orig_ts_query_get(...)
+    if res == nil then
+      return { text = "", captures = {} }
+    end
+    return res
+  end
+end
+
+
 
 
 -- Block legacy/system aerial plugin from throwing < 0.10 deprecation error
