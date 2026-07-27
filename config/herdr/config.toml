@@ -11,8 +11,10 @@ onboarding = false
 
 [ui]
 agent_panel_sort = "spaces"
-
 show_agent_labels_on_pane_borders = true
+# Bright accent color for space/agent selection highlights, borders, and sidebar
+accent = "cyan"
+
 [keys]
 # Move remote image paste to ctrl+alt+v so ctrl+shift+v stays free for text paste
 remote_image_paste = "ctrl+alt+v"
