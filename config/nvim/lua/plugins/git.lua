@@ -7,6 +7,13 @@ return {
       "nvim-lua/plenary.nvim",
       "sindrets/diffview.nvim",
     },
+    opts = {
+      disable_context_highlighting = true,
+      commit_editor = {
+        kind = "split",
+        show_staged_diff = false,
+      },
+    },
     keys = {
       { "<leader>g", "<cmd>Neogit<cr>", desc = "Neogit (git status/diff/stage)" },
     },
