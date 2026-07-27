@@ -12,6 +12,19 @@ vim.islist = vim.islist or vim.tbl_islist or function(t)
   return true
 end
 
+-- Shim vim.validate for Neovim 0.10 positional argument syntax (e.g. gitsigns.nvim)
+if vim.validate then
+  local orig_validate = vim.validate
+  vim.validate = function(opt, ...)
+    if type(opt) == "string" then
+      local val, validator, optional = ...
+      return orig_validate({ [opt] = { val, validator, optional } })
+    end
+    return orig_validate(opt, ...)
+  end
+end
+
+
 -- Block legacy/system aerial plugin from throwing < 0.10 deprecation error
 package.loaded["aerial"] = { setup = function() end }
 package.loaded["aerial.config"] = { setup = function() end }
