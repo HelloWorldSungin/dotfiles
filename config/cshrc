@@ -1,0 +1,9 @@
+# Auto-generate localhost xauth entries for MobaXterm + LSF qsx (CSH / TCSH)
+if ( $?DISPLAY ) then
+    set _disp_num = `echo $DISPLAY | sed 's/.*:\([0-9]*\).*/\1/'`
+    set _disp_cookie = `xauth list | grep -m 1 "COOKIE" | awk '{print $3}'`
+    if ( "$_disp_num" != "" && "$_disp_cookie" != "" ) then
+        xauth add localhost/unix:$_disp_num MIT-MAGIC-COOKIE-1 $_disp_cookie >& /dev/null
+        xauth add localhost:$_disp_num.0 MIT-MAGIC-COOKIE-1 $_disp_cookie >& /dev/null
+    endif
+endif
