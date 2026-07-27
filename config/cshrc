@@ -1,17 +1,14 @@
-# Auto-register MobaXterm xauth cookie for active DISPLAY (CSH / TCSH)
+# Auto-register MobaXterm xauth cookie into ~/.display_env (CSH / TCSH)
 if ( $?DISPLAY ) then
     set _cookie = `xauth list | grep -m 1 "COOKIE" | awk '{print $3}'`
     set _d = `echo $DISPLAY | sed 's/.*:\([0-9]*\).*/\1/'`
     if ( "$_cookie" != "" && "$_d" != "" ) then
-        xauth add localhost/unix:$_d MIT-MAGIC-COOKIE-1 $_cookie >& /dev/null
-        xauth add localhost:$_d.0 MIT-MAGIC-COOKIE-1 $_cookie >& /dev/null
-        xauth add `hostname`/unix:$_d MIT-MAGIC-COOKIE-1 $_cookie >& /dev/null
-        xauth add `hostname`:$_d.0 MIT-MAGIC-COOKIE-1 $_cookie >& /dev/null
+        echo "setenv DISPLAY $DISPLAY" >! ~/.display_env
+        echo "xauth add localhost/unix:$_d MIT-MAGIC-COOKIE-1 $_cookie >& /dev/null" >> ~/.display_env
+        echo "xauth add localhost:$_d.0 MIT-MAGIC-COOKIE-1 $_cookie >& /dev/null" >> ~/.display_env
+        echo "xauth add \`hostname\`/unix:$_d MIT-MAGIC-COOKIE-1 $_cookie >& /dev/null" >> ~/.display_env
+        echo "xauth add \`hostname\`:$_d.0 MIT-MAGIC-COOKIE-1 $_cookie >& /dev/null" >> ~/.display_env
     endif
-endif
-
-if ( $?DISPLAY ) then
-    echo "setenv DISPLAY $DISPLAY" >! ~/.display_env
 endif
 
 alias fixdisplay 'source ~/.display_env'
