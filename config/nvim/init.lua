@@ -54,6 +54,16 @@ if vim.treesitter and vim.treesitter.query and vim.treesitter.query.get then
   end
 end
 
+-- Polyfill vim.lsp.ms for Neovim 0.9.5 (used by oil.nvim LSP file operations like will_create_files)
+if vim.lsp then
+  vim.lsp.ms = vim.lsp.ms or setmetatable({}, {
+    __index = function()
+      return function() end
+    end,
+  })
+end
+
+
 
 
 
