@@ -12,3 +12,11 @@ vim.keymap.set("n", "<C-a>", "ggVG", { desc = "Select all" })
 -- you just replaced (vim register behavior). This keeps the clipboard
 -- intact so you can paste the same thing repeatedly.
 vim.keymap.set("x", "p", '"_dP', { desc = "Paste without clobbering clipboard" })
+
+-- Ctrl+Shift+V pastes system clipboard in insert, command, and normal modes
+vim.keymap.set({ "i", "c" }, "<C-S-v>", "<C-r>+", { desc = "Paste system clipboard" })
+vim.keymap.set("n", "<C-S-v>", '"+p', { desc = "Paste system clipboard" })
+
+-- Ctrl+Shift+C copies selection to system clipboard in visual mode
+vim.keymap.set("v", "<C-S-c>", '"+y', { desc = "Copy selection to system clipboard" })
+
