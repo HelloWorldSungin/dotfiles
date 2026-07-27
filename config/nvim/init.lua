@@ -221,6 +221,27 @@ vim.fn.has = function(item)
   return orig_has(item)
 end
 
+-- Shim vim.version() for Neovim 0.10 version checks in modern plugins (like neogit)
+if vim.version then
+  local orig_version = vim.version
+  vim.version = setmetatable({
+    major = 0,
+    minor = 10,
+    patch = 0,
+  }, {
+    __call = function()
+      return { major = 0, minor = 10, patch = 0 }
+    end,
+    __index = function(t, k)
+      if type(orig_version) == "table" and orig_version[k] then
+        return orig_version[k]
+      end
+      return nil
+    end,
+  })
+end
+
+
 -- Polyfill vim.fs.joinpath (introduced in Neovim 0.10)
 if vim.fs and not vim.fs.joinpath then
   vim.fs.joinpath = function(...)
