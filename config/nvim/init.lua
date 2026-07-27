@@ -85,7 +85,7 @@ if not vim.iter then
 end
 
 
--- Polyfill vim.system (introduced in Neovim 0.10, used by neogit cli.lua)
+-- Polyfill vim.system (introduced in Neovim 0.10, used by neogit process.lua / cli.lua)
 if not vim.system then
   vim.system = function(cmd, opts, on_exit)
     if type(opts) == "function" then
@@ -103,10 +103,27 @@ if not vim.system then
       code = exit_code,
       stdout = stdout_str,
       stderr = "",
+      pid = 12345,
       wait = function(self)
         return self
       end,
+      kill = function(self)
+        return self
+      end,
+      write = function(self)
+        return self
+      end,
     }
+
+    setmetatable(completed, {
+      __index = function(_, k)
+        if k == "code" then return exit_code end
+        if k == "stdout" then return stdout_str end
+        if k == "stderr" then return "" end
+        if k == "pid" then return 12345 end
+        return function(self) return self end
+      end,
+    })
 
     if on_exit then
       on_exit(completed)
@@ -115,6 +132,7 @@ if not vim.system then
     return completed
   end
 end
+
 
 
 -- Shim vim.validate for Neovim 0.10 positional argument syntax (e.g. gitsigns.nvim)
