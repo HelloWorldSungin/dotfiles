@@ -24,6 +24,25 @@ if vim.validate then
   end
 end
 
+-- Configure OSC 52 clipboard provider for headless Linux SSH connections
+if vim.g.clipboard == nil then
+  local ok, osc52 = pcall(require, "vim.ui.clipboard.osc52")
+  if ok and osc52 then
+    vim.g.clipboard = {
+      name = "OSC 52",
+      copy = {
+        ["+"] = osc52.copy("+"),
+        ["*"] = osc52.copy("*"),
+      },
+      paste = {
+        ["+"] = osc52.paste("+"),
+        ["*"] = osc52.paste("*"),
+      },
+    }
+  end
+end
+
+
 
 -- Block legacy/system aerial plugin from throwing < 0.10 deprecation error
 package.loaded["aerial"] = { setup = function() end }
