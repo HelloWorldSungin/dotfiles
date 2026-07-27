@@ -2,7 +2,7 @@
 # dev-tools-check-updates - read-only visibility into personal developer-tool updates.
 #
 # Derived from Firstmate's fm-check-updates checker and adapted as a standalone
-# dotfiles tool. It checks four independently published sources without
+# dotfiles tool. It checks five independently published sources without
 # applying updates. The only writes are a bounded fetch of the configured
 # Firstmate repository's origin refs and this tool's own atomic XDG cache.
 #
@@ -15,6 +15,12 @@
 #               global prefix. Other global npm packages are excluded.
 #   treehouse   Compare the installed version with the latest GitHub release.
 #   no-mistakes Compare the installed version with the latest GitHub release.
+#   herdr       Compare the installed version with the latest GitHub release.
+#               REPORT ONLY by design - herdr version bumps can disrupt a live
+#               firstmate fleet mid-work (e.g. a keybinding break that breaks
+#               composer interaction), so the captain decides when to apply
+#               them manually. dev-tools-apply-updates is intentionally NOT
+#               allowed to apply, install, or restart herdr; it only reports.
 #   nix-pinned  Never checked. tea, ghdl, git, and the other Nix packages are
 #               deliberately controlled by this dotfiles repo's flake lock.
 #
@@ -37,9 +43,9 @@
 #         DEV_TOOLS_UPDATE_CACHE_TTL_SECONDS. --force bypasses a fresh cache.
 #
 # Output modes:
-#   default     Five human-readable source summaries.
-#   --json      One JSON object with schema_version=1. May be combined with
-#               --health for a machine-readable health result.
+#   default     Six human-readable source summaries.
+#   --json      One JSON object. Update checks use schema_version=2; --health
+#               uses schema_version=1. May be combined with --health.
 #   --health    Report chrome-devtools-axi headless flag health and exit.
 #   --startup   Read only the update cache, run the local health check, never
 #               use the network, and print only updates or non-healthy wiring.
@@ -50,8 +56,9 @@
 #
 # Test seams:
 #   DEV_TOOLS_UPDATE_GIT_BIN, DEV_TOOLS_UPDATE_NPM_BIN,
-#   DEV_TOOLS_UPDATE_CURL_BIN, DEV_TOOLS_UPDATE_TREEHOUSE_BIN, and
-#   DEV_TOOLS_UPDATE_NO_MISTAKES_BIN replace command paths.
+#   DEV_TOOLS_UPDATE_CURL_BIN, DEV_TOOLS_UPDATE_TREEHOUSE_BIN,
+#   DEV_TOOLS_UPDATE_NO_MISTAKES_BIN, and DEV_TOOLS_UPDATE_HERDR_BIN
+#   replace command paths.
 #   DEV_TOOLS_UPDATE_NOW_EPOCH replaces the clock.
 #   DEV_TOOLS_HEALTH_PRINTENV_BIN replaces the environment reader.
 set -u
@@ -60,16 +67,19 @@ FIRSTMATE_PATH=${DEV_TOOLS_FIRSTMATE_PATH:-${HOME:-.}/firstmate}
 CACHE_HOME=${XDG_CACHE_HOME:-${HOME:-.}/.cache}
 CACHE_PATH=${DEV_TOOLS_UPDATE_CACHE_PATH:-$CACHE_HOME/dev-tools-update-checker/cache.json}
 CACHE_TTL=${DEV_TOOLS_UPDATE_CACHE_TTL_SECONDS:-14400}
+CACHE_SCHEMA_VERSION=2
 NETWORK_TIMEOUT=${DEV_TOOLS_UPDATE_NETWORK_TIMEOUT_SECONDS:-15}
 GIT_BIN=${DEV_TOOLS_UPDATE_GIT_BIN:-git}
 NPM_BIN=${DEV_TOOLS_UPDATE_NPM_BIN:-npm}
 CURL_BIN=${DEV_TOOLS_UPDATE_CURL_BIN:-curl}
 TREEHOUSE_BIN=${DEV_TOOLS_UPDATE_TREEHOUSE_BIN:-${HOME:-.}/.local/bin/treehouse}
 NO_MISTAKES_BIN=${DEV_TOOLS_UPDATE_NO_MISTAKES_BIN:-${HOME:-.}/.local/bin/no-mistakes}
+HERDR_BIN=${DEV_TOOLS_UPDATE_HERDR_BIN:-${HOME:-.}/.local/bin/herdr}
 PRINTENV_BIN=${DEV_TOOLS_HEALTH_PRINTENV_BIN:-printenv}
 NPM_PREFIX=${DEV_TOOLS_UPDATE_NPM_PREFIX:-${HOME:-.}/.npm-global}
 TREEHOUSE_RELEASE_URL=https://api.github.com/repos/kunchenguid/treehouse/releases/latest
 NO_MISTAKES_RELEASE_URL=https://api.github.com/repos/kunchenguid/no-mistakes/releases/latest
+HERDR_RELEASE_URL=https://api.github.com/repos/ogulcancelik/herdr/releases/latest
 TRACKED_NPM_JSON='["chrome-devtools-axi","gh-axi","gnhf","lavish-axi","quota-axi","tasks-axi"]'
 CHROME_REQUIRED_FLAGS_JSON='["--no-sandbox","--disable-dev-shm-usage","--disable-gpu"]'
 
@@ -293,7 +303,8 @@ check_release_tool() {
 
 cache_is_valid() {
   [ -f "$CACHE_PATH" ] || return 1
-  jq -e '.schema_version == 1 and (.checked_at_epoch | type == "number") and (.sources | type == "object")' \
+  jq -e --argjson schema_version "$CACHE_SCHEMA_VERSION" \
+    '.schema_version == $schema_version and (.checked_at_epoch | type == "number") and (.sources | type == "object")' \
     "$CACHE_PATH" >/dev/null 2>&1
 }
 
@@ -339,6 +350,7 @@ render_human() {
          end),
         simple("treehouse"; $s.treehouse),
         simple("no-mistakes"; $s.no_mistakes),
+        simple("herdr"; $s.herdr),
         "nix-pinned: nix-pinned tools are intentionally not tracked here"
       ]
     | .[]
@@ -351,7 +363,8 @@ render_startup() {
     | ([if $s.firstmate.status == "update_available" then "firstmate " + ($s.firstmate.behind | tostring) + " behind" else empty end]
        + [$s.npm_global.packages[]? | .name + " " + .current + " -> " + .latest]
        + [if $s.treehouse.status == "update_available" then "treehouse " + $s.treehouse.current + " -> " + $s.treehouse.latest else empty end]
-       + [if $s.no_mistakes.status == "update_available" then "no-mistakes " + $s.no_mistakes.current + " -> " + $s.no_mistakes.latest else empty end]) as $updates
+       + [if $s.no_mistakes.status == "update_available" then "no-mistakes " + $s.no_mistakes.current + " -> " + $s.no_mistakes.latest else empty end]
+       + [if $s.herdr.status == "update_available" then "herdr " + $s.herdr.current + " -> " + $s.herdr.latest + " (report-only: apply manually)" else empty end]) as $updates
     | if ($updates | length) > 0
       then "dev-tools: updates available - " + ($updates | join("; "))
       else empty
@@ -396,11 +409,12 @@ if ! command -v jq >/dev/null 2>&1; then
   case "$MODE" in
     startup) printf '%s\n' 'dev-tools: chrome-devtools headless flags unknown - jq unavailable' ;;
     json)
-      printf '{"schema_version":1,"checked_at_epoch":%s,"cache_ttl_seconds":%s,"sources":{"firstmate":{"status":"unknown","detail":"jq unavailable"},"npm_global":{"status":"unknown","detail":"jq unavailable"},"treehouse":{"status":"unknown","detail":"jq unavailable"},"no_mistakes":{"status":"unknown","detail":"jq unavailable"},"nix_pinned":{"status":"excluded","detail":"nix-pinned tools are intentionally not tracked here"}}}\n' "$NOW" "$CACHE_TTL"
+      printf '{"schema_version":%s,"checked_at_epoch":%s,"cache_ttl_seconds":%s,"sources":{"firstmate":{"status":"unknown","detail":"jq unavailable"},"npm_global":{"status":"unknown","detail":"jq unavailable"},"treehouse":{"status":"unknown","detail":"jq unavailable"},"no_mistakes":{"status":"unknown","detail":"jq unavailable"},"herdr":{"status":"unknown","detail":"jq unavailable"},"nix_pinned":{"status":"excluded","detail":"nix-pinned tools are intentionally not tracked here"}}}\n' "$CACHE_SCHEMA_VERSION" "$NOW" "$CACHE_TTL"
       ;;
     *)
       printf '%s\n' 'firstmate: unknown (jq unavailable)' 'npm-global: unknown (jq unavailable)' \
         'treehouse: unknown (jq unavailable)' 'no-mistakes: unknown (jq unavailable)' \
+        'herdr: unknown (jq unavailable)' \
         'nix-pinned: nix-pinned tools are intentionally not tracked here'
       ;;
   esac
@@ -434,16 +448,19 @@ else
   NPM_GLOBAL=$(check_npm_global)
   TREEHOUSE=$(check_release_tool treehouse "$TREEHOUSE_BIN" TREEHOUSE_NO_UPDATE_CHECK "$TREEHOUSE_RELEASE_URL")
   NO_MISTAKES=$(check_release_tool no-mistakes "$NO_MISTAKES_BIN" NO_MISTAKES_NO_UPDATE_CHECK "$NO_MISTAKES_RELEASE_URL")
+  HERDR=$(check_release_tool herdr "$HERDR_BIN" HERDR_NO_UPDATE_CHECK "$HERDR_RELEASE_URL")
   NIX_PINNED=$(jq -cn '{status:"excluded",detail:"nix-pinned tools are intentionally not tracked here"}')
   RESULT=$(jq -cn \
+    --argjson schema_version "$CACHE_SCHEMA_VERSION" \
     --argjson checked_at_epoch "$NOW" \
     --argjson cache_ttl_seconds "$CACHE_TTL" \
     --argjson firstmate "$FIRSTMATE" \
     --argjson npm_global "$NPM_GLOBAL" \
     --argjson treehouse "$TREEHOUSE" \
     --argjson no_mistakes "$NO_MISTAKES" \
+    --argjson herdr "$HERDR" \
     --argjson nix_pinned "$NIX_PINNED" \
-    '{schema_version:1,checked_at_epoch:$checked_at_epoch,cache_ttl_seconds:$cache_ttl_seconds,sources:{firstmate:$firstmate,npm_global:$npm_global,treehouse:$treehouse,no_mistakes:$no_mistakes,nix_pinned:$nix_pinned}}')
+    '{schema_version:$schema_version,checked_at_epoch:$checked_at_epoch,cache_ttl_seconds:$cache_ttl_seconds,sources:{firstmate:$firstmate,npm_global:$npm_global,treehouse:$treehouse,no_mistakes:$no_mistakes,herdr:$herdr,nix_pinned:$nix_pinned}}')
   write_cache
 fi
 

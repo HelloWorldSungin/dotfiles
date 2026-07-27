@@ -49,6 +49,7 @@ and the agent harnesses. Then log in to each harness once (`claude`, etc.).
 | Add/remove a package               | edit `home/sungin-ct110.nix`, then `rebuild` (alias) |
 | Change nvim/herdr config           | just edit it - symlinks make it live; commit when happy |
 | Update all pinned packages         | `nix flake update && ./rebuild.sh` |
+| Preview/apply guarded CT110 tool updates | `dev-tools-apply-updates --dry-run`, then `dev-tools-apply-updates` (`--help` documents its scope) |
 | See what a rebuild would change    | `git diff` before running `rebuild` |
 | Start / reattach sessions          | `ssh ct110` then `herdr` -> [docs/herdr.md](docs/herdr.md) |
 

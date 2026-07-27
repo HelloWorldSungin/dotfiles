@@ -16,6 +16,21 @@ let
       nodejs_22
     ];
   };
+  # Guarded, opt-in companion to the checker. Installed on PATH but deliberately
+  # NOT given a timer: it only ever runs when the captain invokes it. The checker
+  # is on its runtime PATH so the tool's own detection delegation resolves.
+  devToolsApplyUpdates = pkgs.writeShellApplication {
+    name = "dev-tools-apply-updates";
+    text = builtins.readFile ../bin/dev-tools-apply-updates;
+    bashOptions = [ ]; # Applies each tier independently and handles failures itself.
+    runtimeInputs = with pkgs; [
+      coreutils
+      git
+      jq
+      nodejs_22
+      devToolsUpdateChecker
+    ];
+  };
   devToolsUpdateCheckRun = pkgs.writeShellScript "dev-tools-update-checker-run" ''
     export CHROME_DEVTOOLS_AXI_CHROME_ARGS=${lib.escapeShellArg config.home.sessionVariables.CHROME_DEVTOOLS_AXI_CHROME_ARGS}
     ${devToolsUpdateChecker}/bin/dev-tools-check-updates --force --json
@@ -33,6 +48,7 @@ in
     chromium # headless browser for chrome-devtools-axi E2E testing
     ghdl     # open-source VHDL simulator
     gtkwave  # view GHDL-produced .ghw/.vcd waveforms
+    devToolsApplyUpdates # opt-in guarded auto-apply for the safe update tiers
   ];
 
   home.sessionVariables = {

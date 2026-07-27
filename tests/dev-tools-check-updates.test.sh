@@ -2,8 +2,8 @@
 # Self-contained behavior tests for bin/dev-tools-check-updates.
 #
 # Every publication source is deterministic. Firstmate fetches from a local
-# file:// bare repository, while npm, curl, treehouse, and no-mistakes are
-# injected executables. The health check receives a fake environment reader.
+# file:// bare repository, while npm, curl, treehouse, no-mistakes, and herdr
+# are injected executables. The health check receives a fake environment reader.
 # No test contacts the network or depends on the real login environment.
 set -u
 
@@ -71,6 +71,7 @@ last=${!#}
 case "$last" in
   *treehouse*) cat "$TEST_FAKE_TREEHOUSE_RELEASE_JSON" ;;
   *no-mistakes*) cat "$TEST_FAKE_NO_MISTAKES_RELEASE_JSON" ;;
+  *herdr*) cat "$TEST_FAKE_HERDR_RELEASE_JSON" ;;
   *) exit 22 ;;
 esac
 SH
@@ -83,6 +84,11 @@ SH
 #!/usr/bin/env bash
 [ "${1:-}" = --version ] || exit 2
 printf '%s\n' "${TEST_FAKE_NO_MISTAKES_VERSION:-no-mistakes version v1.40.0 (fake)}"
+SH
+  cat > "$fakebin/herdr-fixture" <<'SH'
+#!/usr/bin/env bash
+[ "${1:-}" = --version ] || exit 2
+printf '%s\n' "${TEST_FAKE_HERDR_VERSION:-herdr 0.7.4 (fake)}"
 SH
   cat > "$fakebin/printenv-fixture" <<'SH'
 #!/usr/bin/env bash
@@ -115,6 +121,7 @@ run_checker() {
     DEV_TOOLS_UPDATE_CURL_BIN="$TEST_FAKEBIN/curl-fixture" \
     DEV_TOOLS_UPDATE_TREEHOUSE_BIN="$TEST_FAKEBIN/treehouse-fixture" \
     DEV_TOOLS_UPDATE_NO_MISTAKES_BIN="$TEST_FAKEBIN/no-mistakes-fixture" \
+    DEV_TOOLS_UPDATE_HERDR_BIN="$TEST_FAKEBIN/herdr-fixture" \
     DEV_TOOLS_HEALTH_PRINTENV_BIN="$TEST_FAKEBIN/printenv-fixture" \
     "$CHECKER" "$@"
 }
@@ -128,15 +135,17 @@ configure_fixture() {
   TEST_FAKE_NPM_JSON="$base/npm.json"
   TEST_FAKE_TREEHOUSE_RELEASE_JSON="$base/treehouse.json"
   TEST_FAKE_NO_MISTAKES_RELEASE_JSON="$base/no-mistakes.json"
+  TEST_FAKE_HERDR_RELEASE_JSON="$base/herdr.json"
   TEST_FAKE_NPM_RC=1
   TEST_FAKE_CURL_FAIL=0
   TEST_FAKE_TREEHOUSE_VERSION=v2.0.0
   TEST_FAKE_NO_MISTAKES_VERSION='no-mistakes version v1.40.0 (fake)'
+  TEST_FAKE_HERDR_VERSION='herdr 0.7.4 (fake)'
   TEST_FAKE_PRINTENV_RC=0
   TEST_FAKE_CHROME_ARGS='--no-sandbox --disable-dev-shm-usage --disable-gpu'
   export TEST_FAKE_CALL_LOG TEST_FAKE_NPM_JSON TEST_FAKE_TREEHOUSE_RELEASE_JSON
-  export TEST_FAKE_NO_MISTAKES_RELEASE_JSON TEST_FAKE_NPM_RC TEST_FAKE_CURL_FAIL
-  export TEST_FAKE_TREEHOUSE_VERSION TEST_FAKE_NO_MISTAKES_VERSION
+  export TEST_FAKE_NO_MISTAKES_RELEASE_JSON TEST_FAKE_HERDR_RELEASE_JSON TEST_FAKE_NPM_RC TEST_FAKE_CURL_FAIL
+  export TEST_FAKE_TREEHOUSE_VERSION TEST_FAKE_NO_MISTAKES_VERSION TEST_FAKE_HERDR_VERSION
   export TEST_FAKE_PRINTENV_RC TEST_FAKE_CHROME_ARGS
 }
 
@@ -153,6 +162,7 @@ test_source_parsing_and_summaries() {
 JSON
   write_release "$TEST_FAKE_TREEHOUSE_RELEASE_JSON" v2.1.0
   write_release "$TEST_FAKE_NO_MISTAKES_RELEASE_JSON" v1.40.0
+  write_release "$TEST_FAKE_HERDR_RELEASE_JSON" v0.7.5
 
   json=$(run_checker 1000 --force --json)
   [ "$(printf '%s' "$json" | jq -r '.sources.firstmate.default_branch')" = trunk ] \
@@ -167,6 +177,12 @@ JSON
     || fail "treehouse release response was not compared"
   [ "$(printf '%s' "$json" | jq -r '.sources.no_mistakes.status')" = up_to_date ] \
     || fail "no-mistakes up-to-date response was not compared"
+  [ "$(printf '%s' "$json" | jq -r '.sources.herdr.status')" = update_available ] \
+    || fail "herdr release response was not compared"
+  [ "$(printf '%s' "$json" | jq -r '.sources.herdr.current')" = 0.7.4 ] \
+    || fail "herdr installed version was not captured"
+  [ "$(printf '%s' "$json" | jq -r '.sources.herdr.latest')" = v0.7.5 ] \
+    || fail "herdr latest release tag was not captured"
   [ "$(printf '%s' "$json" | jq -r '.sources.nix_pinned.status')" = excluded ] \
     || fail "nix-pinned exclusion is absent from JSON"
 
@@ -175,6 +191,7 @@ JSON
   assert_contains "$human" "npm-global: quota-axi 0.1.6 -> 0.1.9" "human npm summary changed"
   assert_contains "$human" "treehouse: v2.0.0 -> v2.1.0" "human treehouse summary changed"
   assert_contains "$human" "no-mistakes: up to date" "human no-mistakes summary changed"
+  assert_contains "$human" "herdr: 0.7.4 -> v0.7.5" "human herdr summary changed"
   assert_contains "$human" "nix-pinned tools are intentionally not tracked here" "human nix exclusion changed"
 
   calls_before=$(wc -l < "$TEST_FAKE_CALL_LOG" | tr -d ' ')
@@ -185,6 +202,7 @@ JSON
   assert_contains "$startup" "firstmate 1 behind" "startup summary omitted Firstmate"
   assert_contains "$startup" "quota-axi 0.1.6 -> 0.1.9" "startup summary omitted npm update"
   assert_contains "$startup" "treehouse v2.0.0 -> v2.1.0" "startup summary omitted treehouse"
+  assert_contains "$startup" "herdr 0.7.4 -> v0.7.5 (report-only: apply manually)" "startup summary omitted herdr"
   assert_not_contains "$startup" "no-mistakes v1.40.0" "startup summary included an up-to-date source"
   pass "checker parses and renders every scoped source"
 }
@@ -200,19 +218,22 @@ test_fail_soft_unknowns() {
   configure_fixture "$base"
   TEST_FAKE_NPM_RC=42
   TEST_FAKE_NO_MISTAKES_VERSION='unexpected version output'
-  export TEST_FAKE_NPM_RC TEST_FAKE_NO_MISTAKES_VERSION
+  TEST_FAKE_HERDR_VERSION='garbled output'
+  export TEST_FAKE_NPM_RC TEST_FAKE_NO_MISTAKES_VERSION TEST_FAKE_HERDR_VERSION
   printf '{}\n' > "$TEST_FAKE_NPM_JSON"
   write_release "$TEST_FAKE_TREEHOUSE_RELEASE_JSON" latest
   write_release "$TEST_FAKE_NO_MISTAKES_RELEASE_JSON" v9.0.0
+  write_release "$TEST_FAKE_HERDR_RELEASE_JSON" v9.9.9
 
   json=$(run_checker 2000 --force --json) || fail "checker returned non-zero for unavailable sources"
-  [ "$(printf '%s' "$json" | jq '[.sources.firstmate,.sources.npm_global,.sources.treehouse,.sources.no_mistakes] | map(select(.status == "unknown")) | length')" -eq 4 ] \
+  [ "$(printf '%s' "$json" | jq '[.sources.firstmate,.sources.npm_global,.sources.treehouse,.sources.no_mistakes,.sources.herdr] | map(select(.status == "unknown")) | length')" -eq 5 ] \
     || fail "unavailable sources did not all degrade to unknown"
   human=$(run_checker 2001)
   assert_contains "$human" "firstmate: unknown" "human output hid Firstmate failure"
   assert_contains "$human" "npm-global: unknown" "human output hid npm failure"
   assert_contains "$human" "treehouse: unknown" "human output hid treehouse failure"
   assert_contains "$human" "no-mistakes: unknown" "human output hid no-mistakes failure"
+  assert_contains "$human" "herdr: unknown" "human output hid herdr failure"
   pass "source failures are fail-soft unknown results"
 }
 
@@ -225,9 +246,17 @@ test_cache_ttl_force_and_silent_startup() {
   printf '{"quota-axi":{"current":"0.1.6","latest":"0.1.9"}}\n' > "$TEST_FAKE_NPM_JSON"
   write_release "$TEST_FAKE_TREEHOUSE_RELEASE_JSON" v2.1.0
   write_release "$TEST_FAKE_NO_MISTAKES_RELEASE_JSON" v1.40.0
+  write_release "$TEST_FAKE_HERDR_RELEASE_JSON" v0.7.4
+  printf '%s\n' '{"schema_version":1,"checked_at_epoch":3000,"cache_ttl_seconds":10,"sources":{"firstmate":{"status":"up_to_date"},"npm_global":{"status":"up_to_date","packages":[]},"treehouse":{"status":"up_to_date"},"no_mistakes":{"status":"up_to_date"},"nix_pinned":{"status":"excluded"}}}' \
+    > "$TEST_HOME/cache.json"
 
   first=$(run_checker 3000 --json)
+  [ -e "$TEST_FAKE_CALL_LOG" ] || fail "pre-herdr schema v1 cache was accepted"
   calls_first=$(wc -l < "$TEST_FAKE_CALL_LOG" | tr -d ' ')
+  [ "$(jq -r '.schema_version' "$TEST_HOME/cache.json")" = 2 ] \
+    || fail "fresh cache did not use schema version 2"
+  [ "$(jq -r '.sources.herdr | type' "$TEST_HOME/cache.json")" = object ] \
+    || fail "fresh schema v2 cache omitted herdr"
   printf '{"quota-axi":{"current":"0.1.6","latest":"0.1.10"}}\n' > "$TEST_FAKE_NPM_JSON"
   write_release "$TEST_FAKE_TREEHOUSE_RELEASE_JSON" v2.2.0
   second=$(run_checker 3009 --json)
@@ -256,6 +285,7 @@ test_cache_ttl_force_and_silent_startup() {
     | .sources.npm_global.packages = []
     | .sources.treehouse.status = "up_to_date"
     | .sources.no_mistakes.status = "up_to_date"
+    | .sources.herdr.status = "up_to_date"
   ')
   printf '%s\n' "$current" > "$TEST_HOME/cache.json"
   startup=$(run_checker 999999 --startup)
@@ -299,6 +329,19 @@ test_chrome_headless_health() {
   pass "chrome-devtools health covers healthy, broken, unknown, and startup visibility"
 }
 
+test_herdr_is_report_only_tier() {
+  # Belt-and-braces: even when the checker reports herdr as update_available,
+  # the help/contract itself must call out that the apply companion is NOT
+  # allowed to install herdr. This is the human-readable guardrail that makes
+  # the report-only behavior obvious from the tool's own --help output.
+  local contract
+  contract=$(sed -n '2,/^set -u$/s/^# \{0,1\}//p' "$CHECKER")
+  assert_contains "$contract" "REPORT ONLY" "checker --help did not call out herdr as report-only"
+  assert_contains "$contract" "dev-tools-apply-updates is intentionally NOT" \
+    "checker --help did not forbid apply-updates from touching herdr"
+  pass "checker --help documents herdr as a report-only tier"
+}
+
 export GIT_AUTHOR_NAME=dev-tools-test
 export GIT_AUTHOR_EMAIL=dev-tools-test@example.invalid
 export GIT_COMMITTER_NAME=dev-tools-test
@@ -307,3 +350,4 @@ test_source_parsing_and_summaries
 test_fail_soft_unknowns
 test_cache_ttl_force_and_silent_startup
 test_chrome_headless_health
+test_herdr_is_report_only_tier

@@ -1,3 +1,4 @@
+onboarding = false
 # Herdr configuration - ~/.config/herdr/config.toml is a symlink to this file.
 #
 # Starting from an empty config = herdr defaults (prefix key ctrl+b, tmux-like).
@@ -11,12 +12,14 @@
 [ui]
 agent_panel_sort = "spaces"
 
+show_agent_labels_on_pane_borders = true
 [keys]
-# In `herdr --remote`, image paste defaults to ctrl+v — which hijacks normal
-# text paste between panes. Move it to ctrl+shift+v so ctrl+v stays free for
-# text paste. (Inert on the CT110 server; only the Mac --remote client uses it.)
-remote_image_paste = "ctrl+shift+v"
+# Move remote image paste to ctrl+alt+v so ctrl+shift+v stays free for text paste
+remote_image_paste = "ctrl+alt+v"
 
 # Custom split pane shortcuts (prefix Ctrl+b, then key)
 split_vertical = "prefix+v"
 split_horizontal = "prefix+-"
+
+[ui.toast]
+delivery = "system"
