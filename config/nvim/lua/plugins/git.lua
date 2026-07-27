@@ -3,6 +3,7 @@ return {
   {
     -- Neogit: full git UI (status, diffs, staging, commits).
     "NeogitOrg/neogit",
+    version = "*",
     dependencies = {
       "nvim-lua/plenary.nvim",
       "sindrets/diffview.nvim",
