@@ -44,25 +44,33 @@ end
 
 -- Shim vim.treesitter query functions for Neovim 0.9.5 compatibility (used by neogit diff_highlights)
 if vim.treesitter then
-  local fallback_query = { text = "", captures = {}, info = { patterns = {} } }
-  local ts_query = rawget(vim.treesitter, "query") or vim.treesitter.query
-  if type(ts_query) == "table" then
-    if ts_query.get then
-      local orig_get = ts_query.get
-      ts_query.get = function(...)
-        local res = orig_get(...)
-        return res or fallback_query
-      end
-    end
-    if ts_query.get_query then
-      local orig_get_q = ts_query.get_query
-      ts_query.get_query = function(...)
-        local res = orig_get_q(...)
-        return res or fallback_query
+  local fallback_query = setmetatable({
+    text = "",
+    captures = {},
+    info = { patterns = {} },
+  }, {
+    __index = function(_, k)
+      if k == "text" then return "" end
+      return function() return {} end
+    end,
+  })
+
+  if vim.treesitter.query then
+    for _, fn_name in ipairs({ "get", "get_query", "parse", "parse_query" }) do
+      if type(vim.treesitter.query[fn_name]) == "function" then
+        local orig_fn = vim.treesitter.query[fn_name]
+        vim.treesitter.query[fn_name] = function(...)
+          local ok, res = pcall(orig_fn, ...)
+          if not ok or res == nil then
+            return fallback_query
+          end
+          return res
+        end
       end
     end
   end
 end
+
 
 
 
