@@ -71,6 +71,19 @@ if vim.treesitter then
   end
 end
 
+-- Shim neogit diff_highlights module for Neovim 0.9.5 compatibility
+package.loaded["neogit.lib.diff_highlights"] = setmetatable({
+  get = function() return {} end,
+  attach = function() end,
+  detach = function() end,
+  setup = function() end,
+}, {
+  __index = function()
+    return function() return {} end
+  end,
+})
+
+
 
 
 
