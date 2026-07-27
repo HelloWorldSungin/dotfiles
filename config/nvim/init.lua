@@ -126,7 +126,9 @@ if not vim.system then
     })
 
     if on_exit then
-      on_exit(completed)
+      vim.schedule(function()
+        on_exit(completed)
+      end)
     end
 
     return completed
