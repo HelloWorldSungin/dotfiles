@@ -170,6 +170,22 @@ if vim.api and vim.api.nvim_get_hl then
   end
 end
 
+-- Shim vim.api.nvim_set_option_value to remove conflicting 'scope' when 'buf' is present (invalid in 0.9.5)
+if vim.api and vim.api.nvim_set_option_value then
+  local orig_set_opt = vim.api.nvim_set_option_value
+  vim.api.nvim_set_option_value = function(name, value, opts)
+    if type(opts) == "table" and opts.buf ~= nil and opts.scope ~= nil then
+      local clean_opts = {}
+      for k, v in pairs(opts) do
+        if k ~= "scope" then clean_opts[k] = v end
+      end
+      return orig_set_opt(name, value, clean_opts)
+    end
+    return orig_set_opt(name, value, opts)
+  end
+end
+
+
 if not _G.lazy_setup_done then
   _G.lazy_setup_done = true
 
