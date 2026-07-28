@@ -176,32 +176,37 @@ if vim.g.clipboard == nil then
   end
 end
 
--- Shim vim.treesitter query functions for Neovim 0.9.5 compatibility (used by neogit diff_highlights)
+-- Shim vim.treesitter.query for Neovim 0.9.5 compatibility (where vim.treesitter.query is a function)
 if vim.treesitter then
-  local fallback_query = setmetatable({
-    text = "",
-    captures = {},
-    info = { patterns = {} },
-  }, {
-    __index = function(_, k)
-      if k == "text" then return "" end
-      return function() return {} end
-    end,
-  })
-
-  if vim.treesitter.query then
-    for _, fn_name in ipairs({ "get", "get_query", "parse", "parse_query" }) do
-      if type(vim.treesitter.query[fn_name]) == "function" then
-        local orig_fn = vim.treesitter.query[fn_name]
-        vim.treesitter.query[fn_name] = function(...)
-          local ok, res = pcall(orig_fn, ...)
-          if not ok or res == nil then
-            return fallback_query
-          end
-          return res
-        end
-      end
-    end
+  local orig_query = vim.treesitter.query
+  if type(orig_query) == "function" then
+    local query_mod = setmetatable({
+      get = function(...)
+        if vim.treesitter.query_get then return vim.treesitter.query_get(...) end
+        local ok, res = pcall(vim.treesitter.get_query or function() return nil end, ...)
+        return ok and res or nil
+      end,
+      get_query = function(...)
+        local ok, res = pcall(vim.treesitter.get_query or function() return nil end, ...)
+        return ok and res or nil
+      end,
+      parse = function(...)
+        local ok, res = pcall(vim.treesitter.parse_query or function() return nil end, ...)
+        return ok and res or nil
+      end,
+      parse_query = function(...)
+        local ok, res = pcall(vim.treesitter.parse_query or function() return nil end, ...)
+        return ok and res or nil
+      end,
+    }, {
+      __call = function(_, ...)
+        return orig_query(...)
+      end,
+      __index = function(t, k)
+        return rawget(t, k)
+      end,
+    })
+    vim.treesitter.query = query_mod
   end
 end
 
