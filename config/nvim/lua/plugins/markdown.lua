@@ -11,25 +11,9 @@ return {
     },
   },
   {
-    -- Render Markdown: pretty-view markdown files in Neovim instead of raw text.
+    -- Render Markdown: disabled on Neovim 0.9.5 work server to prevent missing C parser errors
     "MeanderingProgrammer/render-markdown.nvim",
-    tag = "v5.0.0",
-    ft = { "markdown" },
-    dependencies = { "nvim-treesitter/nvim-treesitter" },
-    opts = {
-      enabled = true,
-      file_types = { "markdown" },
-      render_modes = { "n", "v", "ic", "c" },
-    },
-    config = function(_, opts)
-      vim.api.nvim_create_autocmd("FileType", {
-        pattern = "markdown",
-        callback = function()
-          vim.opt_local.conceallevel = 2
-        end,
-      })
-      pcall(require("render-markdown").setup, opts)
-    end,
+    enabled = false,
   },
   {
     -- img-clip.nvim: paste screenshot images directly from clipboard into markdown
