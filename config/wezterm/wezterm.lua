@@ -35,6 +35,9 @@ config.keys = {
 
   -- WezTerm Copy mode (Cmd+Shift+C)
   { key = "c", mods = "CMD|SHIFT", action = wezterm.action.ActivateCopyMode },
+
+  -- Map Cmd+Shift+V to send Ctrl+Shift+V to Herdr for remote image paste
+  { key = "v", mods = "CMD|SHIFT", action = wezterm.action.SendKey({ key = "V", mods = "CTRL|SHIFT" }) },
 }
 
 return config
