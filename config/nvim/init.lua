@@ -188,14 +188,49 @@ if vim.treesitter then
   local orig_query = vim.treesitter.query
   if type(orig_query) == "function" then
     local query_mod = setmetatable({
-      get = function(...)
-        if vim.treesitter.query_get then return vim.treesitter.query_get(...) end
-        local ok, res = pcall(vim.treesitter.get_query or function() return nil end, ...)
-        return ok and res or nil
+      get = function(lang, query_name)
+        if vim.treesitter.get_query then
+          local q = vim.treesitter.get_query(lang, query_name)
+          if q then return q end
+        end
+        local files = vim.api.nvim_get_runtime_file(string.format("queries/%s/%s.scm", lang, query_name), true)
+        if #files > 0 then
+          local query_text = {}
+          for _, f in ipairs(files) do
+            local lines = vim.fn.readfile(f)
+            if lines and #lines > 0 then
+              table.insert(query_text, table.concat(lines, "\n"))
+            end
+          end
+          local text = table.concat(query_text, "\n")
+          if #text > 0 and vim.treesitter.parse_query then
+            local ok, parsed = pcall(vim.treesitter.parse_query, lang, text)
+            if ok and parsed then return parsed end
+          end
+        end
+        return nil
       end,
-      get_query = function(...)
-        local ok, res = pcall(vim.treesitter.get_query or function() return nil end, ...)
-        return ok and res or nil
+      get_query = function(lang, query_name)
+        if vim.treesitter.get_query then
+          local q = vim.treesitter.get_query(lang, query_name)
+          if q then return q end
+        end
+        local files = vim.api.nvim_get_runtime_file(string.format("queries/%s/%s.scm", lang, query_name), true)
+        if #files > 0 then
+          local query_text = {}
+          for _, f in ipairs(files) do
+            local lines = vim.fn.readfile(f)
+            if lines and #lines > 0 then
+              table.insert(query_text, table.concat(lines, "\n"))
+            end
+          end
+          local text = table.concat(query_text, "\n")
+          if #text > 0 and vim.treesitter.parse_query then
+            local ok, parsed = pcall(vim.treesitter.parse_query, lang, text)
+            if ok and parsed then return parsed end
+          end
+        end
+        return nil
       end,
       parse = function(...)
         local ok, res = pcall(vim.treesitter.parse_query or function() return nil end, ...)
