@@ -1,6 +1,9 @@
 # Auto-register MobaXterm xauth cookie into ~/.display_env (CSH / TCSH)
 if ( $?DISPLAY ) then
-    set _cookie = `xauth list | grep -m 1 "COOKIE" | awk '{print $3}'`
+    set _cookie = `xauth list $DISPLAY | head -n 1 | awk '{print $3}'`
+    if ( "${_cookie}" == "" ) then
+        set _cookie = `xauth list | tail -n 1 | awk '{print $3}'`
+    endif
     set _d = `echo $DISPLAY | sed 's/.*:\([0-9]*\).*/\1/'`
     set _host = `hostname`
     if ( "${_cookie}" != "" && "${_d}" != "" ) then
@@ -8,7 +11,6 @@ if ( $?DISPLAY ) then
         echo "xauth add localhost/unix:${_d} MIT-MAGIC-COOKIE-1 ${_cookie}" >> ~/.display_env
         echo "xauth add localhost:${_d}.0 MIT-MAGIC-COOKIE-1 ${_cookie}" >> ~/.display_env
         echo "xauth add ${_host}/unix:${_d} MIT-MAGIC-COOKIE-1 ${_cookie}" >> ~/.display_env
-        echo "xauth add ${_host}:${_d}.0 MIT-MAGIC-COOKIE-1 ${_cookie}" >> ~/.display_env
     endif
 endif
 
