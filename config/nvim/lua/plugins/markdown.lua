@@ -33,6 +33,8 @@ return {
     keys = {
       { "<leader>p", "<cmd>PasteImage<cr>", desc = "Paste image from clipboard" },
       { "<C-S-v>", "<cmd>PasteImage<cr>", desc = "Paste image from clipboard" },
+      { "<D-S-v>", "<cmd>PasteImage<cr>", desc = "Paste image from clipboard" },
+      { "<D-v>", "<cmd>PasteImage<cr>", desc = "Paste image from clipboard" },
     },
   },
 }

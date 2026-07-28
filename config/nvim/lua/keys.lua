@@ -13,12 +13,17 @@ vim.keymap.set("n", "<C-a>", "ggVG", { desc = "Select all" })
 -- intact so you can paste the same thing repeatedly.
 vim.keymap.set("x", "p", '"_dP', { desc = "Paste without clobbering clipboard" })
 
--- Ctrl+Shift+V pastes system clipboard in insert, command, and normal modes
+-- Ctrl+Shift+V / Cmd+Shift+V / Cmd+V pastes system clipboard in insert, command, and normal modes
 vim.keymap.set({ "i", "c" }, "<C-S-v>", "<C-r>+", { desc = "Paste system clipboard" })
+vim.keymap.set({ "i", "c" }, "<D-S-v>", "<C-r>+", { desc = "Paste system clipboard" })
+vim.keymap.set({ "i", "c" }, "<D-v>", "<C-r>+", { desc = "Paste system clipboard" })
 vim.keymap.set("n", "<C-S-v>", '"+p', { desc = "Paste system clipboard" })
+vim.keymap.set("n", "<D-S-v>", '"+p', { desc = "Paste system clipboard" })
+vim.keymap.set("n", "<D-v>", '"+p', { desc = "Paste system clipboard" })
 
--- Ctrl+Shift+C copies selection to system clipboard in visual mode
+-- Ctrl+Shift+C / Cmd+Shift+C copies selection to system clipboard in visual mode
 vim.keymap.set("v", "<C-S-c>", '"+y', { desc = "Copy selection to system clipboard" })
+vim.keymap.set("v", "<D-S-c>", '"+y', { desc = "Copy selection to system clipboard" })
 
 -- Toggle spell check on/off
 vim.keymap.set("n", "<leader>us", "<cmd>set spell!<cr>", { desc = "Toggle spell check" })
