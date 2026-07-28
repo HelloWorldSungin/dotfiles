@@ -4,10 +4,10 @@ if ( $?DISPLAY ) then
     set _d = `echo $DISPLAY | sed 's/.*:\([0-9]*\).*/\1/'`
     if ( "$_cookie" != "" && "$_d" != "" ) then
         echo "setenv DISPLAY $DISPLAY" >! ~/.display_env
-        echo "xauth add localhost/unix:$_d MIT-MAGIC-COOKIE-1 $_cookie >& /dev/null" >> ~/.display_env
-        echo "xauth add localhost:$_d.0 MIT-MAGIC-COOKIE-1 $_cookie >& /dev/null" >> ~/.display_env
-        echo "xauth add \`hostname\`/unix:$_d MIT-MAGIC-COOKIE-1 $_cookie >& /dev/null" >> ~/.display_env
-        echo "xauth add \`hostname\`:$_d.0 MIT-MAGIC-COOKIE-1 $_cookie >& /dev/null" >> ~/.display_env
+        echo "xauth add localhost/unix:$_d MIT-MAGIC-COOKIE-1 $_cookie" >> ~/.display_env
+        echo "xauth add localhost:$_d.0 MIT-MAGIC-COOKIE-1 $_cookie" >> ~/.display_env
+        echo "xauth add \`hostname\`/unix:$_d MIT-MAGIC-COOKIE-1 $_cookie" >> ~/.display_env
+        echo "xauth add \`hostname\`:$_d.0 MIT-MAGIC-COOKIE-1 $_cookie" >> ~/.display_env
     endif
 endif
 
