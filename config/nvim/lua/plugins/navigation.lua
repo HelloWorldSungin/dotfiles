@@ -8,7 +8,12 @@ return {
     priority = 1000,
     lazy = false,
     opts = {
-      picker = { enabled = true },
+      picker = {
+        enabled = true,
+        icons = {
+          files = { enabled = false },
+        },
+      },
       notifier = { enabled = false }, -- Disabled for Neovim 0.9.5 compatibility
       input = { enabled = true },
     },
@@ -26,6 +31,7 @@ return {
     opts = {
       default_file_explorer = true,
       lsp_file_methods = { enabled = false },
+      columns = {}, -- Clean ASCII file list without missing icon boxes
       view_options = { show_hidden = true },
     },
     keys = {
