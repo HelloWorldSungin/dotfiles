@@ -183,6 +183,27 @@ if vim.g.clipboard == nil then
   end
 end
 
+-- Shim vim.treesitter.language for Neovim 0.9.5 compatibility (suppress no parser errors)
+if vim.treesitter then
+  vim.treesitter.language = vim.treesitter.language or {}
+  local orig_add = vim.treesitter.language.add
+  vim.treesitter.language.add = function(lang, opts)
+    if orig_add then
+      local ok, res = pcall(orig_add, lang, opts)
+      if ok then return res end
+    end
+    return false
+  end
+  local orig_req = vim.treesitter.language.require_language
+  if orig_req then
+    vim.treesitter.language.require_language = function(lang, path, silent)
+      local ok, res = pcall(orig_req, lang, path, silent)
+      if ok then return res end
+      return false
+    end
+  end
+end
+
 -- Shim vim.treesitter.query for Neovim 0.9.5 compatibility (where vim.treesitter.query is a function)
 if vim.treesitter then
   local orig_query = vim.treesitter.query
