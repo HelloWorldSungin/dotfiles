@@ -20,3 +20,6 @@ vim.keymap.set("n", "<C-S-v>", '"+p', { desc = "Paste system clipboard" })
 -- Ctrl+Shift+C copies selection to system clipboard in visual mode
 vim.keymap.set("v", "<C-S-c>", '"+y', { desc = "Copy selection to system clipboard" })
 
+-- Toggle spell check on/off
+vim.keymap.set("n", "<leader>us", "<cmd>set spell!<cr>", { desc = "Toggle spell check" })
+

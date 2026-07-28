@@ -12,6 +12,13 @@ vim.islist = vim.islist or vim.tbl_islist or function(t)
   return true
 end
 
+-- Ensure .md files are detected as markdown filetype in Neovim 0.9.5
+vim.filetype.add({
+  extension = {
+    md = "markdown",
+  },
+})
+
 -- Polyfill vim.iter (introduced in Neovim 0.10, used by neogit diff.lua)
 if not vim.iter then
   local function create_iter(list)
