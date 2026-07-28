@@ -14,7 +14,9 @@ return {
     ft = { "markdown" },
     dependencies = { "nvim-treesitter/nvim-treesitter" },
     opts = {
+      enabled = true,
       file_types = { "markdown" },
+      render_modes = true,
     },
   },
   {
