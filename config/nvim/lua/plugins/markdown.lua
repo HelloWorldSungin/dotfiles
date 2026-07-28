@@ -16,7 +16,7 @@ return {
     opts = {
       enabled = true,
       file_types = { "markdown" },
-      render_modes = true,
+      render_modes = { "n", "v", "ic", "c" },
     },
     init = function()
       vim.opt.conceallevel = 2
