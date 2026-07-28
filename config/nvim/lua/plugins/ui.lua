@@ -5,7 +5,15 @@ return {
     -- memorizing docs up front.
     "folke/which-key.nvim",
     event = "VeryLazy",
-    opts = {},
+    opts = {
+      icons = {
+        breadcrumb = ">>",
+        separator = "->",
+        group = "+",
+        mappings = false,
+        rules = false,
+      },
+    },
   },
   {
     -- Rose Pine (moon variant) - same theme as the WezTerm client, so the
