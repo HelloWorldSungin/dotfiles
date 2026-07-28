@@ -19,8 +19,14 @@ return {
       file_types = { "markdown" },
       render_modes = { "n", "v", "ic", "c" },
     },
-    init = function()
-      vim.opt.conceallevel = 2
+    config = function(_, opts)
+      require("render-markdown").setup(opts)
+      vim.api.nvim_create_autocmd("FileType", {
+        pattern = "markdown",
+        callback = function()
+          vim.opt_local.conceallevel = 2
+        end,
+      })
     end,
   },
   {
