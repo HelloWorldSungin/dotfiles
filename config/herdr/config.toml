@@ -16,8 +16,8 @@ show_agent_labels_on_pane_borders = true
 accent = "cyan"
 
 [keys]
-# Move remote image paste to ctrl+alt+v so ctrl+shift+v stays free for text paste
-remote_image_paste = "ctrl+alt+v"
+# Remote image paste: converts copied Mac screenshot into remote file upload for Herdr agent sessions
+remote_image_paste = "ctrl+shift+v"
 
 # Custom split pane shortcuts (prefix Ctrl+b, then key)
 split_vertical = "prefix+v"
