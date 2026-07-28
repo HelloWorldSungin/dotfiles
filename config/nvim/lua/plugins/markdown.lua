@@ -18,6 +18,9 @@ return {
       file_types = { "markdown" },
       render_modes = true,
     },
+    init = function()
+      vim.opt.conceallevel = 2
+    end,
   },
   {
     -- img-clip.nvim: paste screenshot images directly from clipboard into markdown
