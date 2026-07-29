@@ -1,5 +1,5 @@
 [Unit]
-Description=CT110 VPN to home ethernet internet failover
+Description=CT110 probe-governed VPN to home ethernet internet failover
 Documentation=file:/usr/local/share/doc/ct110-network-failover/README.md
 Wants=network-online.target
 After=systemd-networkd.service network-online.target

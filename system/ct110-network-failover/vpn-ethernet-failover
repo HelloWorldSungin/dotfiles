@@ -162,7 +162,7 @@ read_state() {
 }
 
 main() {
-  local state failure_count=0 success_count=0 probe_count=0
+  local state persisted_state failure_count=0 success_count=0 probe_count=0
 
   if (( EUID != 0 )) && [[ ${ALLOW_NON_ROOT_FOR_TESTS:-0} != 1 ]]; then
     printf 'vpn-ethernet-failover must run as root\n' >&2
@@ -180,20 +180,19 @@ main() {
     return 1
   }
 
-  state=$(read_state)
-  if [[ $state != unknown ]]; then
-    set_routing_state "$state" || {
-      log "fatal: could not restore persisted routing state ${state}"
-      return 1
-    }
-  fi
-  log "started in ${state} state; thresholds failure=${FAILURE_THRESHOLD} success=${SUCCESS_THRESHOLD}"
+  persisted_state=$(read_state)
+  state=home
+  set_routing_state "$state" || {
+    log "fatal: could not establish safe startup routing state"
+    return 1
+  }
+  log "started in home safety state; persisted=${persisted_state}; thresholds failure=${FAILURE_THRESHOLD} success=${SUCCESS_THRESHOLD}"
 
   while true; do
     # networkctl reload can re-add PVE's generated unmetered gateway while the
     # daemon is already in home state. Reconcile every cycle so stale routes
     # cannot silently override the persisted health decision.
-    if [[ $state != unknown ]] && ! reconcile_routing_state "$state"; then
+    if ! reconcile_routing_state "$state"; then
       log "fatal: could not reconcile ${state} routing state"
       return 1
     fi
@@ -201,7 +200,7 @@ main() {
     if probe_vpn_egress; then
       ((success_count += 1))
       failure_count=0
-      if [[ $state == home || $state == unknown ]]; then
+      if [[ $state == home ]]; then
         log "eth1 egress probe healthy (${success_count}/${SUCCESS_THRESHOLD})"
       fi
       if (( success_count >= SUCCESS_THRESHOLD )) && [[ $state != vpn ]]; then
@@ -216,7 +215,7 @@ main() {
     else
       ((failure_count += 1))
       success_count=0
-      if [[ $state == vpn || $state == unknown ]]; then
+      if [[ $state == vpn ]]; then
         log "eth1 egress probe failed (${failure_count}/${FAILURE_THRESHOLD})"
       fi
       if (( failure_count >= FAILURE_THRESHOLD )) && [[ $state != home ]]; then

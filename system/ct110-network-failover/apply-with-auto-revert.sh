@@ -4,6 +4,7 @@ set -euo pipefail
 CTID=${CTID:-110}
 REVERT_SECONDS=${REVERT_SECONDS:-180}
 UNIT_NAME=fm-ct110-network-apply-revert
+LOCK_FILE=/run/lock/fm-ct110-network-apply.lock
 source_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 if (( EUID != 0 )); then
@@ -12,6 +13,23 @@ if (( EUID != 0 )); then
 fi
 if ! command -v pct >/dev/null 2>&1; then
   printf 'pct is required; run this on the Proxmox host, not inside CT110.\n' >&2
+  exit 1
+fi
+if ! command -v flock >/dev/null 2>&1; then
+  printf 'flock is required on the Proxmox host.\n' >&2
+  exit 1
+fi
+
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  printf 'Another CT110 network apply is in progress.\n' >&2
+  exit 1
+fi
+if systemctl is-active --quiet "$UNIT_NAME.timer" ||
+  systemctl is-active --quiet "$UNIT_NAME.service" ||
+  systemctl is-failed --quiet "$UNIT_NAME.timer" ||
+  systemctl is-failed --quiet "$UNIT_NAME.service"; then
+  printf 'A prior CT110 network apply rollback is active or failed; preserve and resolve it before retrying.\n' >&2
   exit 1
 fi
 
@@ -87,8 +105,6 @@ pct exec "\$CTID" -- curl --ipv4 --silent --show-error --fail --connect-timeout 
 EOF
 chmod 700 "$rollback_dir/rollback.sh"
 
-systemctl stop "$UNIT_NAME.timer" "$UNIT_NAME.service" 2>/dev/null || true
-systemctl reset-failed "$UNIT_NAME.service" 2>/dev/null || true
 systemd-run --unit="$UNIT_NAME" --on-active="${REVERT_SECONDS}s" "$rollback_dir/rollback.sh"
 printf 'Armed %ss host-side auto-revert before touching CT110.\n' "$REVERT_SECONDS"
 

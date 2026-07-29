@@ -4,6 +4,7 @@ set -euo pipefail
 CTID=${CTID:-110}
 REVERT_SECONDS=${REVERT_SECONDS:-180}
 UNIT_NAME=fm-ct110-failover-e2e-revert
+LOCK_FILE=/run/lock/fm-ct110-failover-e2e.lock
 TEST_DESTINATION=1.1.1.1
 DROPIN_DIR=/run/systemd/system/vpn-ethernet-failover.service.d
 DROPIN=$DROPIN_DIR/90-e2e-failure-injection.conf
@@ -12,6 +13,26 @@ if (( EUID != 0 )) || ! command -v pct >/dev/null 2>&1; then
   printf 'Run this script as root on the Proxmox host.\n' >&2
   exit 1
 fi
+if ! command -v flock >/dev/null 2>&1; then
+  printf 'flock is required on the Proxmox host.\n' >&2
+  exit 1
+fi
+
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  printf 'Another CT110 failover E2E run is in progress.\n' >&2
+  exit 1
+fi
+if systemctl is-active --quiet "$UNIT_NAME.timer" ||
+  systemctl is-active --quiet "$UNIT_NAME.service" ||
+  systemctl is-failed --quiet "$UNIT_NAME.timer" ||
+  systemctl is-failed --quiet "$UNIT_NAME.service"; then
+  printf 'A prior CT110 failover E2E rollback is active or failed; preserve and resolve it before retrying.\n' >&2
+  exit 1
+fi
+
+payload=$(mktemp /tmp/ct110-vpn-ethernet-failover-e2e.XXXXXX)
+trap 'rm -f -- "$payload"' EXIT
 
 # First prove the simple scoped path that the test will later make unreachable.
 # This avoids turning a broken test endpoint into a false network finding.
@@ -29,8 +50,6 @@ pct exec $CTID -- systemctl restart vpn-ethernet-failover.service
 EOF
 chmod 700 "$rollback"
 
-systemctl stop "$UNIT_NAME.timer" "$UNIT_NAME.service" 2>/dev/null || true
-systemctl reset-failed "$UNIT_NAME.service" 2>/dev/null || true
 systemd-run --unit="$UNIT_NAME" --on-active="${REVERT_SECONDS}s" "$rollback"
 printf 'Armed %ss host-side auto-revert before failure simulation.\n' "$REVERT_SECONDS"
 
@@ -41,11 +60,16 @@ pct exec "$CTID" -- mkdir -p "$DROPIN_DIR"
 printf '%s\n' \
   '[Service]' \
   'Environment="PROBE_URLS=https://1.1.1.1/cdn-cgi/trace"' \
-  > /tmp/ct110-vpn-ethernet-failover-e2e.conf
-pct push "$CTID" /tmp/ct110-vpn-ethernet-failover-e2e.conf "$DROPIN"
+  >"$payload"
+pct push "$CTID" "$payload" "$DROPIN"
 pct exec "$CTID" -- systemctl daemon-reload
 pct exec "$CTID" -- systemctl restart vpn-ethernet-failover.service
 
+deadline=$((SECONDS + 40))
+until pct exec "$CTID" -- sh -c "test \"\$(cat /var/lib/vpn-ethernet-failover/state)\" = vpn"; do
+  (( SECONDS < deadline )) || { printf 'Timed out waiting for startup VPN proof.\n' >&2; exit 1; }
+  sleep 2
+done
 before=$(pct exec "$CTID" -- curl --ipv4 --silent --show-error --fail --connect-timeout 4 --max-time 10 https://api.ipify.org)
 pct exec "$CTID" -- ip -4 route add unreachable "$TEST_DESTINATION" metric 1
 
@@ -56,8 +80,8 @@ until pct exec "$CTID" -- sh -c "test \"\$(cat /var/lib/vpn-ethernet-failover/st
   (( SECONDS < deadline )) || { printf 'Timed out waiting for failover.\n' >&2; exit 1; }
   sleep 2
 done
-# Reproduce Proxmox's stale-config edge while failed over: networkd will read
-# the healthy metric from disk, and the running daemon must reconcile it back.
+# Reproduce Proxmox's stale-config edge while failed over: networkd will replay
+# its non-preferred baseline, and the running daemon must retain failed state.
 pct exec "$CTID" -- networkctl reload
 deadline=$((SECONDS + 15))
 until pct exec "$CTID" -- ip -4 route get 8.8.8.8 | grep -q 'dev eth0'; do
@@ -96,5 +120,4 @@ pct exec "$CTID" -- systemctl restart vpn-ethernet-failover.service
 pct exec "$CTID" -- curl --ipv4 --silent --show-error --fail --connect-timeout 4 --max-time 10 https://api.ipify.org >/dev/null
 systemctl stop "$UNIT_NAME.timer"
 systemctl reset-failed "$UNIT_NAME.service" 2>/dev/null || true
-rm -f /tmp/ct110-vpn-ethernet-failover-e2e.conf
 printf 'Failover and positive-proof failback passed; production probes restored and auto-revert cancelled.\n'

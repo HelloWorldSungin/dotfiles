@@ -93,16 +93,16 @@ default via 192.168.50.1 dev eth1 proto static metric 100
 default via 192.168.68.1 dev eth0 proto static metric 500
 ROUTES
 printf 'vpn\n' >"$case_failover/state/current"
-printf '%s\n' failure failure success failure failure failure >"$case_failover/results"
+printf '%s\n' success success success failure failure success failure failure failure >"$case_failover/results"
 # Simulate networkctl re-adding PVE's unmetered gateway while the daemon runs.
 printf '%s\n' 'default via 192.168.50.1 dev eth1 proto static' >"$case_failover/inject-route"
-run_case "$case_failover" 6
+run_case "$case_failover" 9
 [[ $(<"$case_failover/state/current") == home ]] || fail 'did not enter home state'
 assert_contains "$case_failover/routes" 'default via 192.168.50.1 dev eth1 proto static metric 1000'
 assert_contains "$case_failover/routes" 'default via 192.168.68.1 dev eth0 proto static metric 500'
 [[ $(grep -Fc -- 'default via 192.168.50.1' "$case_failover/routes") == 1 ]] || fail 'stale PVE VPN route was not reconciled'
 [[ $(grep -Fc -- 'transition vpn->home after 3 consecutive failed' "$case_failover/log") == 1 ]] || fail 'failover transition was not logged exactly once'
-[[ $(wc -l <"$case_failover/curl-calls") == 6 ]] || fail 'unexpected failover probe count'
+[[ $(wc -l <"$case_failover/curl-calls") == 9 ]] || fail 'unexpected failover probe count'
 assert_contains "$case_failover/curl-calls" '--interface eth1'
 
 # Two successes are not enough, and a failure resets the recovery streak.
@@ -119,16 +119,27 @@ run_case "$case_failback" 6
 assert_contains "$case_failback/routes" 'default via 192.168.50.1 dev eth1 proto static metric 100'
 [[ $(grep -Fc -- 'transition home->vpn after 3 consecutive successful' "$case_failback/log") == 1 ]] || fail 'failback transition was not logged exactly once'
 
-# An unknown startup state also requires three positive probes before selecting VPN.
+# A startup with persisted VPN state still requires three fresh positive probes.
 case_initial="$tmp/initial"
 make_fakes "$case_initial"
 cat >"$case_initial/routes" <<'ROUTES'
-default via 192.168.50.1 dev eth1
+default via 192.168.50.1 dev eth1 proto static metric 100
 default via 192.168.68.1 dev eth0 proto static metric 500
 ROUTES
+printf 'vpn\n' >"$case_initial/state/current"
+printf '%s\n' success success >"$case_initial/results"
+run_case "$case_initial" 2
+[[ $(<"$case_initial/state/current") == home ]] || fail 'startup trusted persisted VPN state without fresh proof'
+assert_contains "$case_initial/routes" 'default via 192.168.50.1 dev eth1 proto static metric 1000'
+assert_contains "$case_initial/log" 'started in home safety state; persisted=vpn'
+
+# The third consecutive startup success promotes the VPN.
 printf '%s\n' success success success >"$case_initial/results"
 run_case "$case_initial" 3
-[[ $(<"$case_initial/state/current") == vpn ]] || fail 'unknown state selected VPN without positive proof'
-assert_contains "$case_initial/log" 'transition unknown->vpn after 3 consecutive successful'
+[[ $(<"$case_initial/state/current") == vpn ]] || fail 'startup did not select VPN after positive proof'
+assert_contains "$case_initial/log" 'transition home->vpn after 3 consecutive successful'
+
+grep -Fq 'Metric=1000' "$repo_root/system/ct110-network-failover/eth1-failover.conf" ||
+  fail 'static eth1 route is VPN-preferred'
 
 printf 'vpn-ethernet-failover tests passed\n'
