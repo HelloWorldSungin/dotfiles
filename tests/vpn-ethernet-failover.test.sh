@@ -154,6 +154,12 @@ assert_contains "$apply_script" 'for unit in "$APPLY_UNIT_NAME" "$E2E_UNIT_NAME"
 assert_contains "$e2e_script" 'for unit in "$APPLY_UNIT_NAME" "$E2E_UNIT_NAME"; do'
 assert_contains "$apply_script" 'exit "\$recovery_failed"'
 assert_contains "$e2e_script" 'exit "\$recovery_failed"'
+assert_contains "$apply_script" 'stop_originating_workflow || exit 1'
+assert_contains "$e2e_script" 'stop_originating_workflow || exit 1'
+assert_contains "$apply_script" 'flock -w 15 9 || exit 1'
+assert_contains "$e2e_script" 'flock -w 15 9 || exit 1'
+assert_contains "$apply_script" '--property=KillMode=control-group'
+assert_contains "$e2e_script" '--property=KillMode=control-group'
 assert_contains "$e2e_script" 'MIN_REVERT_SECONDS=$((WORKFLOW_BUDGET_SECONDS + ROLLBACK_MARGIN_SECONDS))'
 assert_contains "$e2e_script" 'WORKFLOW_DEADLINE=$((SECONDS + REVERT_SECONDS - ROLLBACK_MARGIN_SECONDS))'
 

@@ -6,6 +6,8 @@ REVERT_SECONDS=${REVERT_SECONDS:-180}
 APPLY_UNIT_NAME=fm-ct110-network-apply-revert
 E2E_UNIT_NAME=fm-ct110-failover-e2e-revert
 UNIT_NAME=$APPLY_UNIT_NAME
+WORKFLOW_UNIT=fm-ct110-network-apply-workflow
+WORKFLOW_SCOPE=${WORKFLOW_UNIT}.scope
 LOCK_FILE=/run/lock/ct110-network-failover.lock
 RECOVERY_MARKER=/var/lib/vz/snippets/ct110-network-failover-recovery.pending
 source_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -21,6 +23,21 @@ fi
 if ! command -v flock >/dev/null 2>&1; then
   printf 'flock is required on the Proxmox host.\n' >&2
   exit 1
+fi
+if ! command -v systemd-run >/dev/null 2>&1; then
+  printf 'systemd-run is required on the Proxmox host.\n' >&2
+  exit 1
+fi
+if [[ ${CT110_NETWORK_FAILOVER_SCOPED:-0} != 1 ]]; then
+  exec systemd-run \
+    --scope \
+    --quiet \
+    --unit="$WORKFLOW_UNIT" \
+    --property=KillMode=control-group \
+    --property=TimeoutStopSec=15s \
+    --property=SendSIGKILL=yes \
+    --setenv=CT110_NETWORK_FAILOVER_SCOPED=1 \
+    "$source_dir/$(basename "${BASH_SOURCE[0]}")" "$@"
 fi
 
 exec 9>"$LOCK_FILE"
@@ -89,10 +106,28 @@ backup=$rollback_dir/files
 service_was_enabled=$service_was_enabled
 service_was_active=$service_was_active
 recovery_marker=$RECOVERY_MARKER
+workflow_scope=$WORKFLOW_SCOPE
+lock_file=$LOCK_FILE
 recovery_failed=0
 attempt() {
   "\$@" || recovery_failed=1
 }
+stop_originating_workflow() {
+  local state
+  state=\$(systemctl show --property=ActiveState --value "\$workflow_scope") || return 1
+  case \$state in
+    active | activating | reloading | deactivating)
+      systemctl stop "\$workflow_scope" || return 1
+      ;;
+    inactive | failed) ;;
+    *) return 1 ;;
+  esac
+  state=\$(systemctl show --property=ActiveState --value "\$workflow_scope") || return 1
+  [[ \$state == inactive || \$state == failed ]]
+}
+stop_originating_workflow || exit 1
+exec 9>"\$lock_file" || exit 1
+flock -w 15 9 || exit 1
 # Stop the route manager first, then add a temporary preferred copy of the
 # previously working VPN route before restoring any files.
 attempt pct exec "\$CTID" -- sh -c \

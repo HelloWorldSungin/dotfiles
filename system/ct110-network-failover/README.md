@@ -75,7 +75,9 @@ exercise both transitions under a separate auto-revert:
 The apply and E2E scripts share one host lock and recovery marker. Either script
 refuses to start while the other is running or any rollback remains active,
 failed, or unresolved. The E2E timer defaults to four minutes and reserves a
-30-second rollback margin beyond its bounded workflow deadline.
+30-second rollback margin beyond its bounded workflow deadline. Each script
+runs in its own systemd scope; an expired timer stops that entire process tree,
+waits for it to exit, and takes the shared lock before restoring guest state.
 
 Routine inspection from CT110:
 
