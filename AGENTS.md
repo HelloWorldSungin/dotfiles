@@ -16,6 +16,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - Nix flakes only read git-tracked files: `git add` any new `bin/`/`home/` file
   before `nix build ...activationPackage`, or evaluation fails with "not tracked
   by Git".
+- CT110 root networking failover is tracked in `system/ct110-network-failover/`;
+  its README documents the Proxmox-owned boundary, guarded apply, and E2E test.
 
 ## Maintaining this file
 
