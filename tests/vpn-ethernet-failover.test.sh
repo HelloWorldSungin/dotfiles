@@ -3,6 +3,8 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 program="$repo_root/system/ct110-network-failover/vpn-ethernet-failover"
+apply_script="$repo_root/system/ct110-network-failover/apply-with-auto-revert.sh"
+e2e_script="$repo_root/system/ct110-network-failover/e2e-failover-test.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
@@ -141,5 +143,18 @@ assert_contains "$case_initial/log" 'transition home->vpn after 3 consecutive su
 
 grep -Fq 'Metric=1000' "$repo_root/system/ct110-network-failover/eth1-failover.conf" ||
   fail 'static eth1 route is VPN-preferred'
+
+apply_lock=$(sed -n 's/^LOCK_FILE=//p' "$apply_script")
+e2e_lock=$(sed -n 's/^LOCK_FILE=//p' "$e2e_script")
+[[ -n $apply_lock && $apply_lock == "$e2e_lock" ]] || fail 'host operations do not share one lock'
+apply_marker=$(sed -n 's/^RECOVERY_MARKER=//p' "$apply_script")
+e2e_marker=$(sed -n 's/^RECOVERY_MARKER=//p' "$e2e_script")
+[[ -n $apply_marker && $apply_marker == "$e2e_marker" ]] || fail 'host operations do not share one recovery marker'
+assert_contains "$apply_script" 'for unit in "$APPLY_UNIT_NAME" "$E2E_UNIT_NAME"; do'
+assert_contains "$e2e_script" 'for unit in "$APPLY_UNIT_NAME" "$E2E_UNIT_NAME"; do'
+assert_contains "$apply_script" 'exit "\$recovery_failed"'
+assert_contains "$e2e_script" 'exit "\$recovery_failed"'
+assert_contains "$e2e_script" 'MIN_REVERT_SECONDS=$((WORKFLOW_BUDGET_SECONDS + ROLLBACK_MARGIN_SECONDS))'
+assert_contains "$e2e_script" 'WORKFLOW_DEADLINE=$((SECONDS + REVERT_SECONDS - ROLLBACK_MARGIN_SECONDS))'
 
 printf 'vpn-ethernet-failover tests passed\n'

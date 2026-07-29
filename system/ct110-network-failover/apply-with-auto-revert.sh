@@ -3,8 +3,11 @@ set -euo pipefail
 
 CTID=${CTID:-110}
 REVERT_SECONDS=${REVERT_SECONDS:-180}
-UNIT_NAME=fm-ct110-network-apply-revert
-LOCK_FILE=/run/lock/fm-ct110-network-apply.lock
+APPLY_UNIT_NAME=fm-ct110-network-apply-revert
+E2E_UNIT_NAME=fm-ct110-failover-e2e-revert
+UNIT_NAME=$APPLY_UNIT_NAME
+LOCK_FILE=/run/lock/ct110-network-failover.lock
+RECOVERY_MARKER=/var/lib/vz/snippets/ct110-network-failover-recovery.pending
 source_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 if (( EUID != 0 )); then
@@ -22,14 +25,26 @@ fi
 
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
-  printf 'Another CT110 network apply is in progress.\n' >&2
+  printf 'Another CT110 network failover operation is in progress.\n' >&2
   exit 1
 fi
-if systemctl is-active --quiet "$UNIT_NAME.timer" ||
-  systemctl is-active --quiet "$UNIT_NAME.service" ||
-  systemctl is-failed --quiet "$UNIT_NAME.timer" ||
-  systemctl is-failed --quiet "$UNIT_NAME.service"; then
-  printf 'A prior CT110 network apply rollback is active or failed; preserve and resolve it before retrying.\n' >&2
+
+recovery_pending() {
+  local unit
+  [[ -e $RECOVERY_MARKER ]] && return 0
+  for unit in "$APPLY_UNIT_NAME" "$E2E_UNIT_NAME"; do
+    if systemctl is-active --quiet "$unit.timer" ||
+      systemctl is-active --quiet "$unit.service" ||
+      systemctl is-failed --quiet "$unit.timer" ||
+      systemctl is-failed --quiet "$unit.service"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+if recovery_pending; then
+  printf 'A prior CT110 network recovery is active or unresolved; preserve and resolve it before retrying.\n' >&2
   exit 1
 fi
 
@@ -73,39 +88,58 @@ CTID=$CTID
 backup=$rollback_dir/files
 service_was_enabled=$service_was_enabled
 service_was_active=$service_was_active
+recovery_marker=$RECOVERY_MARKER
+recovery_failed=0
+attempt() {
+  "\$@" || recovery_failed=1
+}
 # Stop the route manager first, then add a temporary preferred copy of the
 # previously working VPN route before restoring any files.
-pct exec "\$CTID" -- systemctl stop vpn-ethernet-failover.service >/dev/null 2>&1 || true
-pct exec "\$CTID" -- ip -4 route replace default via 192.168.50.1 dev eth1 metric 10 || true
+attempt pct exec "\$CTID" -- sh -c \
+  "systemctl stop vpn-ethernet-failover.service >/dev/null 2>&1 || ! systemctl is-active --quiet vpn-ethernet-failover.service"
+attempt pct exec "\$CTID" -- ip -4 route replace default via 192.168.50.1 dev eth1 metric 10
 for target in ${targets[*]}; do
   encoded=\${target#/}
   if [[ -e "\$backup/\$encoded.absent" ]]; then
-    pct exec "\$CTID" -- rm -f "\$target"
+    attempt pct exec "\$CTID" -- rm -f "\$target"
   elif [[ -e "\$backup/\$encoded" ]]; then
-    pct exec "\$CTID" -- mkdir -p "\$(dirname "\$target")"
-    pct push "\$CTID" "\$backup/\$encoded" "\$target"
+    attempt pct exec "\$CTID" -- mkdir -p "\$(dirname "\$target")"
+    attempt pct push "\$CTID" "\$backup/\$encoded" "\$target"
+  else
+    printf 'Missing recovery snapshot for %s\n' "\$target" >&2
+    recovery_failed=1
   fi
 done
-pct exec "\$CTID" -- systemctl daemon-reload
+attempt pct exec "\$CTID" -- systemctl daemon-reload
 # networkctl reload is deliberately non-disruptive and closes Proxmox's stale-config gap.
-pct exec "\$CTID" -- networkctl reload || true
+attempt pct exec "\$CTID" -- networkctl reload
 if [[ \$service_was_enabled == yes ]]; then
-  pct exec "\$CTID" -- systemctl enable vpn-ethernet-failover.service >/dev/null 2>&1 || true
+  attempt pct exec "\$CTID" -- systemctl enable vpn-ethernet-failover.service
 else
-  pct exec "\$CTID" -- systemctl disable vpn-ethernet-failover.service >/dev/null 2>&1 || true
+  attempt pct exec "\$CTID" -- sh -c \
+    "systemctl disable vpn-ethernet-failover.service >/dev/null 2>&1 || ! systemctl is-enabled --quiet vpn-ethernet-failover.service"
 fi
 if [[ \$service_was_active == yes ]]; then
-  pct exec "\$CTID" -- systemctl start vpn-ethernet-failover.service || true
+  attempt pct exec "\$CTID" -- systemctl start vpn-ethernet-failover.service
 else
   # Restore PVE's unmetered default before removing the temporary metric-10 route.
-  pct exec "\$CTID" -- ip -4 route add default via 192.168.50.1 dev eth1 2>/dev/null || true
-  pct exec "\$CTID" -- ip -4 route del default via 192.168.50.1 dev eth1 metric 10 2>/dev/null || true
+  attempt pct exec "\$CTID" -- ip -4 route replace default via 192.168.50.1 dev eth1
+  attempt pct exec "\$CTID" -- sh -c \
+    "ip -4 route del default via 192.168.50.1 dev eth1 metric 10 2>/dev/null || { routes=\$(ip -4 route show default) || exit 1; ! printf '%s\\n' \"\$routes\" | grep -Eq 'via 192\\.168\\.50\\.1 dev eth1 .*metric 10([[:space:]]|\$)'; }"
 fi
-pct exec "\$CTID" -- curl --ipv4 --silent --show-error --fail --connect-timeout 4 --max-time 10 https://1.1.1.1/cdn-cgi/trace >/dev/null || true
+attempt pct exec "\$CTID" -- curl --ipv4 --silent --show-error --fail --connect-timeout 4 --max-time 10 https://1.1.1.1/cdn-cgi/trace
+if (( recovery_failed == 0 )); then
+  rm -f "\$recovery_marker" || recovery_failed=1
+fi
+exit "\$recovery_failed"
 EOF
 chmod 700 "$rollback_dir/rollback.sh"
 
-systemd-run --unit="$UNIT_NAME" --on-active="${REVERT_SECONDS}s" "$rollback_dir/rollback.sh"
+printf '%s\n' apply >"$RECOVERY_MARKER"
+if ! systemd-run --unit="$UNIT_NAME" --on-active="${REVERT_SECONDS}s" "$rollback_dir/rollback.sh"; then
+  rm -f "$RECOVERY_MARKER"
+  exit 1
+fi
 printf 'Armed %ss host-side auto-revert before touching CT110.\n' "$REVERT_SECONDS"
 
 install_from_repo() {
@@ -138,4 +172,11 @@ pct exec "$CTID" -- curl --interface eth1 --ipv4 --silent --show-error --fail --
 pct exec "$CTID" -- curl --ipv4 --silent --show-error --fail --connect-timeout 4 --max-time 10 https://api.ipify.org
 printf '\nLive routes and both egress paths verified. Cancelling auto-revert.\n'
 systemctl stop "$UNIT_NAME.timer"
+if systemctl is-active --quiet "$UNIT_NAME.service" ||
+  systemctl is-failed --quiet "$UNIT_NAME.service" ||
+  [[ ! -e $RECOVERY_MARKER ]]; then
+  printf 'The apply rollback started before cancellation; recovery state remains authoritative.\n' >&2
+  exit 1
+fi
 systemctl reset-failed "$UNIT_NAME.service" 2>/dev/null || true
+rm -f "$RECOVERY_MARKER"

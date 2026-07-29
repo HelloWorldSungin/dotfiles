@@ -72,6 +72,11 @@ exercise both transitions under a separate auto-revert:
 /tmp/ct110-network-failover/e2e-failover-test.sh
 ```
 
+The apply and E2E scripts share one host lock and recovery marker. Either script
+refuses to start while the other is running or any rollback remains active,
+failed, or unresolved. The E2E timer defaults to four minutes and reserves a
+30-second rollback margin beyond its bounded workflow deadline.
+
 Routine inspection from CT110:
 
 ```sh
