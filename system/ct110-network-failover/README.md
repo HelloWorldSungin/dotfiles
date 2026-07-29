@@ -6,27 +6,28 @@ service under `/etc` and `/usr/local`.
 
 ## Routing and health policy
 
-- The static `eth1` route via `192.168.50.1` is always non-preferred at metric
-  1000. Only the running service may promote it to metric 100 after three fresh,
+- The on-disk `eth1` route via `192.168.50.1` is non-preferred at metric 1000.
+  Only the running service may promote it to metric 100 after three fresh,
   consecutive successful probes. That gateway's upstream tunnel supplies the
   VPN exit.
 - `eth0` via the proven home gateway `192.168.68.1` stays installed at metric
   500. It is selected when the service raises the failed VPN route to metric
   1000.
-- Every five seconds the service makes real HTTPS requests with curl bound to
-  `eth1`. Either of two independent HTTP 204 endpoints is accepted.
+- Each health loop makes real HTTPS requests with curl bound to `eth1`, accepts
+  either of two independent HTTP 204 endpoints, then waits five seconds.
 - Three consecutive failures are required to select home ethernet. Three
   consecutive successes are required to return to the VPN. Opposite results
   reset the streak.
 - Every service start first selects home ethernet and requires the same three
   successful probes before selecting the VPN, even when the persisted state was
   `vpn`.
-- Probe streaks and every transition are logged to the system journal under
-  `vpn-ethernet-failover`.
+- Decision-direction probe streaks and every transition are logged to the
+  system journal under `vpn-ethernet-failover`.
 
 The VPN route is retained at metric 1000 during failover so interface-bound
 health probes can still test that path. Link state and gateway ICMP are never
-used as health evidence.
+used as health evidence. Connectivity has priority over VPN privacy: egress
+through the home public IP during a confirmed `eth1` outage is intentional.
 
 ## Durable layer and Proxmox boundary
 
@@ -50,7 +51,8 @@ A full container rebuild replaces the guest root filesystem and therefore
 removes the installed drop-ins, unit, and executable. The tracked copies remain
 in this repo, but an administrator must rerun `apply-with-auto-revert.sh` after
 a rebuild. The Proxmox `net0`/`net1` definitions, addresses, and MAC addresses
-remain host-owned and are intentionally not changed by this package.
+remain host-owned and are intentionally not changed by this package. The
+package also does not change DNS or the upstream VPN.
 
 ## Deployment and verification
 
