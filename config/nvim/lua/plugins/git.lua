@@ -20,101 +20,6 @@ return {
         snacks = false,          -- Disable Neogit's internal snacks finder wrapper bug on item selection
       },
     },
-    config = function(_, opts)
-      require("neogit").setup(opts)
-
-      -- Direct Neogit Worktree Handler Override
-      local ok_wt, wt_actions = pcall(require, "neogit.popups.worktree.actions")
-      local ok_async, a = pcall(require, "neogit.lib.async")
-      if ok_wt and wt_actions and ok_async and a then
-        local async_input = a.wrap(function(input_opts, cb)
-          vim.ui.input(input_opts, cb)
-        end, 2)
-
-        -- w -> W (Create new worktree with new branch)
-        wt_actions.create_worktree = a.void(function()
-          local git = require("neogit.lib.git")
-          local FuzzyFinderBuffer = require("neogit.buffers.fuzzy_finder")
-
-          local cwd = (vim.uv or vim.loop).cwd()
-          local parent_dir = vim.fs.normalize(cwd .. "/..")
-          local default_path = parent_dir .. "/new-worktree"
-
-          -- Step 1: Prompt Worktree Path
-          local path = async_input({ prompt = "Worktree path: ", default = default_path })
-          if not path or path == "" then return end
-
-          -- Step 2: Prompt Base Branch / Ref
-          local branches = git.refs.list_local_branches()
-          local remote_branches = git.refs.list_remote_branches()
-          local all_refs = {}
-          for _, b in ipairs(branches) do table.insert(all_refs, b) end
-          for _, b in ipairs(remote_branches) do table.insert(all_refs, b) end
-
-          local start_ref = FuzzyFinderBuffer.new(all_refs):open_async({
-            prompt_prefix = "Create and checkout branch starting at",
-          })
-          if not start_ref or start_ref == "" then return end
-
-          -- Step 3: Prompt New Branch Name
-          local default_branch = vim.fs.basename(path)
-          if default_branch == "" or default_branch == ".." then default_branch = "new-branch" end
-          local branch_name = async_input({ prompt = "Create new branch: ", default = default_branch })
-          if not branch_name or branch_name == "" then return end
-
-          -- Execute Git Worktree Creation
-          local success, err = git.worktree.add(branch_name, path)
-          if not success then
-            git.branch.create(branch_name, start_ref)
-            success, err = git.worktree.add(branch_name, path)
-          end
-
-          if success then
-            require("neogit.lib.notification").info("Added worktree: " .. path)
-            local status_mod = require("neogit.buffers.status")
-            if status_mod.is_open() then
-              status_mod.instance():chdir(path)
-            end
-          else
-            require("neogit.lib.notification").error("Failed to create worktree: " .. tostring(err or "unknown error"))
-          end
-        end)
-
-        -- w -> c (Checkout existing branch in new worktree)
-        wt_actions.checkout_worktree = a.void(function()
-          local git = require("neogit.lib.git")
-          local FuzzyFinderBuffer = require("neogit.buffers.fuzzy_finder")
-
-          local branches = git.refs.list_local_branches()
-          local remote_branches = git.refs.list_remote_branches()
-          local all_refs = {}
-          for _, b in ipairs(branches) do table.insert(all_refs, b) end
-          for _, b in ipairs(remote_branches) do table.insert(all_refs, b) end
-
-          local selected_branch = FuzzyFinderBuffer.new(all_refs):open_async({
-            prompt_prefix = "Checkout branch in new worktree",
-          })
-          if not selected_branch or selected_branch == "" then return end
-
-          local cwd = (vim.uv or vim.loop).cwd()
-          local default_path = vim.fs.normalize(cwd .. "/..") .. "/" .. vim.fs.basename(selected_branch)
-
-          local path = async_input({ prompt = "Worktree path: ", default = default_path })
-          if not path or path == "" then return end
-
-          local success, err = git.worktree.add(selected_branch, path)
-          if success then
-            require("neogit.lib.notification").info("Added worktree: " .. path)
-            local status_mod = require("neogit.buffers.status")
-            if status_mod.is_open() then
-              status_mod.instance():chdir(path)
-            end
-          else
-            require("neogit.lib.notification").error("Failed to checkout worktree: " .. tostring(err or "unknown error"))
-          end
-        end)
-      end
-    end,
     keys = {
       { "<leader>g", "<cmd>Neogit<cr>", desc = "Neogit (git status/diff/stage)" },
     },
@@ -157,7 +62,6 @@ return {
                 attach_mappings = function(prompt_bufnr, map)
                   local actions = require("telescope.actions")
                   local action_state = require("telescope.actions.state")
-                  local worktree = require("git-worktree")
 
                   local function safe_delete_worktree(path, force)
                     local worktree = require("git-worktree")
@@ -218,55 +122,6 @@ return {
           vim.cmd("Telescope git_worktree create_git_worktree")
         end,
         desc = "Git Worktree: Create",
-      },
-      {
-        "<leader>wd",
-        function()
-          local lines = vim.fn.systemlist("git worktree list")
-          local worktrees = {}
-          for _, line in ipairs(lines) do
-            if not line:match("^fatal:") and not line:match("^error:") then
-              local path = line:match("^(%S+)")
-              if path and (path:sub(1, 1) == "/" or path:sub(1, 1) == "~" or (vim.uv or vim.loop).fs_stat(path)) then
-                table.insert(worktrees, path)
-              end
-            end
-          end
-
-          if #worktrees == 0 then
-            vim.notify("No active git worktrees found", vim.log.levels.INFO)
-            return
-          end
-
-          vim.ui.select(worktrees, {
-            prompt = "Delete Worktree Path:",
-            format_item = function(item)
-              return tostring(item)
-            end,
-          }, function(selected)
-            if selected and selected ~= "" then
-              local confirm = vim.fn.confirm("Delete worktree at " .. selected .. "?", "&Yes\n&No", 2)
-              if confirm == 1 then
-                local current_cwd = vim.fs.normalize((vim.uv or vim.loop).cwd() or "")
-                local target_path = vim.fs.normalize(selected)
-
-                if current_cwd == target_path or current_cwd:find(target_path, 1, true) then
-                  local main_path = worktrees[1]
-                  if main_path and main_path ~= target_path then
-                    pcall(vim.api.nvim_set_current_dir, main_path)
-                  else
-                    local parent = vim.fs.normalize(target_path .. "/..")
-                    pcall(vim.api.nvim_set_current_dir, parent)
-                  end
-                end
-
-                local out = vim.fn.system({ "git", "worktree", "remove", "--force", selected })
-                vim.notify("Removed worktree: " .. selected, vim.log.levels.INFO)
-              end
-            end
-          end)
-        end,
-        desc = "Git Worktree: Delete",
       },
     },
   },
