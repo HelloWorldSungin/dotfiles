@@ -110,6 +110,7 @@ Leader key = **`<Space>`** ([`config/nvim/lua/vim-config.lua`](../config/nvim/lu
 | `<Space>` `hr` | Reset Git Change | `gitsigns.nvim` | Reset / undo current git change hunk |
 | `<Space>` `wc` | Create Worktree | `git-worktree.nvim` | Interactively create git worktree & branch via Telescope |
 | `<Space>` `wm` | Manage Worktree | `git-worktree.nvim` | Switch worktree (`<Enter>`) or delete (`<Ctrl-d>` / `d`) |
+| `<Space>` `um` | Toggle Minimap | `codewindow.nvim` | Toggle VS Code-style code minimap on the right side |
 | `Ctrl` + `n` | Multi-Cursor | `vim-visual-multi` | Select word under cursor & spawn next match cursor |
 | `Ctrl` + `Shift` + `Down` / `Up` | Add Cursor | `vim-visual-multi` | Spawn multi-cursor directly below / above |
 
