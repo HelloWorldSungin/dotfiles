@@ -21,55 +21,99 @@ return {
       },
     },
     config = function(_, opts)
-      local function log_debug(msg)
-        local f = io.open("/tmp/neogit_debug.log", "a")
-        if f then
-          f:write(os.date("%Y-%m-%d %H:%M:%S") .. " " .. tostring(msg) .. "\n")
-          f:close()
-        end
-      end
-
-      -- 1. Shim neogit.lib.input to eliminate pcall coroutine yield bug on Neovim 0.9.5
-      local ok_input, neogit_input = pcall(require, "neogit.lib.input")
-      if ok_input and neogit_input then
-        neogit_input.get_user_input = function(prompt, input_opts)
-          log_debug("[INPUT START] prompt=" .. tostring(prompt))
-          local a = require("neogit.lib.async")
-          local async_input = a.wrap(vim.ui.input, 2)
-          input_opts = vim.tbl_extend("keep", input_opts or {}, { strip_spaces = false, separator = ": " })
-
-          local result = async_input({
-            prompt = ("%s%s"):format(prompt, input_opts.separator),
-            default = input_opts.default or input_opts.prepend,
-            cancelreturn = input_opts.cancel,
-          })
-
-          log_debug("[INPUT END] prompt=" .. tostring(prompt) .. ", result=" .. tostring(result))
-          if not result then return nil end
-          if input_opts.strip_spaces then result, _ = result:gsub("%s", "-") end
-          if result == "" then return nil end
-          return result
-        end
-      end
-
-      -- 2. Shim neogit.lib.finder to use vim.ui.select for clean snacks.picker integration
-      local ok_finder, neogit_finder = pcall(require, "neogit.lib.finder")
-      if ok_finder and neogit_finder then
-        neogit_finder.find = function(self, on_select)
-          log_debug("[FINDER START] prompt=" .. tostring(self.opts.prompt_prefix) .. ", #entries=" .. #self.entries)
-          vim.ui.select(self.entries, {
-            prompt = string.format("%s", self.opts.prompt_prefix or "Select"),
-            format_item = function(entry) return tostring(entry) end,
-          }, function(item)
-            log_debug("[FINDER SELECTED] item=" .. tostring(item))
-            vim.schedule(function()
-              on_select(self.opts.allow_multi and { item } or item)
-            end)
-          end)
-        end
-      end
-
       require("neogit").setup(opts)
+
+      -- Direct Neogit Worktree Handler Override
+      local ok_wt, wt_actions = pcall(require, "neogit.popups.worktree.actions")
+      local ok_async, a = pcall(require, "neogit.lib.async")
+      if ok_wt and wt_actions and ok_async and a then
+        local async_input = a.wrap(function(input_opts, cb)
+          vim.ui.input(input_opts, cb)
+        end, 2)
+
+        -- w -> W (Create new worktree with new branch)
+        wt_actions.create_worktree = a.void(function()
+          local git = require("neogit.lib.git")
+          local FuzzyFinderBuffer = require("neogit.buffers.fuzzy_finder")
+
+          local cwd = (vim.uv or vim.loop).cwd()
+          local parent_dir = vim.fs.normalize(cwd .. "/..")
+          local default_path = parent_dir .. "/new-worktree"
+
+          -- Step 1: Prompt Worktree Path
+          local path = async_input({ prompt = "Worktree path: ", default = default_path })
+          if not path or path == "" then return end
+
+          -- Step 2: Prompt Base Branch / Ref
+          local branches = git.refs.list_local_branches()
+          local remote_branches = git.refs.list_remote_branches()
+          local all_refs = {}
+          for _, b in ipairs(branches) do table.insert(all_refs, b) end
+          for _, b in ipairs(remote_branches) do table.insert(all_refs, b) end
+
+          local start_ref = FuzzyFinderBuffer.new(all_refs):open_async({
+            prompt_prefix = "Create and checkout branch starting at",
+          })
+          if not start_ref or start_ref == "" then return end
+
+          -- Step 3: Prompt New Branch Name
+          local default_branch = vim.fs.basename(path)
+          if default_branch == "" or default_branch == ".." then default_branch = "new-branch" end
+          local branch_name = async_input({ prompt = "Create new branch: ", default = default_branch })
+          if not branch_name or branch_name == "" then return end
+
+          -- Execute Git Worktree Creation
+          local success, err = git.worktree.add(branch_name, path)
+          if not success then
+            git.branch.create(branch_name, start_ref)
+            success, err = git.worktree.add(branch_name, path)
+          end
+
+          if success then
+            require("neogit.lib.notification").info("Added worktree: " .. path)
+            local status_mod = require("neogit.buffers.status")
+            if status_mod.is_open() then
+              status_mod.instance():chdir(path)
+            end
+          else
+            require("neogit.lib.notification").error("Failed to create worktree: " .. tostring(err or "unknown error"))
+          end
+        end)
+
+        -- w -> c (Checkout existing branch in new worktree)
+        wt_actions.checkout_worktree = a.void(function()
+          local git = require("neogit.lib.git")
+          local FuzzyFinderBuffer = require("neogit.buffers.fuzzy_finder")
+
+          local branches = git.refs.list_local_branches()
+          local remote_branches = git.refs.list_remote_branches()
+          local all_refs = {}
+          for _, b in ipairs(branches) do table.insert(all_refs, b) end
+          for _, b in ipairs(remote_branches) do table.insert(all_refs, b) end
+
+          local selected_branch = FuzzyFinderBuffer.new(all_refs):open_async({
+            prompt_prefix = "Checkout branch in new worktree",
+          })
+          if not selected_branch or selected_branch == "" then return end
+
+          local cwd = (vim.uv or vim.loop).cwd()
+          local default_path = vim.fs.normalize(cwd .. "/..") .. "/" .. vim.fs.basename(selected_branch)
+
+          local path = async_input({ prompt = "Worktree path: ", default = default_path })
+          if not path or path == "" then return end
+
+          local success, err = git.worktree.add(selected_branch, path)
+          if success then
+            require("neogit.lib.notification").info("Added worktree: " .. path)
+            local status_mod = require("neogit.buffers.status")
+            if status_mod.is_open() then
+              status_mod.instance():chdir(path)
+            end
+          else
+            require("neogit.lib.notification").error("Failed to checkout worktree: " .. tostring(err or "unknown error"))
+          end
+        end)
+      end
     end,
     keys = {
       { "<leader>g", "<cmd>Neogit<cr>", desc = "Neogit (git status/diff/stage)" },
