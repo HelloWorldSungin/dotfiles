@@ -33,6 +33,50 @@ local function pick_directory_and_open_in_oil()
   end
 end
 
+local function work_server_live_grep()
+  local ok_tele, builtin = pcall(require, "telescope.builtin")
+  if not (ok_tele and builtin) then
+    local ok_snacks, snacks = pcall(require, "snacks")
+    if ok_snacks and snacks.picker then snacks.picker.grep() end
+    return
+  end
+
+  local function custom_vimgrep_entry_maker()
+    return function(line)
+      if not line or type(line) ~= "string" or line == "" then return nil end
+
+      local file, lnum, col, text = line:match("^(.-):(%d+):(%d+):(.*)$")
+      if not file then
+        file, lnum, text = line:match("^(.-):(%d+):(.*)$")
+        col = "1"
+      end
+
+      if not file or file == "" then return nil end
+
+      return {
+        value = line,
+        ordinal = file .. " " .. (text or ""),
+        display = file .. ":" .. lnum .. ":" .. (text or ""),
+        filename = file,
+        lnum = tonumber(lnum) or 1,
+        col = tonumber(col) or 1,
+        text = text or "",
+      }
+    end
+  end
+
+  local cmd = { "git", "grep", "-n", "-I", "--no-color" }
+  local is_git = vim.fn.isdirectory(".git") == 1 or (vim.fn.executable("git") == 1 and vim.fn.system("git rev-parse --is-inside-work-tree"):find("true"))
+  if not is_git then
+    cmd = { "grep", "-HnriI", "--exclude-dir=.git" }
+  end
+
+  builtin.live_grep({
+    vimgrep_arguments = cmd,
+    entry_maker = custom_vimgrep_entry_maker(),
+  })
+end
+
 return {
   {
     -- Snacks: a grab-bag of utilities by folke. We use its pickers -
@@ -54,47 +98,7 @@ return {
     keys = {
       { "<leader>f", function() Snacks.picker.files() end, desc = "Find files" },
       { "<leader>fd", pick_directory_and_open_in_oil, desc = "Find directory & open in Oil" },
-      {
-        "<leader>s",
-        function()
-          local ok_tele, builtin = pcall(require, "telescope.builtin")
-          if ok_tele and builtin then
-            -- Prefer git grep to bypass broken shell wrapper binaries in work environments
-            if vim.fn.executable("git") == 1 and (vim.fn.isdirectory(".git") == 1 or vim.fn.system("git rev-parse --is-inside-work-tree"):find("true")) then
-              builtin.live_grep({
-                vimgrep_arguments = {
-                  "git",
-                  "grep",
-                  "-n",
-                  "--column",
-                  "-I",
-                  "--no-color",
-                },
-              })
-            elseif vim.fn.executable("rg") == 1 then
-              builtin.live_grep({
-                vimgrep_arguments = {
-                  "rg",
-                  "--color=never",
-                  "--no-heading",
-                  "--with-filename",
-                  "--line-number",
-                  "--column",
-                  "--smart-case",
-                },
-              })
-            else
-              builtin.live_grep()
-            end
-          else
-            local ok_snacks, snacks = pcall(require, "snacks")
-            if ok_snacks and snacks.picker then
-              snacks.picker.grep()
-            end
-          end
-        end,
-        desc = "Grep project",
-      },
+      { "<leader>s", work_server_live_grep, desc = "Grep project" },
       { "<leader>b", function() Snacks.picker.buffers() end, desc = "Buffers" },
       { "gd", function() Snacks.picker.lsp_definitions() end, desc = "Goto definition" },
     },
