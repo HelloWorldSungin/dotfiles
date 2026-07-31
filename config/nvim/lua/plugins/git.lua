@@ -147,17 +147,35 @@ return {
       {
         "<leader>wm",
         function()
-          local ok, telescope = pcall(require, "telescope")
-          if ok then
+          local ok_tele, telescope = pcall(require, "telescope")
+          if ok_tele then
             pcall(telescope.load_extension, "git_worktree")
-            if telescope.extensions and telescope.extensions.git_worktree then
-              if type(telescope.extensions.git_worktree.git_worktrees) == "function" then
-                telescope.extensions.git_worktree.git_worktrees()
-                return
-              elseif type(telescope.extensions.git_worktree.git_worktree) == "function" then
-                telescope.extensions.git_worktree.git_worktree()
-                return
-              end
+            local ext = telescope.extensions and telescope.extensions.git_worktree
+            local picker_fn = ext and (ext.git_worktrees or ext.git_worktree)
+            if type(picker_fn) == "function" then
+              picker_fn({
+                attach_mappings = function(prompt_bufnr, map)
+                  local actions = require("telescope.actions")
+                  local action_state = require("telescope.actions.state")
+                  local worktree = require("git-worktree")
+
+                  local function do_delete(force)
+                    local selection = action_state.get_selected_entry()
+                    if selection then
+                      actions.close(prompt_bufnr)
+                      local path = selection.path or selection.value or selection[1]
+                      if path then
+                        worktree.delete_worktree(path, force)
+                      end
+                    end
+                  end
+
+                  map("i", "<C-d>", function() do_delete(false) end)
+                  map("n", "d", function() do_delete(false) end)
+                  return true
+                end,
+              })
+              return
             end
           end
           vim.cmd("Telescope git_worktree git_worktrees")
