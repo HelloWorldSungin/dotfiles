@@ -105,6 +105,9 @@ Leader key = **`<Space>`** ([`config/nvim/lua/vim-config.lua`](../config/nvim/lu
 | `g` `d` | Definition | `snacks.nvim` | Go to LSP symbol definition |
 | `<Space>` `e` | File Explorer | `oil.nvim` | Editable buffer file tree (press `v` for vsplit, `s` for split) |
 | `<Space>` `g` | Git UI | `neogit` | Git status, diff, staging, and commit dashboard |
+| `]c` / `[c` | Jump Git Change | `gitsigns.nvim` | Jump directly to next (`]c`) or previous (`[c`) git change hunk |
+| `<Space>` `hp` | Preview Git Change | `gitsigns.nvim` | Preview git change diff in a floating popup |
+| `<Space>` `hr` | Reset Git Change | `gitsigns.nvim` | Reset / undo current git change hunk |
 | `<Space>` `wc` | Create Worktree | `git-worktree.nvim` | Interactively create git worktree & branch via Telescope |
 | `<Space>` `wm` | Manage Worktree | `git-worktree.nvim` | Switch worktree (`<Enter>`) or delete (`<Ctrl-d>` / `d`) |
 | `Ctrl` + `n` | Multi-Cursor | `vim-visual-multi` | Select word under cursor & spawn next match cursor |
