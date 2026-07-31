@@ -174,6 +174,38 @@ return {
         end,
         desc = "Git Worktree: Create",
       },
+      {
+        "<leader>wd",
+        function()
+          local ok_wt, wt = pcall(require, "git-worktree")
+          if not ok_wt or not wt then
+            vim.notify("git-worktree not loaded", vim.log.levels.ERROR)
+            return
+          end
+
+          local worktrees = wt.get_worktrees()
+          if not worktrees or #worktrees == 0 then
+            vim.notify("No worktrees found", vim.log.levels.INFO)
+            return
+          end
+
+          vim.ui.select(worktrees, {
+            prompt = "Delete Worktree:",
+            format_item = function(item)
+              return tostring(item)
+            end,
+          }, function(selected)
+            if selected then
+              local confirm = vim.fn.confirm("Delete worktree at " .. selected .. "?", "&Yes\n&No", 2)
+              if confirm == 1 then
+                wt.delete_worktree(selected, true)
+                vim.notify("Deleted worktree: " .. selected, vim.log.levels.INFO)
+              end
+            end
+          end)
+        end,
+        desc = "Git Worktree: Delete",
+      },
     },
   },
   {
