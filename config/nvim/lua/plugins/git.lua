@@ -129,13 +129,16 @@ return {
   },
   {
     -- Git Worktree: interactive worktree switching & creation with Telescope
-    "polarmutex/git-worktree.nvim",
+    "ThePrimeagen/git-worktree.nvim",
     dependencies = {
       "nvim-lua/plenary.nvim",
       "nvim-telescope/telescope.nvim",
     },
     config = function()
-      require("git-worktree").setup({})
+      local ok, wt = pcall(require, "git-worktree")
+      if ok and wt and type(wt.setup) == "function" then
+        wt.setup({})
+      end
       pcall(function()
         require("telescope").load_extension("git_worktree")
       end)
@@ -145,12 +148,14 @@ return {
         "<leader>wm",
         function()
           local ok, telescope = pcall(require, "telescope")
-          if ok and telescope.extensions.git_worktree then
-            telescope.extensions.git_worktree.git_worktree()
-          else
-            require("telescope").load_extension("git_worktree")
-            require("telescope").extensions.git_worktree.git_worktree()
+          if ok then
+            pcall(telescope.load_extension, "git_worktree")
+            if telescope.extensions and telescope.extensions.git_worktree then
+              telescope.extensions.git_worktree.git_worktree()
+              return
+            end
           end
+          vim.cmd("Telescope git_worktree")
         end,
         desc = "Git Worktree: Manage / Switch",
       },
@@ -158,12 +163,14 @@ return {
         "<leader>wc",
         function()
           local ok, telescope = pcall(require, "telescope")
-          if ok and telescope.extensions.git_worktree then
-            telescope.extensions.git_worktree.create_git_worktree()
-          else
-            require("telescope").load_extension("git_worktree")
-            require("telescope").extensions.git_worktree.create_git_worktree()
+          if ok then
+            pcall(telescope.load_extension, "git_worktree")
+            if telescope.extensions and telescope.extensions.git_worktree then
+              telescope.extensions.git_worktree.create_git_worktree()
+              return
+            end
           end
+          vim.cmd("Telescope git_worktree create_git_worktree")
         end,
         desc = "Git Worktree: Create",
       },
