@@ -105,6 +105,11 @@ Leader key = **`<Space>`** ([`config/nvim/lua/vim-config.lua`](../config/nvim/lu
 | `g` `d` | Definition | `snacks.nvim` | Go to LSP symbol definition |
 | `<Space>` `e` | File Explorer | `oil.nvim` | Editable buffer file tree (press `v` for vsplit, `s` for split) |
 | `<Space>` `g` | Git UI | `neogit` | Git status, diff, staging, and commit dashboard |
+| `<Space>` `gd` | Open Git Diffview | `diffview.nvim` | Open full side-by-side Git diff view across modified files |
+| `<Space>` `gh` | File Git History Diff | `diffview.nvim` | Open Git file history diff view for current file |
+| `<Space>` `gc` | Close Git Diffview | `diffview.nvim` | Close Diffview pane |
+| `<Space>` `dt` | Window Diff On | Built-in | Diff open split windows side-by-side |
+| `<Space>` `do` | Window Diff Off | Built-in | Turn off window diffing mode |
 | `]c` / `[c` | Jump Git Change | `gitsigns.nvim` | Jump directly to next (`]c`) or previous (`[c`) git change hunk |
 | `<Space>` `hp` | Preview Git Change | `gitsigns.nvim` | Preview git change diff in a floating popup |
 | `<Space>` `hr` | Reset Git Change | `gitsigns.nvim` | Reset / undo current git change hunk |
