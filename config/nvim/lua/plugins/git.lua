@@ -17,7 +17,7 @@ return {
       auto_show_console = false, -- Disable auto-popping NeogitConsole box (press $ inside Neogit to view log manually)
       integrations = {
         snacks = false,          -- Disable Neogit's internal snacks finder wrapper bug on item selection
-        diffview = false,        -- Use Neogit's native built-in diff buffer to prevent diffview adapter errors
+        diffview = true,         -- Enable Diffview integration with proper setup initialization
       },
     },
     keys = {
@@ -30,6 +30,13 @@ return {
     -- Diffview: full side-by-side Git file diff & commit history viewer
     "sindrets/diffview.nvim",
     cmd = { "DiffviewOpen", "DiffviewClose", "DiffviewFileHistory" },
+    opts = {},
+    config = function(_, opts)
+      local ok, diffview = pcall(require, "diffview")
+      if ok and diffview then
+        diffview.setup(opts)
+      end
+    end,
   },
   {
     -- Gitsigns: change markers in the gutter + inline blame + change navigation.
