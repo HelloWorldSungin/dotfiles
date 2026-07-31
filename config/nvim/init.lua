@@ -431,6 +431,16 @@ if vim.api and vim.api.nvim_buf_set_name then
   end
 end
 
+-- Shim nvim_get_option_info for Telescope set.lua on Neovim 0.9.5
+if vim.api and vim.api.nvim_get_option_info then
+  local orig_get_opt_info = vim.api.nvim_get_option_info
+  vim.api.nvim_get_option_info = function(name)
+    if type(name) ~= "string" or name == "" then return {} end
+    local ok, res = pcall(orig_get_opt_info, name)
+    return ok and res or {}
+  end
+end
+
 
 if not _G.lazy_setup_done then
   _G.lazy_setup_done = true
