@@ -110,6 +110,7 @@ Leader key = **`<Space>`** ([`config/nvim/lua/vim-config.lua`](../config/nvim/lu
 | `<Space>` `gc` | Close Git Diffview | `diffview.nvim` | Close Diffview pane |
 | `<Space>` `dt` | Window Diff On | Built-in | Diff open split windows side-by-side |
 | `<Space>` `do` | Window Diff Off | Built-in | Turn off window diffing mode |
+| `do` / `dp` | Diff Obtain / Put | Built-in | Pull change from opposite diff window (`do`) or push change (`dp`) |
 | `]c` / `[c` | Jump Git Change | `gitsigns.nvim` | Jump directly to next (`]c`) or previous (`[c`) git change hunk |
 | `<Space>` `hp` | Preview Git Change | `gitsigns.nvim` | Preview git change diff in a floating popup |
 | `<Space>` `hr` | Reset Git Change | `gitsigns.nvim` | Reset / undo current git change hunk |
