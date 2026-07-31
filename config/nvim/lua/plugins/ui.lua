@@ -26,4 +26,32 @@ return {
       vim.cmd.colorscheme("rose-pine")
     end,
   },
+  {
+    -- Codewindow: VS Code-style code minimap on the right side
+    "gorbit99/codewindow.nvim",
+    config = function()
+      local ok, codewindow = pcall(require, "codewindow")
+      if ok and codewindow then
+        codewindow.setup({
+          active_in_term = false,
+          auto_enable = false,
+          exclude_filetypes = { "oil", "neogitstatus", "help", "NvimTree", "snacks_picker_input" },
+          side = "right",
+          width = 14,
+        })
+      end
+    end,
+    keys = {
+      {
+        "<leader>um",
+        function()
+          local ok, codewindow = pcall(require, "codewindow")
+          if ok and codewindow then
+            codewindow.toggle_minimap()
+          end
+        end,
+        desc = "Toggle code minimap",
+      },
+    },
+  },
 }
