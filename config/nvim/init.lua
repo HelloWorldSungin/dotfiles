@@ -363,9 +363,6 @@ end
 
 -- Shim neogit.lib.input to eliminate pcall coroutine yield bug on Neovim 0.9.5
 package.preload["neogit.lib.input"] = function()
-  local a = require("neogit.lib.async")
-  local input = a.wrap(vim.ui.input, 2)
-
   local M = {}
 
   function M.get_confirmation(msg, options)
@@ -390,9 +387,11 @@ package.preload["neogit.lib.input"] = function()
   end
 
   function M.get_user_input(prompt, opts)
+    local a = require("neogit.lib.async")
+    local async_input = a.wrap(vim.ui.input, 2)
     opts = vim.tbl_extend("keep", opts or {}, { strip_spaces = false, separator = ": " })
 
-    local result = input({
+    local result = async_input({
       prompt = ("%s%s"):format(prompt, opts.separator),
       default = opts.default or opts.prepend,
       completion = opts.completion,
