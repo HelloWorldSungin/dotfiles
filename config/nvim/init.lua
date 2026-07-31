@@ -428,6 +428,50 @@ package.preload["neogit.lib.input"] = function()
 
   return M
 end
+
+-- Shim neogit.lib.finder to use vim.ui.select for clean snacks.picker integration
+package.preload["neogit.lib.finder"] = function()
+  local Finder = {}
+  Finder.__index = Finder
+
+  function Finder:new(opts)
+    return setmetatable({
+      entries = {},
+      opts = opts or {},
+    }, Finder)
+  end
+
+  function Finder.create(opts)
+    return Finder:new(opts or {})
+  end
+
+  function Finder:add_entries(entries)
+    if type(entries) == "table" then
+      for _, entry in ipairs(entries) do
+        table.insert(self.entries, entry)
+      end
+    end
+    return self
+  end
+
+  function Finder:find(on_select)
+    vim.ui.select(self.entries, {
+      prompt = string.format("%s", self.opts.prompt_prefix or "Select"),
+      format_item = function(entry)
+        return tostring(entry)
+      end,
+    }, function(item)
+      vim.schedule(function()
+        on_select(self.opts.allow_multi and { item } or item)
+      end)
+    end)
+  end
+
+  local a = require("neogit.lib.async")
+  Finder.find_async = a.wrap(Finder.find, 2)
+
+  return Finder
+end
 if vim.api and vim.api.nvim_set_option_value then
   local orig_set_opt = vim.api.nvim_set_option_value
   vim.api.nvim_set_option_value = function(name, value, opts)
