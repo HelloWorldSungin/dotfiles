@@ -16,6 +16,9 @@ return {
       },
       console_timeout = 60000,   -- Allow up to 60 seconds for git operations on large repositories
       auto_show_console = false, -- Disable auto-popping NeogitConsole box (press $ inside Neogit to view log manually)
+      integrations = {
+        snacks = false,          -- Disable Neogit's internal snacks finder wrapper bug on item selection
+      },
     },
     config = function(_, opts)
       require("neogit").setup(opts)
