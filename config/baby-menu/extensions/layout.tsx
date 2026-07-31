@@ -12,15 +12,14 @@ const CHEATSHEETS: VimCmd[] = [
   // Movement
   { key: "gg", desc: "Jump to first line of file", cat: "Movement" },
   { key: "G", desc: "Jump to end of file", cat: "Movement" },
-  { key: "0", desc: "Move to start of line", cat: "Movement" },
-  { key: "$", desc: "Move to end of line", cat: "Movement" },
-  { key: "w", desc: "Jump forward to next word", cat: "Movement" },
-  { key: "b", desc: "Jump backward to word", cat: "Movement" },
-  { key: "e", desc: "Jump to end of word", cat: "Movement" },
+  { key: "0 / ^ / $", desc: "Move to start / soft start / end of line", cat: "Movement" },
+  { key: "w / b / e", desc: "Jump forward / backward / end of word", cat: "Movement" },
   { key: "{ / }", desc: "Jump paragraph prev / next", cat: "Movement" },
   { key: "zz", desc: "Center view on cursor", cat: "Movement" },
-  { key: "Ctrl + d", desc: "Scroll half page down", cat: "Movement" },
-  { key: "Ctrl + u", desc: "Scroll half page up", cat: "Movement" },
+  { key: "Ctrl + d / u", desc: "Scroll half page down / up", cat: "Movement" },
+  { key: "gt / gT", desc: "Cycle forward / backward through open tabs", cat: "Movement" },
+  { key: "1gt .. 9gt", desc: "Jump directly to Tab 1 through 9", cat: "Movement" },
+  { key: "Ctrl + w + v / -", desc: "Split window vertically (v) or horizontally (-)", cat: "Movement" },
 
   // Editing
   { key: "i / a", desc: "Insert before / Append after cursor", cat: "Editing" },
@@ -31,6 +30,8 @@ const CHEATSHEETS: VimCmd[] = [
   { key: "ciw", desc: "Change inner word", cat: "Editing" },
   { key: "u / Ctrl+r", desc: "Undo / Redo change", cat: "Editing" },
   { key: ".", desc: "Repeat last editing action", cat: "Editing" },
+  { key: "Ctrl + n", desc: "Multi-cursor select word & spawn next match", cat: "Editing" },
+  { key: "Ctrl + Shift + Down / Up", desc: "Spawn multi-cursor directly below / above", cat: "Editing" },
 
   // Clipboard
   { key: "yy / Y", desc: "Yank (copy) line", cat: "Clipboard" },
@@ -39,12 +40,27 @@ const CHEATSHEETS: VimCmd[] = [
   { key: "dw / x", desc: "Delete word / single character", cat: "Clipboard" },
 
   // Search & Replace
+  { key: "Space f", desc: "Find Files (fuzzy search by name)", cat: "Search" },
+  { key: "Space fd", desc: "Find Directory recursively & open in Oil (or Ctrl-f in Oil)", cat: "Search" },
+  { key: "Space s", desc: "Live Grep across codebase", cat: "Search" },
+  { key: "Space b", desc: "Switch active buffers", cat: "Search" },
   { key: "/pattern", desc: "Search forward for pattern", cat: "Search" },
   { key: "?pattern", desc: "Search backward for pattern", cat: "Search" },
   { key: "n / N", desc: "Next / previous search result", cat: "Search" },
   { key: ":%s/old/new/g", desc: "Substitute all old with new in file", cat: "Search" },
 
-  // Advanced & Modes
+  // Advanced & Git
+  { key: "Space e", desc: "File Explorer (Oil.nvim — v for vsplit, - for split)", cat: "Advanced" },
+  { key: "Space g", desc: "Git Dashboard (Neogit status, staging, diffs)", cat: "Advanced" },
+  { key: "Space gv / g-", desc: "Open Neogit in Vertical (gv) or Horizontal (g-) split", cat: "Advanced" },
+  { key: "Space dt / do", desc: "Side-by-side Window Diff On (dt) / Off (do)", cat: "Advanced" },
+  { key: "do / dp", desc: "Diff Obtain (pull change) / Diff Put (push change)", cat: "Advanced" },
+  { key: "]c / [c", desc: "Jump to next (]c) or previous ([c) Git change hunk", cat: "Advanced" },
+  { key: "Space h", desc: "Preview single Git change diff in floating popup", cat: "Advanced" },
+  { key: "Space hr", desc: "Reset / undo single Git change hunk", cat: "Advanced" },
+  { key: "Space hw", desc: "Toggle ignore whitespace in Git diffs & gutters", cat: "Advanced" },
+  { key: "Space wc / wm", desc: "Git Worktrees: Create (wc) / Manage & Delete (wm)", cat: "Advanced" },
+  { key: "Space um", desc: "Toggle VS Code-style Code Minimap on right side", cat: "Advanced" },
   { key: "v / V / Ctrl+v", desc: "Visual mode: Char / Line / Block", cat: "Advanced" },
   { key: "qa / q / @a", desc: "Record macro to 'a' / Stop / Play 'a'", cat: "Advanced" },
   { key: ":wq / :q!", desc: "Save & quit / Quit without saving", cat: "Advanced" }
