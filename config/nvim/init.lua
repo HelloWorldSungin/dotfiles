@@ -394,7 +394,6 @@ package.preload["neogit.lib.input"] = function()
     local result = async_input({
       prompt = ("%s%s"):format(prompt, opts.separator),
       default = opts.default or opts.prepend,
-      completion = opts.completion,
       cancelreturn = opts.cancel,
     })
 
