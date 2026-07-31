@@ -25,4 +25,6 @@ vim.opt.scrolloff = 16 -- keep 16 lines visible above/below the cursor
 
 vim.opt.undofile = true -- undo history survives closing and reopening files
 
+vim.opt.diffopt:append("iwhite") -- Ignore whitespace changes in file diffs
+
 vim.opt.termguicolors = true
