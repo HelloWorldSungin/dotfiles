@@ -395,4 +395,57 @@ if not _G.lazy_setup_done then
 
   -- Load every file in lua/plugins/ as a plugin spec.
   require("lazy").setup("plugins")
+
+  vim.schedule(function()
+    local log_file = "/tmp/neogit_debug.log"
+    local function log_debug(msg)
+      local f = io.open(log_file, "a")
+      if f then
+        f:write(os.date("%Y-%m-%d %H:%M:%S") .. " " .. tostring(msg) .. "\n")
+        f:close()
+      end
+    end
+
+    log_debug("[INIT.LUA DEFERRED SHIM ATTEMPT]")
+
+    local ok_input, neogit_input = pcall(require, "neogit.lib.input")
+    log_debug("neogit.lib.input require ok=" .. tostring(ok_input))
+    if ok_input and neogit_input then
+      neogit_input.get_user_input = function(prompt, input_opts)
+        log_debug("[INPUT START] prompt=" .. tostring(prompt))
+        local a = require("neogit.lib.async")
+        local async_input = a.wrap(vim.ui.input, 2)
+        input_opts = vim.tbl_extend("keep", input_opts or {}, { strip_spaces = false, separator = ": " })
+
+        local result = async_input({
+          prompt = ("%s%s"):format(prompt, input_opts.separator),
+          default = input_opts.default or input_opts.prepend,
+          cancelreturn = input_opts.cancel,
+        })
+
+        log_debug("[INPUT END] prompt=" .. tostring(prompt) .. " result=" .. tostring(result))
+        if not result then return nil end
+        if input_opts.strip_spaces then result, _ = result:gsub("%s", "-") end
+        if result == "" then return nil end
+        return result
+      end
+    end
+
+    local ok_finder, neogit_finder = pcall(require, "neogit.lib.finder")
+    log_debug("neogit.lib.finder require ok=" .. tostring(ok_finder))
+    if ok_finder and neogit_finder then
+      neogit_finder.find = function(self, on_select)
+        log_debug("[FINDER START] prompt=" .. tostring(self.opts.prompt_prefix) .. " #entries=" .. tostring(#self.entries))
+        vim.ui.select(self.entries, {
+          prompt = string.format("%s", self.opts.prompt_prefix or "Select"),
+          format_item = function(entry) return tostring(entry) end,
+        }, function(item)
+          log_debug("[FINDER SELECTED] item=" .. tostring(item))
+          vim.schedule(function()
+            on_select(self.opts.allow_multi and { item } or item)
+          end)
+        end)
+      end
+    end
+  end)
 end
