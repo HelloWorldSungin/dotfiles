@@ -49,21 +49,7 @@ return {
     keys = {
       { "<leader>f", function() Snacks.picker.files() end, desc = "Find files" },
       { "<leader>fd", pick_directory_and_open_in_oil, desc = "Find directory & open in Oil" },
-      {
-        "<leader>s",
-        function()
-          local ok_tele, builtin = pcall(require, "telescope.builtin")
-          if ok_tele and builtin then
-            builtin.live_grep()
-          else
-            local ok_snacks, snacks = pcall(require, "snacks")
-            if ok_snacks and snacks.picker then
-              snacks.picker.grep()
-            end
-          end
-        end,
-        desc = "Grep project",
-      },
+      { "<leader>s", function() Snacks.picker.grep() end, desc = "Grep project" },
       { "<leader>b", function() Snacks.picker.buffers() end, desc = "Buffers" },
       { "gd", function() Snacks.picker.lsp_definitions() end, desc = "Goto definition" },
     },
