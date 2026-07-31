@@ -17,7 +17,12 @@ local function pick_directory_and_open_in_oil()
           actions.close(prompt_bufnr)
           local path = selection and (selection.path or selection.value or selection[1])
           if path then
-            if ok_oil then oil.open(path) else vim.cmd("edit " .. path) end
+            if ok_oil then
+              local ok = pcall(oil.open, path)
+              if not ok then pcall(vim.cmd, "edit! " .. vim.fn.fnameescape(path)) end
+            else
+              pcall(vim.cmd, "edit! " .. vim.fn.fnameescape(path))
+            end
           end
         end)
         return true
