@@ -177,29 +177,31 @@ return {
       {
         "<leader>wd",
         function()
-          local ok_wt, wt = pcall(require, "git-worktree")
-          if not ok_wt or not wt then
-            vim.notify("git-worktree not loaded", vim.log.levels.ERROR)
-            return
+          local lines = vim.fn.systemlist("git worktree list")
+          local worktrees = {}
+          for _, line in ipairs(lines) do
+            local path = line:match("^(%S+)")
+            if path then
+              table.insert(worktrees, path)
+            end
           end
 
-          local worktrees = wt.get_worktrees()
-          if not worktrees or #worktrees == 0 then
+          if #worktrees == 0 then
             vim.notify("No worktrees found", vim.log.levels.INFO)
             return
           end
 
           vim.ui.select(worktrees, {
-            prompt = "Delete Worktree:",
+            prompt = "Delete Worktree Path:",
             format_item = function(item)
               return tostring(item)
             end,
           }, function(selected)
-            if selected then
+            if selected and selected ~= "" then
               local confirm = vim.fn.confirm("Delete worktree at " .. selected .. "?", "&Yes\n&No", 2)
               if confirm == 1 then
-                wt.delete_worktree(selected, true)
-                vim.notify("Deleted worktree: " .. selected, vim.log.levels.INFO)
+                local out = vim.fn.system({ "git", "worktree", "remove", "--force", selected })
+                vim.notify("Removed worktree: " .. selected, vim.log.levels.INFO)
               end
             end
           end)
