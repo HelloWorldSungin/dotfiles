@@ -421,6 +421,16 @@ if vim.api and vim.api.nvim_set_option_value then
   end
 end
 
+-- Safely wrap nvim_buf_set_name for oil.nvim buffer moves on Neovim 0.9.5
+if vim.api and vim.api.nvim_buf_set_name then
+  local orig_set_name = vim.api.nvim_buf_set_name
+  vim.api.nvim_buf_set_name = function(bufnr, name)
+    local ok, res = pcall(orig_set_name, bufnr, name)
+    if ok then return res end
+    return nil
+  end
+end
+
 
 if not _G.lazy_setup_done then
   _G.lazy_setup_done = true
