@@ -111,12 +111,20 @@ if not vim.system then
     local stderr_results = {}
     local exit_code = 0
 
+    local job_cwd = nil
+    if opts.cwd and opts.cwd ~= "" then
+      local abs_cwd = vim.fs.normalize(opts.cwd)
+      if (vim.uv or vim.loop).fs_stat(abs_cwd) then
+        job_cwd = abs_cwd
+      end
+    end
+
     local ok_job, Job = pcall(require, "plenary.job")
     if ok_job and Job then
       local job = Job:new({
         command = command,
         args = args,
-        cwd = opts.cwd,
+        cwd = job_cwd,
         on_exit = function(j, code)
           exit_code = code or 0
           stdout_results = j:result() or {}
