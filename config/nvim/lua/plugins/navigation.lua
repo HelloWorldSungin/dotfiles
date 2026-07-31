@@ -19,6 +19,24 @@ return {
     },
     keys = {
       { "<leader>f", function() Snacks.picker.files() end, desc = "Find files" },
+      {
+        "<leader>fd",
+        function()
+          local ok_oil, oil = pcall(require, "oil")
+          local ok_snacks, snacks = pcall(require, "snacks")
+          if ok_snacks and snacks.picker then
+            snacks.picker.directories({
+              confirm = function(picker, item)
+                picker:close()
+                if item and item.file then
+                  if ok_oil then oil.open(item.file) else vim.cmd("edit " .. item.file) end
+                end
+              end,
+            })
+          end
+        end,
+        desc = "Find directory & open in Oil",
+      },
       { "<leader>s", function() Snacks.picker.grep() end, desc = "Grep project" },
       { "<leader>b", function() Snacks.picker.buffers() end, desc = "Buffers" },
       { "gd", function() Snacks.picker.lsp_definitions() end, desc = "Goto definition" },
