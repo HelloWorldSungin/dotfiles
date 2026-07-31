@@ -361,7 +361,75 @@ if vim.api and vim.api.nvim_get_hl then
   end
 end
 
--- Shim vim.api.nvim_set_option_value to remove conflicting 'scope' when 'buf' is present (invalid in 0.9.5)
+-- Shim neogit.lib.input to eliminate pcall coroutine yield bug on Neovim 0.9.5
+package.preload["neogit.lib.input"] = function()
+  local a = require("neogit.lib.async")
+  local input = a.wrap(vim.ui.input, 2)
+
+  local M = {}
+
+  function M.get_confirmation(msg, options)
+    options = options or {}
+    options.values = options.values or { "&Yes", "&No" }
+    options.default = options.default or 1
+    return vim.fn.confirm(msg, table.concat(options.values, "\n"), options.default) == 1
+  end
+
+  function M.get_permission(msg, options)
+    options = options or {}
+    options.values = options.values or { "&Yes", "&No" }
+    options.default = options.default or 2
+    return vim.fn.confirm(msg, table.concat(options.values, "\n"), options.default) == 1
+  end
+
+  function M.get_choice(msg, options)
+    local choice = vim.fn.confirm(msg, table.concat(options.values, "\n"), options.default)
+    vim.cmd("redraw")
+    if choice == 0 then choice = options.default end
+    return choice
+  end
+
+  function M.get_user_input(prompt, opts)
+    opts = vim.tbl_extend("keep", opts or {}, { strip_spaces = false, separator = ": " })
+
+    local result = input({
+      prompt = ("%s%s"):format(prompt, opts.separator),
+      default = opts.default or opts.prepend,
+      completion = opts.completion,
+      cancelreturn = opts.cancel,
+    })
+
+    if not result then
+      return nil
+    end
+
+    if opts.strip_spaces then
+      result, _ = result:gsub("%s", "-")
+    end
+
+    if result == "" then
+      return nil
+    end
+
+    return result
+  end
+
+  function M.get_user_input_blocking(prompt, opts)
+    opts = opts or {}
+    local result = vim.fn.input({
+      prompt = prompt .. (opts.separator or ": "),
+      default = opts.default or opts.prepend or "",
+      completion = opts.completion,
+      cancelreturn = opts.cancel,
+    })
+    if opts.strip_spaces and result then
+      result, _ = result:gsub("%s", "-")
+    end
+    return result
+  end
+
+  return M
+end
 if vim.api and vim.api.nvim_set_option_value then
   local orig_set_opt = vim.api.nvim_set_option_value
   vim.api.nvim_set_option_value = function(name, value, opts)
