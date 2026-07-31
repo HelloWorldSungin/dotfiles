@@ -9,8 +9,8 @@ return {
     },
     keys = {
       { "<leader>g", "<cmd>Neogit<cr>", desc = "Neogit (git status/diff/stage)" },
-      { "<leader>gv", "<cmd>Neogit vsplit<cr>", desc = "Neogit (vertical split)" },
-      { "<leader>gs", "<cmd>Neogit split<cr>", desc = "Neogit (horizontal split)" },
+      { "<leader>gv", "<cmd>Neogit kind=vsplit<cr>", desc = "Neogit (vertical split)" },
+      { "<leader>g-", "<cmd>Neogit kind=split<cr>", desc = "Neogit (horizontal split)" },
     },
   },
   {

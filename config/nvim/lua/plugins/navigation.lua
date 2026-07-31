@@ -26,6 +26,12 @@ return {
     opts = {
       default_file_explorer = true,
       view_options = { show_hidden = true },
+      keymaps = {
+        ["<C-v>"] = "actions.select_vsplit",
+        ["<C-s>"] = "actions.select_split",
+        ["v"] = "actions.select_vsplit",
+        ["-"] = "actions.select_split",
+      },
     },
     keys = {
       { "<leader>e", "<cmd>Oil<cr>", desc = "File explorer (oil)" },
