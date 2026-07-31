@@ -101,10 +101,46 @@ if not vim.system then
     end
     opts = opts or {}
 
-    local res = vim.fn.systemlist(cmd)
-    local exit_code = vim.v.shell_error
-    local stdout_str = table.concat(res, "\n")
-    if #res > 0 then stdout_str = stdout_str .. "\n" end
+    local command = type(cmd) == "table" and cmd[1] or cmd
+    local args = {}
+    if type(cmd) == "table" then
+      for i = 2, #cmd do table.insert(args, cmd[i]) end
+    end
+
+    local stdout_results = {}
+    local stderr_results = {}
+    local exit_code = 0
+
+    local ok_job, Job = pcall(require, "plenary.job")
+    if ok_job and Job then
+      local job = Job:new({
+        command = command,
+        args = args,
+        cwd = opts.cwd,
+        on_exit = function(j, code)
+          exit_code = code or 0
+          stdout_results = j:result() or {}
+          stderr_results = j:stderr_result() or {}
+        end,
+      })
+      pcall(function() job:sync() end)
+    else
+      if vim.in_fast_event() then
+        vim.schedule(function()
+          pcall(vim.fn.systemlist, cmd)
+        end)
+      else
+        local res = vim.fn.systemlist(cmd)
+        exit_code = vim.v.shell_error
+        stdout_results = res
+      end
+    end
+
+    local stdout_str = table.concat(stdout_results, "\n")
+    if #stdout_results > 0 then stdout_str = stdout_str .. "\n" end
+
+    local stderr_str = table.concat(stderr_results, "\n")
+    if #stderr_results > 0 then stderr_str = stderr_str .. "\n" end
 
     local dummy_handle = {
       is_closing = function() return false end,
@@ -115,25 +151,19 @@ if not vim.system then
     local completed = {
       code = exit_code,
       stdout = stdout_str,
-      stderr = "",
+      stderr = stderr_str,
       pid = 12345,
       handle = dummy_handle,
-      wait = function(self)
-        return self
-      end,
-      kill = function(self)
-        return self
-      end,
-      write = function(self)
-        return self
-      end,
+      wait = function(self) return self end,
+      kill = function(self) return self end,
+      write = function(self) return self end,
     }
 
     setmetatable(completed, {
       __index = function(_, k)
         if k == "code" then return exit_code end
         if k == "stdout" then return stdout_str end
-        if k == "stderr" then return "" end
+        if k == "stderr" then return stderr_str end
         if k == "pid" then return 12345 end
         if k == "handle" then return dummy_handle end
         return function(self) return self end
