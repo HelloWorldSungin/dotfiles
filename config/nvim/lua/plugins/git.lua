@@ -14,6 +14,9 @@ return {
         kind = "split",
         show_staged_diff = false,
       },
+      auto_show_console = true,
+      auto_show_console_on = "error", -- Only pop up console when an error actually occurs
+      auto_close_console = false,     -- Keep the console open on error so you can read it
     },
     keys = {
       { "<leader>g", "<cmd>Neogit<cr>", desc = "Neogit (git status/diff/stage)" },
