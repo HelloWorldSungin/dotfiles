@@ -180,14 +180,16 @@ return {
           local lines = vim.fn.systemlist("git worktree list")
           local worktrees = {}
           for _, line in ipairs(lines) do
-            local path = line:match("^(%S+)")
-            if path then
-              table.insert(worktrees, path)
+            if not line:match("^fatal:") and not line:match("^error:") then
+              local path = line:match("^(%S+)")
+              if path and (path:sub(1, 1) == "/" or path:sub(1, 1) == "~" or (vim.uv or vim.loop).fs_stat(path)) then
+                table.insert(worktrees, path)
+              end
             end
           end
 
           if #worktrees == 0 then
-            vim.notify("No worktrees found", vim.log.levels.INFO)
+            vim.notify("No active git worktrees found", vim.log.levels.INFO)
             return
           end
 
