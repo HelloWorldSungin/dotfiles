@@ -150,7 +150,31 @@ const CHEATSHEET_DATA: VimCommand[] = [
   { key: ":set [all]", desc: "Show options set by user (or default options)", category: "advanced", subcategory: "Commands & Config", keywords: ["settings", "options", "configuration", "show"] },
   { key: ":set option", desc: "Enable 'option' (e.g. :set nu)", category: "advanced", subcategory: "Commands & Config", keywords: ["settings", "enable", "option", "toggle"] },
   { key: ":set option=val", desc: "Assign value to 'option' (e.g. :set tabstop=4)", category: "advanced", subcategory: "Commands & Config", keywords: ["settings", "assign", "value", "option"] },
-  { key: ":set nooption", desc: "Disable 'option' (e.g. :set nonu)", category: "advanced", subcategory: "Commands & Config", keywords: ["settings", "disable", "option", "toggle"] }
+  { key: ":set nooption", desc: "Disable 'option' (e.g. :set nonu)", category: "advanced", subcategory: "Commands & Config", keywords: ["settings", "disable", "option", "toggle"] },
+
+  // CUSTOM & PLUGIN SHORTCUTS
+  { key: "Space f", desc: "Find Files (fuzzy search by name)", category: "advanced", subcategory: "Plugin & Config", keywords: ["find", "files", "fuzzy", "picker", "snacks", "space"] },
+  { key: "Space s", desc: "Live Grep across codebase", category: "advanced", subcategory: "Plugin & Config", keywords: ["grep", "search", "live", "codebase", "snacks", "space"] },
+  { key: "Space b", desc: "Switch active buffers", category: "advanced", subcategory: "Plugin & Config", keywords: ["buffers", "switch", "open", "snacks", "space"] },
+  { key: "Space e", desc: "File Explorer (Oil.nvim buffer tree - v for vsplit, - for split)", category: "advanced", subcategory: "Plugin & Config", keywords: ["file", "explorer", "oil", "tree", "split", "space"] },
+  { key: "Space g", desc: "Git Dashboard (Neogit status, staging, diffs, commits)", category: "advanced", subcategory: "Git", keywords: ["git", "neogit", "dashboard", "status", "commit", "space"] },
+  { key: "Space gv", desc: "Open Neogit in side-by-side vertical split", category: "advanced", subcategory: "Git", keywords: ["git", "neogit", "vertical", "vsplit", "space"] },
+  { key: "Space g-", desc: "Open Neogit in top/bottom horizontal split", category: "advanced", subcategory: "Git", keywords: ["git", "neogit", "horizontal", "split", "space"] },
+  { key: "Space dt", desc: "Diff open split windows side-by-side (diffthis)", category: "advanced", subcategory: "Git & Diff", keywords: ["diff", "windows", "side-by-side", "compare", "space"] },
+  { key: "Space do", desc: "Turn off window diffing mode (diffoff)", category: "advanced", subcategory: "Git & Diff", keywords: ["diff", "off", "windows", "stop", "space"] },
+  { key: "do / dp", desc: "Diff Obtain (do - pull change) / Diff Put (dp - push change)", category: "advanced", subcategory: "Git & Diff", keywords: ["diff", "obtain", "put", "pull", "push", "merge"] },
+  { key: "]c / [c", desc: "Jump to next (]c) or previous ([c) Git change hunk", category: "advanced", subcategory: "Git & Diff", keywords: ["git", "change", "hunk", "next", "prev", "jump"] },
+  { key: "Space h", desc: "Preview single Git change diff in floating popup", category: "advanced", subcategory: "Git", keywords: ["git", "preview", "hunk", "diff", "popup", "space"] },
+  { key: "Space hr", desc: "Reset / undo single Git change hunk", category: "advanced", subcategory: "Git", keywords: ["git", "reset", "undo", "hunk", "revert", "space"] },
+  { key: "Space hw", desc: "Toggle ignore whitespace in Git diffs & gutters", category: "advanced", subcategory: "Git & Diff", keywords: ["git", "whitespace", "ignore", "toggle", "diff", "space"] },
+  { key: "Space wc", desc: "Interactively create Git worktree & branch via Telescope", category: "advanced", subcategory: "Git Worktree", keywords: ["git", "worktree", "create", "branch", "telescope", "space"] },
+  { key: "Space wm", desc: "Manage / Switch / Delete Git worktrees (Ctrl-d or d to delete)", category: "advanced", subcategory: "Git Worktree", keywords: ["git", "worktree", "manage", "switch", "delete", "space"] },
+  { key: "Space um", desc: "Toggle VS Code-style code minimap on right side", category: "advanced", subcategory: "UI & Minimap", keywords: ["minimap", "code", "codewindow", "toggle", "vscode", "space"] },
+  { key: "gt / gT", desc: "Cycle forward (gt) or backward (gT) through open tabs", category: "advanced", subcategory: "Tabs & Splits", keywords: ["tabs", "next", "prev", "cycle", "navigate"] },
+  { key: "1gt .. 9gt", desc: "Jump directly to tab 1 through 9", category: "advanced", subcategory: "Tabs & Splits", keywords: ["tabs", "jump", "direct", "select"] },
+  { key: "Ctrl + w + v / -", desc: "Split window vertically (v) or horizontally (-)", category: "advanced", subcategory: "Tabs & Splits", keywords: ["split", "window", "vertical", "horizontal"] },
+  { key: "Ctrl + n", desc: "Multi-cursor select word under cursor & spawn next match", category: "advanced", subcategory: "Editing", keywords: ["multi-cursor", "select", "next", "ctrl-n"] },
+  { key: "Ctrl + Shift + Down / Up", desc: "Spawn multi-cursor directly below / above", category: "advanced", subcategory: "Editing", keywords: ["multi-cursor", "down", "up", "spawn"] }
 ];
 
 function CommandBadge({ cmd }: { cmd: string }) {
