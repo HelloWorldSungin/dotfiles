@@ -127,4 +127,51 @@ return {
       current_line_blame = true,
     },
   },
+  {
+    -- Git Worktree: interactive worktree switching & creation with Telescope
+    "polarmutex/git-worktree.nvim",
+    dependencies = {
+      "nvim-lua/plenary.nvim",
+      "nvim-telescope/telescope.nvim",
+    },
+    config = function()
+      require("git-worktree").setup({})
+      pcall(function()
+        require("telescope").load_extension("git_worktree")
+      end)
+    end,
+    keys = {
+      {
+        "<leader>wm",
+        function()
+          local ok, telescope = pcall(require, "telescope")
+          if ok and telescope.extensions.git_worktree then
+            telescope.extensions.git_worktree.git_worktree()
+          else
+            require("telescope").load_extension("git_worktree")
+            require("telescope").extensions.git_worktree.git_worktree()
+          end
+        end,
+        desc = "Git Worktree: Manage / Switch",
+      },
+      {
+        "<leader>wc",
+        function()
+          local ok, telescope = pcall(require, "telescope")
+          if ok and telescope.extensions.git_worktree then
+            telescope.extensions.git_worktree.create_git_worktree()
+          else
+            require("telescope").load_extension("git_worktree")
+            require("telescope").extensions.git_worktree.create_git_worktree()
+          end
+        end,
+        desc = "Git Worktree: Create",
+      },
+    },
+  },
+  {
+    "nvim-telescope/telescope.nvim",
+    cmd = "Telescope",
+    dependencies = { "nvim-lua/plenary.nvim" },
+  },
 }
