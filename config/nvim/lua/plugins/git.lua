@@ -45,6 +45,7 @@ return {
         end, { expr = true, desc = "Previous git change" })
 
         -- Git change actions
+        map("n", "<leader>h", gs.preview_hunk, { desc = "Preview git change hunk" })
         map("n", "<leader>hp", gs.preview_hunk, { desc = "Preview git change hunk" })
         map("n", "<leader>hs", gs.stage_hunk, { desc = "Stage git change hunk" })
         map("n", "<leader>hr", gs.reset_hunk, { desc = "Reset git change hunk" })
