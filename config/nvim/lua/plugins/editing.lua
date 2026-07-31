@@ -22,9 +22,4 @@ return {
     event = "InsertEnter",
     opts = {},
   },
-  {
-    -- rainbow-delimiters: rainbow coloring for matching bracket pairs
-    "HiPhish/rainbow-delimiters.nvim",
-    event = { "BufReadPre", "BufNewFile" },
-  },
 }
