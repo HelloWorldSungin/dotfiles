@@ -1,4 +1,33 @@
 -- Finding and jumping to things. See docs/cheatsheet.md for the keybinds.
+
+local function pick_directory_and_open_in_oil()
+  local ok_oil, oil = pcall(require, "oil")
+  local ok_tele, builtin = pcall(require, "telescope.builtin")
+  if ok_tele and builtin then
+    local cmd = vim.fn.executable("fd") == 1 and { "fd", "--type", "d", "--hidden", "--exclude", ".git" }
+      or { "find", ".", "-type", "d", "-not", "-path", "*/.*" }
+    builtin.find_files({
+      prompt_title = "Find Directories (Oil)",
+      find_command = cmd,
+      attach_mappings = function(prompt_bufnr, map)
+        local actions = require("telescope.actions")
+        local action_state = require("telescope.actions.state")
+        actions.select_default:replace(function()
+          local selection = action_state.get_selected_entry()
+          actions.close(prompt_bufnr)
+          local path = selection and (selection.path or selection.value or selection[1])
+          if path then
+            if ok_oil then oil.open(path) else vim.cmd("edit " .. path) end
+          end
+        end)
+        return true
+      end,
+    })
+  else
+    vim.notify("Telescope plugin is required for directory search", vim.log.levels.WARN)
+  end
+end
+
 return {
   {
     -- Snacks: a grab-bag of utilities by folke. We use its pickers -
@@ -14,24 +43,7 @@ return {
     },
     keys = {
       { "<leader>f", function() Snacks.picker.files() end, desc = "Find files" },
-      {
-        "<leader>fd",
-        function()
-          local ok_oil, oil = pcall(require, "oil")
-          local ok_snacks, snacks = pcall(require, "snacks")
-          if ok_snacks and snacks.picker then
-            snacks.picker.directories({
-              confirm = function(picker, item)
-                picker:close()
-                if item and item.file then
-                  if ok_oil then oil.open(item.file) else vim.cmd("edit " .. item.file) end
-                end
-              end,
-            })
-          end
-        end,
-        desc = "Find directory & open in Oil",
-      },
+      { "<leader>fd", pick_directory_and_open_in_oil, desc = "Find directory & open in Oil" },
       { "<leader>s", function() Snacks.picker.grep() end, desc = "Grep project" },
       { "<leader>b", function() Snacks.picker.buffers() end, desc = "Buffers" },
       { "gd", function() Snacks.picker.lsp_definitions() end, desc = "Goto definition" },
@@ -49,6 +61,8 @@ return {
         ["<C-s>"] = "actions.select_split",
         ["v"] = "actions.select_vsplit",
         ["-"] = "actions.select_split",
+        ["f"] = pick_directory_and_open_in_oil,
+        ["<C-f>"] = pick_directory_and_open_in_oil,
       },
     },
     keys = {
