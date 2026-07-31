@@ -113,6 +113,7 @@ Leader key = **`<Space>`** ([`config/nvim/lua/vim-config.lua`](../config/nvim/lu
 | `]c` / `[c` | Jump Git Change | `gitsigns.nvim` | Jump directly to next (`]c`) or previous (`[c`) git change hunk |
 | `<Space>` `h` | Preview Git Change | `gitsigns.nvim` | Preview single git change diff in a floating popup |
 | `<Space>` `hr` | Reset Git Change | `gitsigns.nvim` | Reset / undo current git change hunk |
+| `<Space>` `hw` | Toggle Whitespace Diff | `gitsigns.nvim` | Toggle ignoring whitespace changes in git diffs & gutters |
 | `<Space>` `wc` | Create Worktree | `git-worktree.nvim` | Interactively create git worktree & branch via Telescope |
 | `<Space>` `wm` | Manage Worktree | `git-worktree.nvim` | Switch worktree (`<Enter>`) or delete (`<Ctrl-d>` / `d`) |
 | `<Space>` `um` | Toggle Minimap | `codewindow.nvim` | Toggle VS Code-style code minimap on the right side |
