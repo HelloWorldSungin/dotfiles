@@ -59,7 +59,31 @@ return {
         function()
           local ok_tele, builtin = pcall(require, "telescope.builtin")
           if ok_tele and builtin then
-            builtin.live_grep()
+            if vim.fn.executable("rg") == 1 then
+              builtin.live_grep({
+                vimgrep_arguments = {
+                  "rg",
+                  "--color=never",
+                  "--no-heading",
+                  "--with-filename",
+                  "--line-number",
+                  "--column",
+                  "--smart-case",
+                },
+              })
+            elseif vim.fn.executable("git") == 1 then
+              builtin.live_grep({
+                vimgrep_arguments = {
+                  "git",
+                  "grep",
+                  "-n",
+                  "--column",
+                  "-I",
+                },
+              })
+            else
+              builtin.live_grep()
+            end
           else
             local ok_snacks, snacks = pcall(require, "snacks")
             if ok_snacks and snacks.picker then
