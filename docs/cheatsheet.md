@@ -90,17 +90,23 @@ Leader key = **`<Space>`** ([`config/nvim/lua/vim-config.lua`](../config/nvim/lu
 | `Esc` | Normal | **Auto-Save** | Saves current buffer (`:w`) on exit |
 | `Ctrl` + `a` | Normal | **Select All** | Selects entire file content (`ggVG`) |
 | `p` | Visual | **Non-Clobber Paste** | Pastes over selection without clobbering register (`"_dP`) |
+| `gt` / `gT` | Normal | **Next / Prev Tab** | Cycle forward (`gt`) or backward (`gT`) through tabs |
+| `1gt` .. `9gt` | Normal | **Select Tab** | Jump directly to Tab 1 through 9 |
+| `Ctrl` + `w` + `v` / `s` | Normal | **Split Window** | Split window vertically (`v`) or horizontally (`s`) |
+| `Ctrl` + `w` + `h`/`j`/`k`/`l` | Normal | **Navigate Split** | Move focus left (`h`), down (`j`), up (`k`), right (`l`) |
 
 ### Plugin Shortcuts
 
 | Shortcut | Feature | Plugin | Description |
 | :--- | :--- | :--- | :--- |
-| `<Space>` `f` | Find Files | `snacks.nvim` | Fuzzy search files by name |
+| `<Space>` `f` | Find Files | `snacks.nvim` | Fuzzy search files by name (press `<Ctrl-v>` to open in vsplit) |
 | `<Space>` `s` | Live Grep | `snacks.nvim` | Grep text across codebase |
 | `<Space>` `b` | Buffers | `snacks.nvim` | Switch active buffers |
 | `g` `d` | Definition | `snacks.nvim` | Go to LSP symbol definition |
-| `<Space>` `e` | File Explorer | `oil.nvim` | Editable buffer file tree |
+| `<Space>` `e` | File Explorer | `oil.nvim` | Editable buffer file tree (press `v` for vsplit, `s` for split) |
 | `<Space>` `g` | Git UI | `neogit` | Git status, diff, staging, and commit dashboard |
+| `<Space>` `wc` | Create Worktree | `git-worktree.nvim` | Interactively create git worktree & branch via Telescope |
+| `<Space>` `wm` | Manage Worktree | `git-worktree.nvim` | Switch worktree (`<Enter>`) or delete (`<Ctrl-d>` / `d`) |
 | `Ctrl` + `n` | Multi-Cursor | `vim-visual-multi` | Select word under cursor & spawn next match cursor |
 | `Ctrl` + `Shift` + `Down` / `Up` | Add Cursor | `vim-visual-multi` | Spawn multi-cursor directly below / above |
 
