@@ -467,8 +467,13 @@ package.preload["neogit.lib.finder"] = function()
     end)
   end
 
-  local a = require("neogit.lib.async")
-  Finder.find_async = a.wrap(Finder.find, 2)
+  function Finder:find_async()
+    local a = require("neogit.lib.async")
+    local wrapped_find = a.wrap(function(instance, cb)
+      instance:find(cb)
+    end, 2)
+    return wrapped_find(self)
+  end
 
   return Finder
 end
