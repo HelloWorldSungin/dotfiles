@@ -151,13 +151,18 @@ return {
           if ok then
             pcall(telescope.load_extension, "git_worktree")
             if telescope.extensions and telescope.extensions.git_worktree then
-              telescope.extensions.git_worktree.git_worktree()
-              return
+              if type(telescope.extensions.git_worktree.git_worktrees) == "function" then
+                telescope.extensions.git_worktree.git_worktrees()
+                return
+              elseif type(telescope.extensions.git_worktree.git_worktree) == "function" then
+                telescope.extensions.git_worktree.git_worktree()
+                return
+              end
             end
           end
-          vim.cmd("Telescope git_worktree")
+          vim.cmd("Telescope git_worktree git_worktrees")
         end,
-        desc = "Git Worktree: Manage / Switch",
+        desc = "Git Worktree: Manage / Switch / Delete",
       },
       {
         "<leader>wc",
