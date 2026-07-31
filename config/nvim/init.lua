@@ -396,56 +396,105 @@ if not _G.lazy_setup_done then
   -- Load every file in lua/plugins/ as a plugin spec.
   require("lazy").setup("plugins")
 
-  vim.schedule(function()
-    local log_file = "/tmp/neogit_debug.log"
-    local function log_debug(msg)
-      local f = io.open(log_file, "a")
-      if f then
-        f:write(os.date("%Y-%m-%d %H:%M:%S") .. " " .. tostring(msg) .. "\n")
-        f:close()
-      end
+  local log_file = "/tmp/neogit_debug.log"
+  local function log_debug(msg)
+    local f = io.open(log_file, "a")
+    if f then
+      f:write(os.date("%Y-%m-%d %H:%M:%S") .. " " .. tostring(msg) .. "\n")
+      f:close()
     end
+  end
 
-    log_debug("[INIT.LUA DEFERRED SHIM ATTEMPT]")
+  log_debug("[INIT.LUA LOCKING NEOGIT SHIMS]")
 
-    local ok_input, neogit_input = pcall(require, "neogit.lib.input")
-    log_debug("neogit.lib.input require ok=" .. tostring(ok_input))
-    if ok_input and neogit_input then
-      neogit_input.get_user_input = function(prompt, input_opts)
-        log_debug("[INPUT START] prompt=" .. tostring(prompt))
-        local a = require("neogit.lib.async")
-        local async_input = a.wrap(vim.ui.input, 2)
-        input_opts = vim.tbl_extend("keep", input_opts or {}, { strip_spaces = false, separator = ": " })
+  local input_module = {
+    get_confirmation = function(msg, options)
+      options = options or {}
+      options.values = options.values or { "&Yes", "&No" }
+      options.default = options.default or 1
+      return vim.fn.confirm(msg, table.concat(options.values, "\n"), options.default) == 1
+    end,
+    get_permission = function(msg, options)
+      options = options or {}
+      options.values = options.values or { "&Yes", "&No" }
+      options.default = options.default or 2
+      return vim.fn.confirm(msg, table.concat(options.values, "\n"), options.default) == 1
+    end,
+    get_choice = function(msg, options)
+      local choice = vim.fn.confirm(msg, table.concat(options.values, "\n"), options.default)
+      vim.cmd("redraw")
+      if choice == 0 then choice = options.default end
+      return choice
+    end,
+    get_user_input = function(prompt, opts)
+      log_debug("[INPUT START] prompt=" .. tostring(prompt))
+      local a = require("neogit.lib.async")
+      local async_input = a.wrap(vim.ui.input, 2)
+      opts = vim.tbl_extend("keep", opts or {}, { strip_spaces = false, separator = ": " })
 
-        local result = async_input({
-          prompt = ("%s%s"):format(prompt, input_opts.separator),
-          default = input_opts.default or input_opts.prepend,
-          cancelreturn = input_opts.cancel,
-        })
+      local result = async_input({
+        prompt = ("%s%s"):format(prompt, opts.separator),
+        default = opts.default or opts.prepend,
+        cancelreturn = opts.cancel,
+      })
 
-        log_debug("[INPUT END] prompt=" .. tostring(prompt) .. " result=" .. tostring(result))
-        if not result then return nil end
-        if input_opts.strip_spaces then result, _ = result:gsub("%s", "-") end
-        if result == "" then return nil end
-        return result
-      end
+      log_debug("[INPUT END] prompt=" .. tostring(prompt) .. " result=" .. tostring(result))
+      if not result then return nil end
+      if opts.strip_spaces then result, _ = result:gsub("%s", "-") end
+      if result == "" then return nil end
+      return result
+    end,
+    get_user_input_blocking = function(prompt, opts)
+      opts = opts or {}
+      local result = vim.fn.input({
+        prompt = prompt .. (opts.separator or ": "),
+        default = opts.default or opts.prepend or "",
+        completion = opts.completion,
+        cancelreturn = opts.cancel,
+      })
+      if opts.strip_spaces and result then result, _ = result:gsub("%s", "-") end
+      return result
+    end,
+  }
+
+  package.preload["neogit.lib.input"] = function() return input_module end
+  package.loaded["neogit.lib.input"] = input_module
+
+  local finder_module = {}
+  finder_module.__index = finder_module
+
+  function finder_module:new(opts)
+    return setmetatable({ entries = {}, opts = opts or {} }, finder_module)
+  end
+  function finder_module.create(opts)
+    return finder_module:new(opts or {})
+  end
+  function finder_module:add_entries(entries)
+    if type(entries) == "table" then
+      for _, entry in ipairs(entries) do table.insert(self.entries, entry) end
     end
+    return self
+  end
+  function finder_module:find(on_select)
+    log_debug("[FINDER START] prompt=" .. tostring(self.opts.prompt_prefix) .. " #entries=" .. tostring(#self.entries))
+    vim.ui.select(self.entries, {
+      prompt = string.format("%s", self.opts.prompt_prefix or "Select"),
+      format_item = function(entry) return tostring(entry) end,
+    }, function(item)
+      log_debug("[FINDER SELECTED] item=" .. tostring(item))
+      vim.schedule(function()
+        on_select(self.opts.allow_multi and { item } or item)
+      end)
+    end)
+  end
+  function finder_module:find_async()
+    local a = require("neogit.lib.async")
+    local wrapped_find = a.wrap(function(instance, cb)
+      instance:find(cb)
+    end, 2)
+    return wrapped_find(self)
+  end
 
-    local ok_finder, neogit_finder = pcall(require, "neogit.lib.finder")
-    log_debug("neogit.lib.finder require ok=" .. tostring(ok_finder))
-    if ok_finder and neogit_finder then
-      neogit_finder.find = function(self, on_select)
-        log_debug("[FINDER START] prompt=" .. tostring(self.opts.prompt_prefix) .. " #entries=" .. tostring(#self.entries))
-        vim.ui.select(self.entries, {
-          prompt = string.format("%s", self.opts.prompt_prefix or "Select"),
-          format_item = function(entry) return tostring(entry) end,
-        }, function(item)
-          log_debug("[FINDER SELECTED] item=" .. tostring(item))
-          vim.schedule(function()
-            on_select(self.opts.allow_multi and { item } or item)
-          end)
-        end)
-      end
-    end
-  end)
+  package.preload["neogit.lib.finder"] = function() return finder_module end
+  package.loaded["neogit.lib.finder"] = finder_module
 end
