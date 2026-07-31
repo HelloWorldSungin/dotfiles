@@ -29,7 +29,7 @@ return {
   {
     -- Diffview: full side-by-side Git file diff & commit history viewer
     "sindrets/diffview.nvim",
-    cmd = { "DiffviewOpen", "DiffviewClose", "DiffviewFileHistory" },
+    lazy = false,
     opts = {},
     config = function(_, opts)
       local ok, diffview = pcall(require, "diffview")
