@@ -25,6 +25,16 @@ return {
     },
   },
   {
+    -- Diffview: full side-by-side Git file diff & commit history viewer
+    "sindrets/diffview.nvim",
+    cmd = { "DiffviewOpen", "DiffviewClose", "DiffviewFileHistory" },
+    keys = {
+      { "<leader>gd", "<cmd>DiffviewOpen<cr>", desc = "Open Git diff view" },
+      { "<leader>gh", "<cmd>DiffviewFileHistory %<cr>", desc = "Current file git history diff" },
+      { "<leader>gc", "<cmd>DiffviewClose<cr>", desc = "Close Git diff view" },
+    },
+  },
+  {
     -- Gitsigns: change markers in the gutter + inline blame + change navigation.
     "lewis6991/gitsigns.nvim",
     event = { "BufReadPre", "BufNewFile" },

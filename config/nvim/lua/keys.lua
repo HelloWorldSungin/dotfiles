@@ -28,3 +28,7 @@ vim.keymap.set("v", "<D-S-c>", '"+y', { desc = "Copy selection to system clipboa
 -- Toggle spell check on/off
 vim.keymap.set("n", "<leader>us", "<cmd>set spell!<cr>", { desc = "Toggle spell check" })
 
+-- Diff open split windows side-by-side
+vim.keymap.set("n", "<leader>dt", "<cmd>windo diffthis<cr>", { desc = "Diff open windows side-by-side" })
+vim.keymap.set("n", "<leader>do", "<cmd>windo diffoff<cr>", { desc = "Turn off window diffing" })
+
