@@ -104,10 +104,7 @@ Leader key = **`<Space>`** ([`config/nvim/lua/vim-config.lua`](../config/nvim/lu
 | `<Space>` `b` | Buffers | `snacks.nvim` | Switch active buffers |
 | `g` `d` | Definition | `snacks.nvim` | Go to LSP symbol definition |
 | `<Space>` `e` | File Explorer | `oil.nvim` | Editable buffer file tree (press `v` for vsplit, `s` for split) |
-| `<Space>` `g` | Git UI | `neogit` | Git status, diff, staging, and commit dashboard |
-| `<Space>` `gd` | Open Git Diffview | `diffview.nvim` | Open full side-by-side Git diff view across modified files |
-| `<Space>` `gh` | File Git History Diff | `diffview.nvim` | Open Git file history diff view for current file |
-| `<Space>` `gc` | Close Git Diffview | `diffview.nvim` | Close Diffview pane |
+| `<Space>` `g` | Git UI | `neogit` | Opens Neogit git status, diff, staging, and commit dashboard |
 | `<Space>` `dt` | Window Diff On | Built-in | Diff open split windows side-by-side |
 | `<Space>` `do` | Window Diff Off | Built-in | Turn off window diffing mode |
 | `do` / `dp` | Diff Obtain / Put | Built-in | Pull change from opposite diff window (`do`) or push change (`dp`) |
