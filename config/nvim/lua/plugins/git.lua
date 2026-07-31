@@ -68,11 +68,18 @@ return {
         end, { expr = true, desc = "Previous git change" })
 
         -- Git change actions
-        map("n", "<leader>h", gs.preview_hunk, { desc = "Preview git change hunk" })
-        map("n", "<leader>hp", gs.preview_hunk, { desc = "Preview git change hunk" })
-        map("n", "<leader>hs", gs.stage_hunk, { desc = "Stage git change hunk" })
-        map("n", "<leader>hr", gs.reset_hunk, { desc = "Reset git change hunk" })
-        map("n", "<leader>hw", gs.toggle_ignore_whitespace, { desc = "Toggle ignore whitespace in git diff" })
+        map("n", "<leader>h", function() gs.preview_hunk() end, { desc = "Preview git change hunk" })
+        map("n", "<leader>hp", function() gs.preview_hunk() end, { desc = "Preview git change hunk" })
+        map("n", "<leader>hs", function() gs.stage_hunk() end, { desc = "Stage git change hunk" })
+        map("n", "<leader>hr", function() gs.reset_hunk() end, { desc = "Reset git change hunk" })
+        map("n", "<leader>hw", function()
+          local g = package.loaded.gitsigns or require("gitsigns")
+          if g and type(g.toggle_ignore_whitespace) == "function" then
+            g.toggle_ignore_whitespace()
+          elseif g and type(g.toggle_whitespace) == "function" then
+            g.toggle_whitespace()
+          end
+        end, { desc = "Toggle ignore whitespace in git diff" })
       end,
     },
   },
