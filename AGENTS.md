@@ -18,6 +18,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   by Git".
 - CT110 root networking failover is tracked in `system/ct110-network-failover/`;
   its README documents the Proxmox-owned boundary, guarded apply, and E2E test.
+- For one-off or infrequent operational work, start with the simplest direct end-to-end path.
+  Do not build wrappers, control planes, policy layers, custom verifiers, or automation unless
+  the direct path exposes a concrete blocker or repeated need that justifies the added machinery.
+- **Branch Strategy (CRITICAL)**: All build server workarounds, work-environment bugfixes, and Neovim 0.9.5 polyfills MUST ONLY be committed to the `nvim-0.9-compat` branch. Do NOT apply work server workarounds or 0.9.5 compatibility shims to the `master` branch.
 
 ## Maintaining this file
 
