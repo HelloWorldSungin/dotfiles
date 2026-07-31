@@ -159,19 +159,41 @@ return {
                   local action_state = require("telescope.actions.state")
                   local worktree = require("git-worktree")
 
-                  local function do_delete(force)
+                  local function safe_delete_worktree(path, force)
+                    local worktree = require("git-worktree")
+                    local current_cwd = vim.fs.normalize((vim.uv or vim.loop).cwd() or "")
+                    local target_path = vim.fs.normalize(path or "")
+
+                    if current_cwd == target_path or current_cwd:find(target_path, 1, true) then
+                      local lines = vim.fn.systemlist("git worktree list")
+                      local main_path = lines[1] and lines[1]:match("^(%S+)")
+                      if main_path and (vim.uv or vim.loop).fs_stat(main_path) and main_path ~= target_path then
+                        pcall(vim.api.nvim_set_current_dir, main_path)
+                      else
+                        local parent = vim.fs.normalize(target_path .. "/..")
+                        pcall(vim.api.nvim_set_current_dir, parent)
+                      end
+                    end
+
+                    worktree.delete_worktree(target_path, force)
+                  end
+
+                  map("i", "<C-d>", function()
                     local selection = action_state.get_selected_entry()
                     if selection then
                       actions.close(prompt_bufnr)
                       local path = selection.path or selection.value or selection[1]
-                      if path then
-                        worktree.delete_worktree(path, force)
-                      end
+                      if path then safe_delete_worktree(path, false) end
                     end
-                  end
-
-                  map("i", "<C-d>", function() do_delete(false) end)
-                  map("n", "d", function() do_delete(false) end)
+                  end)
+                  map("n", "d", function()
+                    local selection = action_state.get_selected_entry()
+                    if selection then
+                      actions.close(prompt_bufnr)
+                      local path = selection.path or selection.value or selection[1]
+                      if path then safe_delete_worktree(path, false) end
+                    end
+                  end)
                   return true
                 end,
               })
@@ -225,6 +247,19 @@ return {
             if selected and selected ~= "" then
               local confirm = vim.fn.confirm("Delete worktree at " .. selected .. "?", "&Yes\n&No", 2)
               if confirm == 1 then
+                local current_cwd = vim.fs.normalize((vim.uv or vim.loop).cwd() or "")
+                local target_path = vim.fs.normalize(selected)
+
+                if current_cwd == target_path or current_cwd:find(target_path, 1, true) then
+                  local main_path = worktrees[1]
+                  if main_path and main_path ~= target_path then
+                    pcall(vim.api.nvim_set_current_dir, main_path)
+                  else
+                    local parent = vim.fs.normalize(target_path .. "/..")
+                    pcall(vim.api.nvim_set_current_dir, parent)
+                  end
+                end
+
                 local out = vim.fn.system({ "git", "worktree", "remove", "--force", selected })
                 vim.notify("Removed worktree: " .. selected, vim.log.levels.INFO)
               end
