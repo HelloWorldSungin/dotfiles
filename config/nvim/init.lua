@@ -153,6 +153,13 @@ end
 
 
 
+-- Shim vim.hl for Neovim 0.9.5 compatibility
+if vim.hl == nil then
+  vim.hl = {
+    range = function(...) end,
+  }
+end
+
 -- Shim vim.validate for Neovim 0.10 positional argument syntax (e.g. gitsigns.nvim)
 if vim.validate then
   local orig_validate = vim.validate
