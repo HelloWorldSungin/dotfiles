@@ -14,6 +14,7 @@ return {
         kind = "split",
         show_staged_diff = false,
       },
+      console_timeout = 60000,   -- Allow up to 60 seconds for git operations on large repositories
       auto_show_console = false, -- Disable auto-popping NeogitConsole box (press $ inside Neogit to view log manually)
     },
     keys = {
