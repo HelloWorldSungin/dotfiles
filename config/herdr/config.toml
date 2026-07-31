@@ -14,8 +14,9 @@ agent_panel_sort = "spaces"
 show_agent_labels_on_pane_borders = true
 # Bright accent color for space/agent selection highlights, borders, and sidebar
 accent = "cyan"
-# Disable mouse capture so MobaXterm handles mouse scrolling, text selection, and right-click paste natively
-mouse_capture = false
+mouse_capture = true
+mouse_scroll_lines = 3
+right_click_passthrough_modifier = "off"
 
 [keys]
 # Remote image paste: converts copied Mac screenshot into remote file upload for Herdr agent sessions
