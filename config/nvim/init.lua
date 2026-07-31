@@ -396,6 +396,10 @@ if not _G.lazy_setup_done then
   -- Load every file in lua/plugins/ as a plugin spec.
   require("lazy").setup("plugins")
 
+  -- Ensure neogit modules are discoverable on package.path even before lazy loads neogit
+  local neogit_lua_path = vim.fn.stdpath("data") .. "/lazy/neogit/lua"
+  package.path = package.path .. ";" .. neogit_lua_path .. "/?.lua;" .. neogit_lua_path .. "/?/init.lua"
+
   local log_file = "/tmp/neogit_debug.log"
   local function log_debug(msg)
     local f = io.open(log_file, "a")
