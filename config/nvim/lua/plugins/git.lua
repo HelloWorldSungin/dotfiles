@@ -7,6 +7,19 @@ return {
       "nvim-lua/plenary.nvim",
       "sindrets/diffview.nvim",
     },
+    opts = {
+      disable_context_highlighting = true,
+      commit_editor = {
+        kind = "split",
+        show_staged_diff = false,
+      },
+      console_timeout = 60000,   -- Allow up to 60 seconds for git operations on large repositories
+      auto_show_console = false, -- Disable auto-popping NeogitConsole box (press $ inside Neogit to view log manually)
+      integrations = {
+        snacks = false,          -- Disable Neogit's internal snacks finder wrapper bug on item selection
+        diffview = false,        -- Use Neogit's native built-in diff buffer to prevent diffview adapter errors
+      },
+    },
     keys = {
       { "<leader>g", "<cmd>Neogit<cr>", desc = "Neogit (git status/diff/stage)" },
       { "<leader>gv", "<cmd>Neogit kind=vsplit<cr>", desc = "Neogit (vertical split)" },
