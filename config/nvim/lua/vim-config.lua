@@ -10,6 +10,7 @@ vim.g.loaded_netrwPlugin = 1
 vim.opt.expandtab = true   -- tabs become spaces
 vim.opt.shiftwidth = 2     -- one indent level = 2 spaces
 vim.opt.tabstop = 2
+vim.opt.softtabstop = 2    -- pressing <Tab> in insert mode inserts 2 spaces
 
 vim.opt.number = true          -- current line shows its absolute number...
 vim.opt.relativenumber = true  -- ...other lines show distance from cursor,
