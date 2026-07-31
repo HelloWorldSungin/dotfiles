@@ -16,8 +16,30 @@ return {
     "sindrets/diffview.nvim",
     cmd = { "DiffviewOpen", "DiffviewClose", "DiffviewFileHistory" },
     keys = {
-      { "<leader>gd", "<cmd>DiffviewOpen<cr>", desc = "Open Git diff view" },
-      { "<leader>gh", "<cmd>DiffviewFileHistory %<cr>", desc = "Current file git history diff" },
+      {
+        "<leader>gd",
+        function()
+          local is_git = vim.fn.systemlist("git rev-parse --is-inside-work-tree")[1] == "true"
+          if is_git then
+            vim.cmd("DiffviewOpen")
+          else
+            vim.notify("Current directory is not inside a Git repository", vim.log.levels.WARN)
+          end
+        end,
+        desc = "Open Git diff view",
+      },
+      {
+        "<leader>gh",
+        function()
+          local is_git = vim.fn.systemlist("git rev-parse --is-inside-work-tree")[1] == "true"
+          if is_git then
+            vim.cmd("DiffviewFileHistory %")
+          else
+            vim.notify("Current file is not inside a Git repository", vim.log.levels.WARN)
+          end
+        end,
+        desc = "Current file git history diff",
+      },
       { "<leader>gc", "<cmd>DiffviewClose<cr>", desc = "Close Git diff view" },
     },
   },
