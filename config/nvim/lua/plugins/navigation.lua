@@ -37,7 +37,7 @@ return {
         ["<C-v>"] = "actions.select_vsplit",
         ["<C-s>"] = "actions.select_split",
         ["v"] = "actions.select_vsplit",
-        ["s"] = "actions.select_split",
+        ["-"] = "actions.select_split",
       },
     },
     keys = {
