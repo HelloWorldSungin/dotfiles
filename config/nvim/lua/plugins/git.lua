@@ -65,6 +65,7 @@ return {
         map("n", "<leader>hp", gs.preview_hunk, { desc = "Preview git change hunk" })
         map("n", "<leader>hs", gs.stage_hunk, { desc = "Stage git change hunk" })
         map("n", "<leader>hr", gs.reset_hunk, { desc = "Reset git change hunk" })
+        map("n", "<leader>hw", gs.toggle_ignore_whitespace, { desc = "Toggle ignore whitespace in git diff" })
       end,
     },
   },
