@@ -441,6 +441,21 @@ if vim.api and vim.api.nvim_get_option_info then
   end
 end
 
+-- Shim vim.wo and vim.bo indexer for Telescope set.lua on Neovim 0.9.5
+for _, opt_table in ipairs({ vim.wo, vim.bo }) do
+  if type(opt_table) == "table" then
+    local meta = getmetatable(opt_table)
+    if meta and meta.__index then
+      local orig_index = meta.__index
+      meta.__index = function(t, k)
+        if k == 0 or k == "0" then return t end
+        local ok, res = pcall(orig_index, t, k)
+        return ok and res or nil
+      end
+    end
+  end
+end
+
 
 if not _G.lazy_setup_done then
   _G.lazy_setup_done = true
