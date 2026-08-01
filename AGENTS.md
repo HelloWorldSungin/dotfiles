@@ -18,9 +18,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
      `bootstrap.sh` step 5/6, deliberately outside Nix (`docs/nix.md` records why).
      `bootstrap.sh` is the superset - it runs the switch itself as step 2/6 - but
      it is install-if-missing, so it never upgrades a CLI that is already present.
-  3. A running herdr does not re-read `config/herdr/config.toml` even though the
-     file is a live symlink; use `herdr server reload-config`. Never restart the
-     captain's herdr to apply a config - it hosts the live fleet.
+  3. A running herdr does not automatically re-read `config/herdr/config.toml`
+     even though the file is a live symlink; use `herdr server reload-config`.
+     Never restart the captain's herdr to apply a config - it hosts the live fleet.
 - The personal tool update checker lives in `bin/dev-tools-check-updates`, its
   deterministic self-test is in `tests/`, and `home/sungin-ct110.nix` owns its
   package, timer, and zsh startup wiring.
