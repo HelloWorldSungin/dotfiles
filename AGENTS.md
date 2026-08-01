@@ -5,8 +5,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `.github/workflows/build.yml` is authoritative for build-only validation of
   Home Manager changes. Do not activate the resulting generation while testing.
 - `bash ~/dotfiles/rebuild.sh` is the apply path for CT110 (it sources nix,
-  auto-selects the flake target, and passes `-b backup`). Only `flake.nix` and
-  `home/*.nix` need it: the `mkOutOfStoreSymlink` trees in `home/common.nix`
+  auto-selects the flake target, and passes `-b backup`). Changes to Nix-evaluated
+  inputs require it; the `mkOutOfStoreSymlink` trees in `home/common.nix`
   (`config/`, `agents/`, `skills/`, `pi/`) are live symlinks into `~/dotfiles`,
   so those edits take effect the instant the fast-forward lands. See `docs/nix.md`.
 - Ordering traps around applying on CT110, in the order they bite:
