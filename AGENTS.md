@@ -4,6 +4,23 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - `.github/workflows/build.yml` is authoritative for build-only validation of
   Home Manager changes. Do not activate the resulting generation while testing.
+- `bash ~/dotfiles/rebuild.sh` is the apply path for CT110 (it sources nix,
+  auto-selects the flake target, and passes `-b backup`). Only `flake.nix` and
+  `home/*.nix` need it: the `mkOutOfStoreSymlink` trees in `home/common.nix`
+  (`config/`, `agents/`, `skills/`, `pi/`) are live symlinks into `~/dotfiles`,
+  so those edits take effect the instant the fast-forward lands. See `docs/nix.md`.
+- Ordering traps around applying on CT110, in the order they bite:
+  1. `git fetch` + `git merge --ff-only` BEFORE running either script. Running
+     first executes the stale pre-merge copy, silently - this has already cost a
+     debugging cycle.
+  2. A `home-manager switch` never installs or refreshes the agent CLIs
+     (`claude`, `codex`, `opencode`, `pi`, ...). They are curl/npm installers in
+     `bootstrap.sh` step 5/6, deliberately outside Nix (`docs/nix.md` records why).
+     `bootstrap.sh` is the superset - it runs the switch itself as step 2/6 - but
+     it is install-if-missing, so it never upgrades a CLI that is already present.
+  3. A running herdr does not re-read `config/herdr/config.toml` even though the
+     file is a live symlink; use `herdr server reload-config`. Never restart the
+     captain's herdr to apply a config - it hosts the live fleet.
 - The personal tool update checker lives in `bin/dev-tools-check-updates`, its
   deterministic self-test is in `tests/`, and `home/sungin-ct110.nix` owns its
   package, timer, and zsh startup wiring.
