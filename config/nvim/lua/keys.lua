@@ -21,10 +21,11 @@ vim.keymap.set("n", "<C-S-v>", '"+p', { desc = "Paste system clipboard" })
 vim.keymap.set("n", "<D-S-v>", '"+p', { desc = "Paste system clipboard" })
 vim.keymap.set("n", "<D-v>", '"+p', { desc = "Paste system clipboard" })
 
--- Ctrl+Shift+C / Cmd+Shift+C / Cmd+C copies selection to system clipboard in visual mode
+-- Ctrl+Shift+C / Cmd+Shift+C / Cmd+C / Ctrl+C copies selection to system clipboard in visual mode
 vim.keymap.set("v", "<C-S-c>", '"+y', { desc = "Copy selection to system clipboard" })
 vim.keymap.set("v", "<D-S-c>", '"+y', { desc = "Copy selection to system clipboard" })
 vim.keymap.set("v", "<D-c>", '"+y', { desc = "Copy selection to system clipboard" })
+vim.keymap.set("v", "<C-c>", '"+y', { desc = "Copy selection to system clipboard" })
 
 -- Toggle spell check on/off
 vim.keymap.set("n", "<leader>us", "<cmd>set spell!<cr>", { desc = "Toggle spell check" })

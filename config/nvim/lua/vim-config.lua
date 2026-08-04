@@ -19,6 +19,22 @@ vim.opt.relativenumber = true  -- ...other lines show distance from cursor,
 vim.opt.ignorecase = true -- searches ignore case...
 vim.opt.smartcase = true  -- ...unless the query contains a capital letter
 
+-- Configure OSC 52 clipboard provider for remote/headless sessions
+local has_osc52, osc52 = pcall(require, "vim.ui.clipboard.osc52")
+if has_osc52 and vim.fn.executable("pbcopy") == 0 and vim.fn.executable("xclip") == 0 and vim.fn.executable("xsel") == 0 and vim.fn.executable("wl-copy") == 0 then
+  vim.g.clipboard = {
+    name = "OSC 52",
+    copy = {
+      ["+"] = osc52.copy("+"),
+      ["*"] = osc52.copy("*"),
+    },
+    paste = {
+      ["+"] = osc52.paste("+"),
+      ["*"] = osc52.paste("*"),
+    },
+  }
+end
+
 vim.opt.clipboard = "unnamedplus" -- yank/paste goes through the system clipboard
 
 vim.opt.scrolloff = 16 -- keep 16 lines visible above/below the cursor
