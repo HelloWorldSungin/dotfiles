@@ -136,27 +136,27 @@ export const DOTFILE_CHEATSHEET_DATA: DotfileCommand[] = [
   // HERDR - Window & Pane Navigation
   {
     key: "Ctrl + b, c",
-    desc: "Opens a new tab",
+    desc: "Create Tab: Opens a new tab",
     category: "Herdr",
     subcategory: "Navigation (tmux)",
     config: "config.toml",
-    keywords: ["create", "tab", "new", "tmux"]
+    keywords: ["create", "tab", "new", "tmux", "herdr"]
   },
   {
     key: "Ctrl + b, n / p",
-    desc: "Switch to next or previous tab",
+    desc: "Switch Tab: Switch to next (n) or previous (p) tab",
     category: "Herdr",
     subcategory: "Navigation (tmux)",
     config: "config.toml",
-    keywords: ["next", "prev", "tab", "switch"]
+    keywords: ["switch", "tab", "next", "prev", "herdr", "tmux"]
   },
   {
     key: "Ctrl + b, 1 .. 9",
-    desc: "Jump to tab 1 through 9",
+    desc: "Jump / Switch Tab: Jump directly to tab 1 through 9",
     category: "Herdr",
     subcategory: "Navigation (tmux)",
     config: "config.toml",
-    keywords: ["select", "tab", "jump", "number"]
+    keywords: ["select", "switch", "tab", "jump", "number", "herdr"]
   },
   {
     key: "Ctrl + b, v",
