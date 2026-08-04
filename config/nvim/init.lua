@@ -210,23 +210,46 @@ if vim.validate then
   end
 end
 
--- Configure OSC 52 clipboard provider for headless Linux SSH connections
+-- Configure OSC 52 clipboard provider for headless Linux SSH connections / Neovim 0.9.5 compatibility
 if vim.g.clipboard == nil then
   local ok, osc52 = pcall(require, "vim.ui.clipboard.osc52")
-  if ok and osc52 then
-    vim.g.clipboard = {
-      name = "OSC 52",
-      copy = {
-        ["+"] = osc52.copy("+"),
-        ["*"] = osc52.copy("*"),
-      },
-      paste = {
-        ["+"] = osc52.paste("+"),
-        ["*"] = osc52.paste("*"),
-      },
+  if not ok or not osc52 then
+    -- Polyfill for Neovim 0.9.5
+    osc52 = {
+      copy = function(_)
+        return function(lines, _)
+          local text = table.concat(lines, "\n")
+          local base64 = vim.base64.encode(text)
+          local osc = string.format("\x1b]52;c;%s\x07", base64)
+          local term = os.getenv("TERM") or ""
+          if os.getenv("TMUX") or term:match("^screen") or term:match("^tmux") then
+            -- Wrap in tmux/herdr passthrough escape sequence
+            osc = string.format("\x1bPtmux;\x1b%s\x1b\\", osc)
+          end
+          io.stderr:write(osc)
+        end
+      end,
+      paste = function(_)
+        return function()
+          return { vim.fn.split(vim.fn.getreg(""), "\n"), vim.fn.getregtype("") }
+        end
+      end
     }
   end
+
+  vim.g.clipboard = {
+    name = "OSC 52",
+    copy = {
+      ["+"] = osc52.copy("+"),
+      ["*"] = osc52.copy("*"),
+    },
+    paste = {
+      ["+"] = osc52.paste("+"),
+      ["*"] = osc52.paste("*"),
+    },
+  }
 end
+
 
 -- Shim vim.treesitter.language for Neovim 0.9.5 compatibility (suppress no parser errors)
 if vim.treesitter then
