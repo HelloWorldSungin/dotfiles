@@ -21,7 +21,19 @@ vim.opt.smartcase = true  -- ...unless the query contains a capital letter
 
 -- Configure OSC 52 clipboard provider for remote/headless sessions
 local has_osc52, osc52 = pcall(require, "vim.ui.clipboard.osc52")
-if has_osc52 and vim.fn.executable("pbcopy") == 0 and vim.fn.executable("xclip") == 0 and vim.fn.executable("xsel") == 0 and vim.fn.executable("wl-copy") == 0 then
+local use_osc52 = false
+
+if has_osc52 then
+  if vim.fn.has("mac") == 0 and os.getenv("WAYLAND_DISPLAY") == nil and os.getenv("DISPLAY") == nil then
+    -- Headless Linux remote session (even if wl-copy/xclip are wrapper-installed, they will fail)
+    use_osc52 = true
+  elseif vim.fn.executable("pbcopy") == 0 and vim.fn.executable("xclip") == 0 and vim.fn.executable("xsel") == 0 and vim.fn.executable("wl-copy") == 0 then
+    -- No clipboard tools available at all
+    use_osc52 = true
+  end
+end
+
+if use_osc52 then
   vim.g.clipboard = {
     name = "OSC 52",
     copy = {
@@ -34,6 +46,7 @@ if has_osc52 and vim.fn.executable("pbcopy") == 0 and vim.fn.executable("xclip")
     },
   }
 end
+
 
 vim.opt.clipboard = "unnamedplus" -- yank/paste goes through the system clipboard
 
