@@ -103,6 +103,8 @@ local function work_server_live_grep()
       "--line-number",
       "--column",
       "--smart-case",
+      "--hidden",
+      "--glob=!.git/*",
     }
   elseif vim.fn.isdirectory(".git") == 1 or (vim.fn.executable("git") == 1 and vim.fn.system("git rev-parse --is-inside-work-tree"):find("true")) then
     cmd = { "git", "grep", "-n", "-I", "--no-color" }
