@@ -72,7 +72,8 @@ end
 local function work_server_live_grep()
   local ok_snacks, snacks = pcall(require, "snacks")
   if ok_snacks and snacks.picker then
-    local ok = pcall(snacks.picker.grep)
+    local opts = rg_bin and { cmd = rg_bin } or {}
+    local ok = pcall(snacks.picker.grep, opts)
     if ok then return end
   end
 
@@ -142,6 +143,9 @@ return {
         enabled = true,
         icons = {
           files = { enabled = false },
+        },
+        sources = {
+          grep = rg_bin and { cmd = rg_bin } or nil,
         },
       },
       notifier = { enabled = false }, -- Disabled for Neovim 0.9.5 compatibility
