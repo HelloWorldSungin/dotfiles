@@ -60,13 +60,24 @@ local function is_working_ripgrep()
   return _is_rg_working
 end
 
-local function work_server_live_grep()
-  local ok_tele, builtin = pcall(require, "telescope.builtin")
-  if not (ok_tele and builtin) then
-    local ok_snacks, snacks = pcall(require, "snacks")
-    if ok_snacks and snacks.picker then snacks.picker.grep() end
-    return
+-- Prepend working ripgrep path to Neovim PATH environment variable
+local rg_bin = is_working_ripgrep()
+if rg_bin then
+  local bin_dir = vim.fn.fnamemodify(rg_bin, ":h")
+  if bin_dir and bin_dir ~= "" and bin_dir ~= "." and not vim.env.PATH:find(bin_dir, 1, true) then
+    vim.env.PATH = bin_dir .. ":" .. vim.env.PATH
   end
+end
+
+local function work_server_live_grep()
+  local ok_snacks, snacks = pcall(require, "snacks")
+  if ok_snacks and snacks.picker then
+    local ok = pcall(snacks.picker.grep)
+    if ok then return end
+  end
+
+  local ok_tele, builtin = pcall(require, "telescope.builtin")
+  if not (ok_tele and builtin) then return end
 
   local function custom_vimgrep_entry_maker()
     return function(line)
@@ -93,7 +104,6 @@ local function work_server_live_grep()
   end
 
   local cmd
-  local rg_bin = is_working_ripgrep()
   if rg_bin then
     cmd = {
       rg_bin,
@@ -104,6 +114,7 @@ local function work_server_live_grep()
       "--column",
       "--smart-case",
       "--hidden",
+      "--no-ignore-vcs",
       "--glob=!.git/*",
     }
   elseif vim.fn.isdirectory(".git") == 1 or (vim.fn.executable("git") == 1 and vim.fn.system("git rev-parse --is-inside-work-tree"):find("true")) then
