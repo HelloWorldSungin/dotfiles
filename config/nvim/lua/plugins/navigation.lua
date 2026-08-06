@@ -33,6 +33,25 @@ local function pick_directory_and_open_in_oil()
   end
 end
 
+local _is_rg_working = nil
+local function is_working_ripgrep()
+  if _is_rg_working ~= nil then return _is_rg_working end
+
+  local candidates = { "rg", vim.fn.expand("~/bin/rg"), vim.fn.expand("~/.local/bin/rg") }
+  for _, bin in ipairs(candidates) do
+    if vim.fn.executable(bin) == 1 then
+      local out = vim.fn.system(vim.fn.shellescape(bin) .. " --version")
+      if vim.v.shell_error == 0 and out:find("ripgrep") then
+        _is_rg_working = bin
+        return _is_rg_working
+      end
+    end
+  end
+
+  _is_rg_working = false
+  return _is_rg_working
+end
+
 local function work_server_live_grep()
   local ok_tele, builtin = pcall(require, "telescope.builtin")
   if not (ok_tele and builtin) then
@@ -66,9 +85,10 @@ local function work_server_live_grep()
   end
 
   local cmd
-  if vim.fn.executable("rg") == 1 then
+  local rg_bin = is_working_ripgrep()
+  if rg_bin then
     cmd = {
-      "rg",
+      rg_bin,
       "--color=never",
       "--no-heading",
       "--with-filename",
