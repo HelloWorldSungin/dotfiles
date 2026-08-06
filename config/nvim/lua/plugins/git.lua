@@ -21,6 +21,33 @@ return {
         diffview = true,         -- Enable Diffview integration with proper setup initialization
       },
     },
+    config = function(_, opts)
+      local ok, neogit = pcall(require, "neogit")
+      if ok and neogit then
+        -- Polyfill for Neovim 0.9.5: Catch harmless E749 empty buffer error when expanding empty/untracked files in Neogit v1.0.0
+        local orig_cmd = vim.cmd
+        local safe_cmd = setmetatable({}, {
+          __call = function(_, cmd_str, ...)
+            local ok_cmd, err = pcall(orig_cmd, cmd_str, ...)
+            if not ok_cmd and type(err) == "string" and err:find("E749") then
+              return -- Ignore harmless empty buffer error on fold/expand
+            elseif not ok_cmd then
+              error(err)
+            end
+          end,
+          __index = orig_cmd,
+        })
+
+        vim.api.nvim_create_autocmd("FileType", {
+          pattern = { "NeogitStatus", "NeogitDiff" },
+          callback = function()
+            vim.cmd = safe_cmd
+          end,
+        })
+
+        neogit.setup(opts)
+      end
+    end,
     keys = {
       { "<leader>g", "<cmd>Neogit<cr>", desc = "Neogit (git status/diff/stage)" },
       { "<leader>gv", "<cmd>Neogit kind=vsplit<cr>", desc = "Neogit (vertical split)" },
