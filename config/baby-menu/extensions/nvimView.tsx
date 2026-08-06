@@ -154,7 +154,11 @@ const CHEATSHEET_DATA: VimCommand[] = [
 
   // CUSTOM & PLUGIN SHORTCUTS
   { key: "Space f", desc: "Find Files (fuzzy search by name)", category: "advanced", subcategory: "Plugin & Config", keywords: ["find", "files", "fuzzy", "picker", "snacks", "space"] },
-  { key: "Space s", desc: "Live Grep across codebase", category: "advanced", subcategory: "Plugin & Config", keywords: ["grep", "search", "live", "codebase", "snacks", "space"] },
+  { key: "Space s", desc: "Live Grep across codebase (press Ctrl+q to send matches to Quickfix)", category: "advanced", subcategory: "Plugin & Config", keywords: ["grep", "search", "live", "codebase", "snacks", "space"] },
+  { key: "Space se", desc: "Grep by file extension (prompts for extension e.g. vhd, py, ts)", category: "advanced", subcategory: "Plugin & Config", keywords: ["grep", "extension", "vhd", "filter", "space"] },
+  { key: "Space sr", desc: "Search & Replace all Quickfix matches (:cfdo %s/old/new/g | update)", category: "advanced", subcategory: "Plugin & Config", keywords: ["replace", "find", "quickfix", "cfdo", "substitute", "space"] },
+  { key: "Space q", desc: "Toggle Quickfix window open/close", category: "advanced", subcategory: "Plugin & Config", keywords: ["quickfix", "toggle", "window", "copen", "cclose", "space"] },
+  { key: "Ctrl + q", desc: "Send search results from Telescope / Snacks picker to Quickfix list", category: "advanced", subcategory: "Plugin & Config", keywords: ["quickfix", "send", "telescope", "snacks", "ctrl-q"] },
   { key: "Space b", desc: "Switch active buffers", category: "advanced", subcategory: "Plugin & Config", keywords: ["buffers", "switch", "open", "snacks", "space"] },
   { key: "Space e", desc: "File Explorer (Oil.nvim buffer tree - v for vsplit, - for split)", category: "advanced", subcategory: "Plugin & Config", keywords: ["file", "explorer", "oil", "tree", "split", "space"] },
   { key: "Space g", desc: "Git Dashboard (Neogit status, staging, diffs, commits)", category: "advanced", subcategory: "Git", keywords: ["git", "neogit", "dashboard", "status", "commit", "space"] },

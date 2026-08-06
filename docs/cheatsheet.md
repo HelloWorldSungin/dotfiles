@@ -101,7 +101,10 @@ Leader key = **`<Space>`** ([`config/nvim/lua/vim-config.lua`](../config/nvim/lu
 | :--- | :--- | :--- | :--- |
 | `<Space>` `f` | Find Files | `snacks.nvim` | Fuzzy search files by name (press `<Ctrl-v>` to open in vsplit) |
 | `<Space>` `fd` | Find Directory | `snacks.nvim` + `oil` | Fuzzy search folders recursively & open in Oil (or `<Ctrl-f>` inside Oil) |
-| `<Space>` `s` | Live Grep | `snacks.nvim` | Grep text across codebase |
+| `<Space>` `s` | Live Grep | `snacks.nvim` | Grep text across codebase (press `<Ctrl-q>` to send matches to Quickfix) |
+| `<Space>` `se` | Grep Extension | Built-in | Grep scoped by file extension (prompts for `vhd`, `py`, `ts`, etc.) |
+| `<Space>` `sr` | Quickfix Replace | Built-in | Search & replace across all Quickfix list entries (`:cfdo %s/old/new/g \| update`) |
+| `<Space>` `q` | Toggle Quickfix | Built-in | Toggle Quickfix list window open/close |
 | `<Space>` `b` | Buffers | `snacks.nvim` | Switch active buffers |
 | `g` `d` | Definition | `snacks.nvim` | Go to LSP symbol definition |
 | `<Space>` `e` | File Explorer | `oil.nvim` | Editable buffer file tree (press `v` for vsplit, `-` for split) |
