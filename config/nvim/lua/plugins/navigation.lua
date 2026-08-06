@@ -38,9 +38,9 @@ local function is_working_ripgrep()
   if _is_rg_working ~= nil then return _is_rg_working end
 
   local candidates = {
-    "rg",
-    vim.fn.expand("~/bin/rg"),
     vim.fn.expand("~/.local/bin/rg"),
+    vim.fn.expand("~/bin/rg"),
+    "rg",
     vim.fn.expand("~/bin/ripgrep"),
     vim.fn.expand("~/.local/bin/ripgrep"),
     vim.fn.expand("~/bin/rg-real"),
