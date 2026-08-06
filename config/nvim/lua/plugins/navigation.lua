@@ -33,7 +33,6 @@ local function pick_directory_and_open_in_oil()
   end
 end
 
-<<<<<<< HEAD
 local _is_rg_working = nil
 local function is_working_ripgrep()
   if _is_rg_working ~= nil then return _is_rg_working end
