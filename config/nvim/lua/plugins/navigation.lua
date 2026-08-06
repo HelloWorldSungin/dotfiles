@@ -70,13 +70,6 @@ if rg_bin then
 end
 
 local function work_server_live_grep()
-  local ok_snacks, snacks = pcall(require, "snacks")
-  if ok_snacks and snacks.picker then
-    local opts = rg_bin and { cmd = rg_bin } or {}
-    local ok = pcall(snacks.picker.grep, opts)
-    if ok then return end
-  end
-
   local ok_tele, builtin = pcall(require, "telescope.builtin")
   if not (ok_tele and builtin) then return end
 
