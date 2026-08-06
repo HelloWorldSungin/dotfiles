@@ -1,0 +1,242 @@
+#!/usr/bin/env bash
+set -u
+
+VPN_INTERFACE=${VPN_INTERFACE:-eth1}
+VPN_GATEWAY=${VPN_GATEWAY:-192.168.50.1}
+VPN_HEALTHY_METRIC=${VPN_HEALTHY_METRIC:-100}
+VPN_FAILED_METRIC=${VPN_FAILED_METRIC:-1000}
+HOME_INTERFACE=${HOME_INTERFACE:-eth0}
+HOME_GATEWAY=${HOME_GATEWAY:-192.168.68.1}
+HOME_METRIC=${HOME_METRIC:-500}
+FAILURE_THRESHOLD=${FAILURE_THRESHOLD:-3}
+SUCCESS_THRESHOLD=${SUCCESS_THRESHOLD:-3}
+PROBE_INTERVAL_SECONDS=${PROBE_INTERVAL_SECONDS:-5}
+PROBE_CONNECT_TIMEOUT_SECONDS=${PROBE_CONNECT_TIMEOUT_SECONDS:-2}
+PROBE_MAX_TIME_SECONDS=${PROBE_MAX_TIME_SECONDS:-3}
+STATE_DIRECTORY=${STATE_DIRECTORY:-/var/lib/vpn-ethernet-failover}
+STATE_FILE=${STATE_FILE:-${STATE_DIRECTORY}/state}
+IP_BIN=${IP_BIN:-/usr/sbin/ip}
+CURL_BIN=${CURL_BIN:-/usr/bin/curl}
+SLEEP_BIN=${SLEEP_BIN:-/usr/bin/sleep}
+MAX_PROBES=${MAX_PROBES:-0}
+
+if [[ -n ${PROBE_URLS:-} ]]; then
+  read -r -a probe_urls <<<"${PROBE_URLS}"
+else
+  probe_urls=(
+    "https://connectivitycheck.gstatic.com/generate_204"
+    "https://cp.cloudflare.com/generate_204"
+  )
+fi
+
+log() {
+  printf '%s\n' "$*"
+}
+
+routes_for_interface() {
+  "$IP_BIN" -4 -o route show default |
+    awk -v interface="$1" '
+      {
+        for (i = 1; i <= NF; i++) {
+          if ($i == "dev" && $(i + 1) == interface) {
+            print
+            break
+          }
+        }
+      }
+    '
+}
+
+route_metric() {
+  awk '
+    {
+      for (i = 1; i <= NF; i++) {
+        if ($i == "metric") {
+          print $(i + 1)
+          exit
+        }
+      }
+      print 0
+    }
+  ' <<<"$1"
+}
+
+route_gateway() {
+  awk '
+    {
+      for (i = 1; i <= NF; i++) {
+        if ($i == "via") {
+          print $(i + 1)
+          exit
+        }
+      }
+    }
+  ' <<<"$1"
+}
+
+# Install the desired route before deleting lower-priority or stale variants.
+# This ordering means route reconciliation never removes the last default path.
+ensure_default_route() {
+  local interface=$1 gateway=$2 metric=$3 routes route found=0
+  routes=$(routes_for_interface "$interface") || return 1
+
+  while IFS= read -r route; do
+    [[ -n $route ]] || continue
+    if [[ $(route_gateway "$route") == "$gateway" && $(route_metric "$route") == "$metric" ]]; then
+      found=1
+      break
+    fi
+  done <<<"$routes"
+
+  if (( found == 0 )); then
+    "$IP_BIN" -4 route add default via "$gateway" dev "$interface" proto static metric "$metric" || return 1
+  fi
+
+  while IFS= read -r route; do
+    [[ -n $route ]] || continue
+    if [[ $(route_gateway "$route") == "$gateway" && $(route_metric "$route") == "$metric" ]]; then
+      continue
+    fi
+    # The route comes from iproute2 itself and is passed back in its accepted form.
+    # shellcheck disable=SC2086
+    "$IP_BIN" -4 route del $route || return 1
+  done <<<"$routes"
+
+  routes=$(routes_for_interface "$interface") || return 1
+  while IFS= read -r route; do
+    [[ -n $route ]] || continue
+    if [[ $(route_gateway "$route") == "$gateway" && $(route_metric "$route") == "$metric" ]]; then
+      return 0
+    fi
+  done <<<"$routes"
+  return 1
+}
+
+reconcile_routing_state() {
+  local state=$1 vpn_metric
+  ensure_default_route "$HOME_INTERFACE" "$HOME_GATEWAY" "$HOME_METRIC" || return 1
+
+  case $state in
+    vpn) vpn_metric=$VPN_HEALTHY_METRIC ;;
+    home) vpn_metric=$VPN_FAILED_METRIC ;;
+    *) return 1 ;;
+  esac
+
+  ensure_default_route "$VPN_INTERFACE" "$VPN_GATEWAY" "$vpn_metric"
+}
+
+set_routing_state() {
+  local state=$1
+  reconcile_routing_state "$state" || return 1
+  printf '%s\n' "$state" >"$STATE_FILE"
+}
+
+probe_vpn_egress() {
+  local url
+  for url in "${probe_urls[@]}"; do
+    if "$CURL_BIN" \
+      --interface "$VPN_INTERFACE" \
+      --ipv4 \
+      --fail \
+      --silent \
+      --output /dev/null \
+      --connect-timeout "$PROBE_CONNECT_TIMEOUT_SECONDS" \
+      --max-time "$PROBE_MAX_TIME_SECONDS" \
+      "$url"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+read_state() {
+  local state
+  if [[ -r $STATE_FILE ]]; then
+    read -r state <"$STATE_FILE"
+    if [[ $state == vpn || $state == home ]]; then
+      printf '%s\n' "$state"
+      return
+    fi
+  fi
+  printf '%s\n' unknown
+}
+
+main() {
+  local state persisted_state failure_count=0 success_count=0 probe_count=0
+
+  if (( EUID != 0 )) && [[ ${ALLOW_NON_ROOT_FOR_TESTS:-0} != 1 ]]; then
+    printf 'vpn-ethernet-failover must run as root\n' >&2
+    return 1
+  fi
+  if (( FAILURE_THRESHOLD < 2 || SUCCESS_THRESHOLD < 2 )); then
+    printf 'probe thresholds must both be at least 2\n' >&2
+    return 1
+  fi
+  mkdir -p "$STATE_DIRECTORY"
+
+  # The home route is established first and is never removed by this service.
+  ensure_default_route "$HOME_INTERFACE" "$HOME_GATEWAY" "$HOME_METRIC" || {
+    log "fatal: could not establish home standby route via ${HOME_GATEWAY} on ${HOME_INTERFACE}"
+    return 1
+  }
+
+  persisted_state=$(read_state)
+  state=home
+  set_routing_state "$state" || {
+    log "fatal: could not establish safe startup routing state"
+    return 1
+  }
+  log "started in home safety state; persisted=${persisted_state}; thresholds failure=${FAILURE_THRESHOLD} success=${SUCCESS_THRESHOLD}"
+
+  while true; do
+    # networkctl reload can re-add PVE's generated unmetered gateway while the
+    # daemon is already in home state. Reconcile every cycle so stale routes
+    # cannot silently override the persisted health decision.
+    if ! reconcile_routing_state "$state"; then
+      log "fatal: could not reconcile ${state} routing state"
+      return 1
+    fi
+
+    if probe_vpn_egress; then
+      ((success_count += 1))
+      failure_count=0
+      if [[ $state == home ]]; then
+        log "eth1 egress probe healthy (${success_count}/${SUCCESS_THRESHOLD})"
+      fi
+      if (( success_count >= SUCCESS_THRESHOLD )) && [[ $state != vpn ]]; then
+        set_routing_state vpn || {
+          log "fatal: failed to select VPN route after confirmed recovery"
+          return 1
+        }
+        log "transition ${state}->vpn after ${SUCCESS_THRESHOLD} consecutive successful eth1 egress probes; vpn metric=${VPN_HEALTHY_METRIC}, home metric=${HOME_METRIC}"
+        state=vpn
+        success_count=0
+      fi
+    else
+      ((failure_count += 1))
+      success_count=0
+      if [[ $state == vpn ]]; then
+        log "eth1 egress probe failed (${failure_count}/${FAILURE_THRESHOLD})"
+      fi
+      if (( failure_count >= FAILURE_THRESHOLD )) && [[ $state != home ]]; then
+        set_routing_state home || {
+          log "fatal: failed to select home route after confirmed VPN failure"
+          return 1
+        }
+        log "transition ${state}->home after ${FAILURE_THRESHOLD} consecutive failed eth1 egress probes; vpn metric=${VPN_FAILED_METRIC}, home metric=${HOME_METRIC}"
+        state=home
+        failure_count=0
+      fi
+    fi
+
+    ((probe_count += 1))
+    if (( MAX_PROBES > 0 && probe_count >= MAX_PROBES )); then
+      return 0
+    fi
+    "$SLEEP_BIN" "$PROBE_INTERVAL_SECONDS"
+  done
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  main "$@"
+fi
