@@ -93,6 +93,8 @@ const CHEATSHEET_DATA: VimCommand[] = [
   { key: "\"ayy", desc: "Yank current line into named register 'a'", category: "clipboard", subcategory: "Registers", keywords: ["copy", "yank", "register", "named"] },
   { key: "p", desc: "Paste (put) clipboard contents AFTER cursor", category: "clipboard", subcategory: "Paste (Put)", keywords: ["paste", "put", "after", "clipboard"] },
   { key: "P", desc: "Paste (put) clipboard contents BEFORE cursor", category: "clipboard", subcategory: "Paste (Put)", keywords: ["paste", "put", "before", "clipboard"] },
+  { key: "yyp", desc: "Duplicate current line directly below cursor (copy + paste next line)", category: "clipboard", subcategory: "Paste (Put)", keywords: ["duplicate", "copy", "line", "below", "paste", "yyp"] },
+  { key: "yyP", desc: "Duplicate current line directly above cursor (copy + paste prev line)", category: "clipboard", subcategory: "Paste (Put)", keywords: ["duplicate", "copy", "line", "above", "paste", "yyP"] },
   { key: "\"aP", desc: "Paste (put) contents of register 'a' before cursor", category: "clipboard", subcategory: "Registers", keywords: ["paste", "put", "register", "named"] },
   { key: "dd", desc: "Delete (cut) current line", category: "clipboard", subcategory: "Delete (Cut)", keywords: ["delete", "cut", "line"] },
   { key: "#dd", desc: "Delete (cut) # lines downward", category: "clipboard", subcategory: "Delete (Cut)", keywords: ["delete", "cut", "lines", "multiple"] },
