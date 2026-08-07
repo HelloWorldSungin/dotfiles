@@ -90,6 +90,7 @@ Leader key = **`<Space>`** ([`config/nvim/lua/vim-config.lua`](../config/nvim/lu
 | `Esc` | Normal | **Auto-Save** | Saves current buffer (`:w`) on exit |
 | `Ctrl` + `a` | Normal | **Select All** | Selects entire file content (`ggVG`) |
 | `p` | Visual | **Non-Clobber Paste** | Pastes over selection without clobbering register (`"_dP`) |
+| `yyp` / `yyP` | Normal | **Duplicate Line** | Copies current line and pastes it directly below (`yyp`) or above (`yyP`) |
 | `gt` / `gT` | Normal | **Next / Prev Tab** | Cycle forward (`gt`) or backward (`gT`) through tabs |
 | `1gt` .. `9gt` | Normal | **Select Tab** | Jump directly to Tab 1 through 9 |
 | `Ctrl` + `w` + `v` / `s` | Normal | **Split Window** | Split window vertically (`v`) or horizontally (`s`) |
