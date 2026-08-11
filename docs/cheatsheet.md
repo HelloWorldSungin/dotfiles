@@ -93,10 +93,15 @@ Leader key = **`<Space>`** ([`config/nvim/lua/vim-config.lua`](../config/nvim/lu
 | `yyp` / `yyP` | Normal | **Duplicate Line** | Copies current line and pastes it directly below (`yyp`) or above (`yyP`) |
 | `gt` / `gT` | Normal | **Next / Prev Tab** | Cycle forward (`gt`) or backward (`gT`) through tabs |
 | `1gt` .. `9gt` | Normal | **Select Tab** | Jump directly to Tab 1 through 9 |
+| `:tabnew` | Command | **New Tab** | Create a brand new tab page in Neovim |
 | `Ctrl` + `w` + `v` / `s` | Normal | **Split Window** | Split window vertically (`v`) or horizontally (`s`) |
 | `Ctrl` + `w` + `c` | Normal | **Close Split** | Close active split window (`:q` / `:close`) |
 | `Ctrl` + `w` + `o` | Normal | **Close Other Splits** | Close all other split windows except the active one (`:only`) |
 | `Ctrl` + `w` + `h`/`j`/`k`/`l` | Normal | **Navigate Split** | Move focus left (`h`), down (`j`), up (`k`), right (`l`) |
+| `:bd` / `:bd!` | Command | **Close Buffer** | Close current buffer keeping split layout intact (`!` forces close) |
+| `:q` / `:q!` | Command | **Quit Window** | Quit active window / split (`!` ignores unsaved changes) |
+| `:qa` / `:qa!` | Command | **Quit All** | Quit all open windows & exit Neovim (`!` forces quit all) |
+| `ZZ` | Normal | **Save & Exit** | Save current buffer and exit window immediately |
 
 ### Plugin Shortcuts
 

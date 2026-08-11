@@ -176,11 +176,16 @@ const CHEATSHEET_DATA: VimCommand[] = [
   { key: "Space wc", desc: "Interactively create Git worktree & branch via Telescope", category: "advanced", subcategory: "Git Worktree", keywords: ["git", "worktree", "create", "branch", "telescope", "space"] },
   { key: "Space wm", desc: "Manage / Switch / Delete Git worktrees (Ctrl-d or d to delete)", category: "advanced", subcategory: "Git Worktree", keywords: ["git", "worktree", "manage", "switch", "delete", "space"] },
   { key: "Space um", desc: "Toggle VS Code-style code minimap on right side", category: "advanced", subcategory: "UI & Minimap", keywords: ["minimap", "code", "codewindow", "toggle", "vscode", "space"] },
+  { key: ":tabnew", desc: "Open a brand new tab page in Neovim", category: "advanced", subcategory: "Tabs & Splits", keywords: ["tab", "new", "create", "tabnew", "page"] },
   { key: "gt / gT", desc: "Cycle forward (gt) or backward (gT) through open tabs", category: "advanced", subcategory: "Tabs & Splits", keywords: ["tabs", "next", "prev", "cycle", "navigate"] },
   { key: "1gt .. 9gt", desc: "Jump directly to tab 1 through 9", category: "advanced", subcategory: "Tabs & Splits", keywords: ["tabs", "jump", "direct", "select"] },
   { key: "Ctrl + w + v / -", desc: "Split window vertically (v) or horizontally (-)", category: "advanced", subcategory: "Tabs & Splits", keywords: ["split", "window", "vertical", "horizontal"] },
   { key: "Ctrl + w + c", desc: "Close active split window (:q / :close)", category: "advanced", subcategory: "Tabs & Splits", keywords: ["close", "window", "split", "quit"] },
   { key: "Ctrl + w + o", desc: "Close all other split windows except active one (:only)", category: "advanced", subcategory: "Tabs & Splits", keywords: ["close", "other", "windows", "only", "maximize"] },
+  { key: ":bd / :bd!", desc: "Close current buffer without closing split layout (! forces close)", category: "advanced", subcategory: "Tabs & Splits", keywords: ["buffer", "close", "bdelete", "delete"] },
+  { key: ":q / :q!", desc: "Quit current window / split (! ignores unsaved changes)", category: "advanced", subcategory: "Exiting", keywords: ["quit", "close", "exit", "window"] },
+  { key: ":qa / :qa!", desc: "Quit all open windows & exit Neovim (! force quits all)", category: "advanced", subcategory: "Exiting", keywords: ["quit", "all", "exit", "neovim"] },
+  { key: "ZZ", desc: "Save current buffer and exit window immediately", category: "advanced", subcategory: "Exiting", keywords: ["save", "exit", "quit", "zz"] },
   { key: "Ctrl + n", desc: "Multi-cursor select word under cursor & spawn next match", category: "advanced", subcategory: "Editing", keywords: ["multi-cursor", "select", "next", "ctrl-n"] },
   { key: "Ctrl + Shift + Down / Up", desc: "Spawn multi-cursor directly below / above", category: "advanced", subcategory: "Editing", keywords: ["multi-cursor", "down", "up", "spawn"] }
 ];
