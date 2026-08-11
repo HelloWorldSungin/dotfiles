@@ -366,6 +366,83 @@ async function collectAntigravity() {
 }
 
 // -----------------------------------------------------------------------------
+// Provider 5: Cursor
+// -----------------------------------------------------------------------------
+async function collectCursor() {
+  const dbPath = path.join(os.homedir(), "Library", "Application Support", "Cursor", "User", "globalStorage", "state.vscdb");
+  if (!fs.existsSync(dbPath)) throw new Error("Cursor SQLite database not found");
+
+  const query = "SELECT key, value FROM ItemTable WHERE key IN ('cursorAuth/accessToken', 'cursorAuth/stripeMembershipType');";
+  const output = await safeExec("/usr/bin/sqlite3", ["-readonly", "-json", "-cmd", ".timeout 1000", dbPath, query]);
+  const rows = JSON.parse(output || "[]");
+  const values = new Map(rows.map((r) => [r.key, r.value]));
+  const token = values.get("cursorAuth/accessToken");
+  if (!token) throw new Error("Cursor access token not found in local state database");
+
+  const res = await fetch("https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+      "connect-protocol-version": "1",
+    },
+    body: "{}",
+  });
+
+  if (!res.ok) throw new Error(`Cursor API HTTP ${res.status}`);
+  const body = await res.json();
+  const planUsage = body?.planUsage;
+  if (!planUsage) throw new Error("Invalid planUsage response structure from Cursor API");
+
+  let resetsAt = null;
+  if (body.billingCycleEnd) {
+    const endMs = Number(body.billingCycleEnd);
+    if (!isNaN(endMs)) resetsAt = new Date(endMs).toISOString();
+  }
+
+  const windows = [];
+  if (typeof planUsage.totalPercentUsed === "number") {
+    const used = Math.round(Math.min(100, Math.max(0, planUsage.totalPercentUsed)));
+    windows.push({
+      id: "included_usage",
+      label: "included usage",
+      percent_remaining: 100 - used,
+      percent_used: used,
+      resets_at: resetsAt,
+    });
+  }
+  if (typeof planUsage.autoPercentUsed === "number") {
+    const used = Math.round(Math.min(100, Math.max(0, planUsage.autoPercentUsed)));
+    windows.push({
+      id: "auto_usage",
+      label: "auto usage",
+      percent_remaining: 100 - used,
+      percent_used: used,
+      resets_at: resetsAt,
+    });
+  }
+  if (typeof planUsage.apiPercentUsed === "number") {
+    const used = Math.round(Math.min(100, Math.max(0, planUsage.apiPercentUsed)));
+    windows.push({
+      id: "api_usage",
+      label: "API usage",
+      percent_remaining: 100 - used,
+      percent_used: used,
+      resets_at: resetsAt,
+    });
+  }
+
+  if (windows.length === 0) throw new Error("No usage windows parsed from Cursor API");
+
+  return {
+    provider: "cursor",
+    label: "Cursor",
+    source: "api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage",
+    windows,
+  };
+}
+
+// -----------------------------------------------------------------------------
 // Output Writer (Atomic File Rename)
 // -----------------------------------------------------------------------------
 function readExistingFile(filePath) {
@@ -458,6 +535,7 @@ async function main() {
   await processProvider(collectZai, "zai", "Z.AI (GLM)");
   await processProvider(collectOpencodeGo, "opencode-go", "OpenCode Go");
   await processProvider(collectAntigravity, "antigravity", "Antigravity / Gemini");
+  await processProvider(collectCursor, "cursor", "Cursor");
 }
 
 main().catch((err) => {
