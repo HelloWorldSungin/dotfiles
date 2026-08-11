@@ -177,6 +177,8 @@ export const CHEATSHEET_DATA: VimCommand[] = [
   { key: "gt / gT", desc: "Cycle forward (gt) or backward (gT) through open tabs", category: "advanced", subcategory: "Tabs & Splits", keywords: ["tabs", "next", "prev", "cycle", "navigate"] },
   { key: "1gt .. 9gt", desc: "Jump directly to tab 1 through 9", category: "advanced", subcategory: "Tabs & Splits", keywords: ["tabs", "jump", "direct", "select"] },
   { key: "Ctrl + w + v / -", desc: "Split window vertically (v) or horizontally (-)", category: "advanced", subcategory: "Tabs & Splits", keywords: ["split", "window", "vertical", "horizontal"] },
+  { key: "Ctrl + w + c", desc: "Close active split window (:q / :close)", category: "advanced", subcategory: "Tabs & Splits", keywords: ["close", "window", "split", "quit"] },
+  { key: "Ctrl + w + o", desc: "Close all other split windows except active one (:only)", category: "advanced", subcategory: "Tabs & Splits", keywords: ["close", "other", "windows", "only", "maximize"] },
   { key: "Ctrl + n", desc: "Multi-cursor select word under cursor & spawn next match", category: "advanced", subcategory: "Editing", keywords: ["multi-cursor", "select", "next", "ctrl-n"] },
   { key: "Ctrl + Shift + Down / Up", desc: "Spawn multi-cursor directly below / above", category: "advanced", subcategory: "Editing", keywords: ["multi-cursor", "down", "up", "spawn"] }
 ];
