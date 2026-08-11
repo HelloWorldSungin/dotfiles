@@ -13,10 +13,10 @@ vim.keymap.set("n", "<C-a>", "ggVG", { desc = "Select all" })
 -- intact so you can paste the same thing repeatedly.
 vim.keymap.set("x", "p", '"_dP', { desc = "Paste without clobbering clipboard" })
 
--- Ctrl+Shift+V / Cmd+Shift+V / Cmd+V pastes system clipboard in insert, command, and normal modes
-vim.keymap.set({ "i", "c" }, "<C-S-v>", "<C-r>+", { desc = "Paste system clipboard" })
-vim.keymap.set({ "i", "c" }, "<D-S-v>", "<C-r>+", { desc = "Paste system clipboard" })
-vim.keymap.set({ "i", "c" }, "<D-v>", "<C-r>+", { desc = "Paste system clipboard" })
+-- Ctrl+Shift+V / Cmd+Shift+V / Cmd+V pastes system clipboard in insert, command, and normal modes literally
+vim.keymap.set({ "i", "c" }, "<C-S-v>", "<C-r><C-o>+", { desc = "Paste system clipboard" })
+vim.keymap.set({ "i", "c" }, "<D-S-v>", "<C-r><C-o>+", { desc = "Paste system clipboard" })
+vim.keymap.set({ "i", "c" }, "<D-v>", "<C-r><C-o>+", { desc = "Paste system clipboard" })
 vim.keymap.set("n", "<C-S-v>", '"+p', { desc = "Paste system clipboard" })
 vim.keymap.set("n", "<D-S-v>", '"+p', { desc = "Paste system clipboard" })
 vim.keymap.set("n", "<D-v>", '"+p', { desc = "Paste system clipboard" })
