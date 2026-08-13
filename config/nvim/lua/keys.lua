@@ -30,7 +30,14 @@ vim.keymap.set("v", "<C-c>", '"+y', { desc = "Copy selection to system clipboard
 -- Toggle spell check on/off
 vim.keymap.set("n", "<leader>us", "<cmd>set spell!<cr>", { desc = "Toggle spell check" })
 
--- Diff open split windows side-by-side
-vim.keymap.set("n", "<leader>dt", "<cmd>windo diffthis<cr>", { desc = "Diff open windows side-by-side" })
-vim.keymap.set("n", "<leader>do", "<cmd>windo diffoff<cr>", { desc = "Turn off window diffing" })
+-- Toggle open split windows diffing side-by-side
+vim.keymap.set("n", "<leader>ud", function()
+  if vim.wo.diff then
+    vim.cmd("windo diffoff")
+    vim.notify("Window diffing disabled", vim.log.levels.INFO)
+  else
+    vim.cmd("windo diffthis")
+    vim.notify("Window diffing enabled", vim.log.levels.INFO)
+  end
+end, { desc = "Toggle window diffing side-by-side" })
 
