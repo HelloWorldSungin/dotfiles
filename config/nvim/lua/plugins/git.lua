@@ -141,10 +141,24 @@ return {
                   local actions = require("telescope.actions")
                   local action_state = require("telescope.actions.state")
 
-                  local function safe_delete_worktree(path, force)
-                    local worktree = require("git-worktree")
+                  local function get_entry_path(selection)
+                    if not selection then return nil end
+                    if type(selection.path) == "string" then return selection.path end
+                    if type(selection.value) == "string" then return selection.value end
+                    if type(selection.value) == "table" and type(selection.value.path) == "string" then return selection.value.path end
+                    if type(selection[1]) == "string" then return selection[1] end
+                    return nil
+                  end
+
+                  local function safe_delete_worktree(raw_path, force)
+                    local path_str = (type(raw_path) == "string" and raw_path) or get_entry_path({ path = raw_path }) or nil
+                    if not path_str or path_str == "" then
+                      vim.notify("Git Worktree: Could not resolve worktree path", vim.log.levels.ERROR)
+                      return
+                    end
+
                     local current_cwd = vim.fs.normalize((vim.uv or vim.loop).cwd() or "")
-                    local target_path = vim.fs.normalize(path or "")
+                    local target_path = vim.fs.normalize(path_str)
 
                     if current_cwd == target_path or current_cwd:find(target_path, 1, true) then
                       local lines = vim.fn.systemlist("git worktree list")
@@ -157,25 +171,47 @@ return {
                       end
                     end
 
-                    worktree.delete_worktree(target_path, force)
+                    local ok_wt, worktree = pcall(require, "git-worktree")
+                    local delete_err = nil
+                    if ok_wt and worktree and type(worktree.delete_worktree) == "function" then
+                      local success, err = pcall(worktree.delete_worktree, target_path, force)
+                      if not success then delete_err = tostring(err) end
+                    else
+                      local cmd = force and { "git", "worktree", "remove", "-f", target_path } or { "git", "worktree", "remove", target_path }
+                      local res = vim.fn.system(cmd)
+                      if vim.v.shell_error ~= 0 then delete_err = res end
+                    end
+
+                    -- If worktree delete failed (e.g. submodules present) and force is requested:
+                    if delete_err and force then
+                      if (vim.uv or vim.loop).fs_stat(target_path) then
+                        vim.fn.system({ "rm", "-rf", target_path })
+                      end
+                      vim.fn.system({ "git", "worktree", "prune" })
+                      delete_err = nil
+                    end
+
+                    if delete_err then
+                      vim.notify("Git Worktree delete failed:\n" .. delete_err, vim.log.levels.ERROR)
+                      return
+                    end
+
+                    vim.notify("Worktree removed: " .. target_path, vim.log.levels.INFO)
                   end
 
-                  map("i", "<C-d>", function()
+                  local function do_delete(force)
                     local selection = action_state.get_selected_entry()
                     if selection then
                       actions.close(prompt_bufnr)
-                      local path = selection.path or selection.value or selection[1]
-                      if path then safe_delete_worktree(path, false) end
+                      local path = get_entry_path(selection)
+                      if path then safe_delete_worktree(path, force) end
                     end
-                  end)
-                  map("n", "d", function()
-                    local selection = action_state.get_selected_entry()
-                    if selection then
-                      actions.close(prompt_bufnr)
-                      local path = selection.path or selection.value or selection[1]
-                      if path then safe_delete_worktree(path, false) end
-                    end
-                  end)
+                  end
+
+                  map("i", "<C-d>", function() do_delete(false) end)
+                  map("i", "<C-f>", function() do_delete(true) end)
+                  map("n", "d", function() do_delete(false) end)
+                  map("n", "D", function() do_delete(true) end)
                   return true
                 end,
               })
