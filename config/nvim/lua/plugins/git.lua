@@ -60,6 +60,26 @@ return {
     lazy = false,
     opts = {},
     config = function(_, opts)
+      -- Polyfill for Neovim 0.9.5: diffview.nvim calls vim.diagnostic.enable(false, ...) using Nvim 0.10+ API
+      if vim.diagnostic and type(vim.diagnostic.enable) == "function" then
+        local orig_diag_enable = vim.diagnostic.enable
+        local orig_diag_disable = vim.diagnostic.disable
+
+        vim.diagnostic.enable = function(first, second, ...)
+          if type(first) == "boolean" then
+            local enable = first
+            local bufnr = type(second) == "number" and second or (type(second) == "table" and second.bufnr) or nil
+            if enable then
+              if orig_diag_enable then pcall(orig_diag_enable, bufnr) end
+            else
+              if orig_diag_disable then pcall(orig_diag_disable, bufnr) end
+            end
+            return
+          end
+          return orig_diag_enable(first, second, ...)
+        end
+      end
+
       local ok, diffview = pcall(require, "diffview")
       if ok and diffview then
         diffview.setup(opts)
