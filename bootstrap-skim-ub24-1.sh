@@ -160,20 +160,22 @@ fi
 # <<< Sungin Dotfiles Environment <<<
 '
 
-# Append to .bashrc if not present
-if ! grep -q "Sungin Dotfiles Environment" "${HOME}/.bashrc" 2>/dev/null; then
-  printf "\n%s\n" "$SHELL_RC_BLOCK" >> "${HOME}/.bashrc"
-  success "Configured ~/.bashrc"
+# Write / update ~/.bashrc_custom
+if ! grep -q "Sungin Dotfiles Environment" "${HOME}/.bashrc_custom" 2>/dev/null; then
+  printf "\n%s\n" "$SHELL_RC_BLOCK" >> "${HOME}/.bashrc_custom"
+  success "Configured ~/.bashrc_custom"
 else
-  success "~/.bashrc already configured."
+  success "~/.bashrc_custom already configured."
 fi
 
-# Create / update .zshrc
-if [ ! -f "${HOME}/.zshrc" ] || ! grep -q "Sungin Dotfiles Environment" "${HOME}/.zshrc" 2>/dev/null; then
-  printf "\n%s\n" "$SHELL_RC_BLOCK" >> "${HOME}/.zshrc"
-  success "Configured ~/.zshrc"
-else
-  success "~/.zshrc already configured."
+# Create / update .zshrc if writable
+if [ -w "${HOME}" ] || [ -w "${HOME}/.zshrc" 2>/dev/null ]; then
+  if ! grep -q "Sungin Dotfiles Environment" "${HOME}/.zshrc" 2>/dev/null; then
+    printf "\n%s\n" "$SHELL_RC_BLOCK" >> "${HOME}/.zshrc" 2>/dev/null || true
+    success "Configured ~/.zshrc"
+  else
+    success "~/.zshrc already configured."
+  fi
 fi
 
 # Switch login shell to zsh if requested & available
@@ -194,5 +196,5 @@ success "Neovim plugins synchronized."
 echo
 printf "\033[1;32m🎉 Setup completed for skim-ub24-1!\033[0m\n"
 echo "To apply changes to your current shell immediately, run:"
-echo "  source ~/.bashrc   # (if staying in Bash)"
-echo "  exec zsh           # (to switch to Zsh with Starship prompt)"
+echo "  source ~/.bashrc_custom   # (if staying in Bash)"
+echo "  exec zsh                  # (to switch to Zsh with Starship prompt)"
