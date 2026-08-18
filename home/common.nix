@@ -96,11 +96,11 @@ in
 
       # Auto-cd on new workspace creation, but preserve active workspace directory in existing spaces/panes
       WORK_DIR="/s/mrcy/ems/users/skim"
+      _CURRENT_SPACE="${HERDR_SPACE:-${HERDR_WORKSPACE:-${HERDR_SESSION:-}}}"
       if [[ -d "$WORK_DIR" ]]; then
-        if [[ -n "$HERDR_SPACE" ]]; then
-          HERDR_STATE_FILE="/tmp/.herdr_${USER}_spaces_${HERDR_SESSION:-default}"
-          if ! grep -qx "$HERDR_SPACE" "$HERDR_STATE_FILE" 2>/dev/null; then
-            echo "$HERDR_SPACE" >> "$HERDR_STATE_FILE" 2>/dev/null || true
+        if [[ -n "$_CURRENT_SPACE" ]]; then
+          if [[ "${_HERDR_INITIALIZED_SPACE:-}" != "$_CURRENT_SPACE" ]]; then
+            export _HERDR_INITIALIZED_SPACE="$_CURRENT_SPACE"
             cd "$WORK_DIR"
           fi
         elif [[ "$PWD" == "$HOME" || "$PWD" == "/" ]]; then
