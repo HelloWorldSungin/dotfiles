@@ -128,7 +128,7 @@ in
     enable = true;
     enableZshIntegration = true;
     settings = {
-      command_timeout = 1000;
+      command_timeout = 60000;
     };
   };
 

@@ -171,6 +171,14 @@ else
   success "Symlinked ~/.config/herdr/config.toml -> ~/dotfiles/config/herdr/config.toml"
 fi
 
+# Starship config
+if [ -L "${HOME}/.config/starship.toml" ]; then
+  success "~/.config/starship.toml symlink already in place."
+else
+  ln -sf "${DOTFILES}/config/starship/starship.toml" "${HOME}/.config/starship.toml"
+  success "Symlinked ~/.config/starship.toml -> ~/dotfiles/config/starship/starship.toml"
+fi
+
 # Cleanly write ~/.bashrc_custom
 cat << 'EOF' > "${HOME}/.bashrc_custom"
 # >>> Sungin Dotfiles Environment >>>
