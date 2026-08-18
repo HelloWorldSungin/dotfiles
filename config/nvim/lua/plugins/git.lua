@@ -210,28 +210,6 @@ return {
               end
               wt._patched_create = true
             end
-
-            -- Patch telescope git_branches to support git worktrees (where .git is a file, not a directory)
-            local ok_builtin, builtin = pcall(require, "telescope.builtin")
-            if ok_builtin and builtin and type(builtin.git_branches) == "function" and not builtin._patched_wt then
-              local orig_branches = builtin.git_branches
-              builtin.git_branches = function(opts)
-                opts = opts or {}
-                local git_root = vim.fn.systemlist("git rev-parse --show-toplevel")[1]
-                if git_root and vim.v.shell_error == 0 and #git_root > 0 then
-                  opts.cwd = git_root
-                  opts.use_git_root = false
-                end
-                local ok_run, err = pcall(orig_branches, opts)
-                if not ok_run then
-                  opts.use_git_root = false
-                  opts.git_dir = vim.fn.systemlist("git rev-parse --git-dir")[1]
-                  pcall(orig_branches, opts)
-                end
-              end
-              builtin._patched_wt = true
-            end
-
             if telescope.extensions and telescope.extensions.git_worktree then
               telescope.extensions.git_worktree.create_git_worktree()
               return
@@ -245,6 +223,7 @@ return {
   },
   {
     "nvim-telescope/telescope.nvim",
+    tag = "0.1.8",
     cmd = "Telescope",
     dependencies = { "nvim-lua/plenary.nvim" },
   },
