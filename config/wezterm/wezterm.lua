@@ -5,9 +5,9 @@ local config = wezterm.config_builder()
 
 local is_windows = wezterm.target_triple:find("windows") ~= nil
 
--- Prefer EGL rendering for maximum performance and GPU compatibility on Windows / Linux
+-- Use OpenGL frontend and prefer EGL for consistent alpha transparency across all display adapters
+config.front_end = "OpenGL"
 config.prefer_egl = true
-config.front_end = "WebGpu"
 
 -- Same theme as nvim on the server: one continuous visual surface.
 config.color_scheme = "rose-pine-moon"
@@ -16,10 +16,8 @@ config.color_scheme = "rose-pine-moon"
 if is_windows then
   config.font = wezterm.font_with_fallback({ "Hack Nerd Font", "Cascadia Code", "Consolas" })
   config.font_size = 12.0
-  -- On Windows 11, Acrylic / Mica requires window_background_opacity to be 0.0
-  -- so the Desktop Window Manager (DWM) can blur the wallpaper behind it.
-  config.win32_system_backdrop = "Acrylic"
-  config.window_background_opacity = 0.0
+  config.win32_system_backdrop = "Disable"
+  config.window_background_opacity = 0.82
 else
   config.font = wezterm.font_with_fallback({ "Hack Nerd Font", "Menlo" })
   config.font_size = 15.0
@@ -72,7 +70,7 @@ config.keys = {
 
 -- Dim unfocused windows so the focused one is obvious at a glance.
 local UNFOCUSED_FOREGROUND_TEXT_HSB = { hue = 1.0, saturation = 0.25, brightness = 0.45 }
-local UNFOCUSED_WINDOW_BACKGROUND_OPACITY = is_windows and 0.0 or 0.62
+local UNFOCUSED_WINDOW_BACKGROUND_OPACITY = 0.62
 
 local function same_text_hsb(actual, expected)
   if actual == nil or expected == nil then
@@ -86,7 +84,7 @@ end
 wezterm.on("window-focus-changed", function(window)
   local overrides = window:get_config_overrides() or {}
   local text_hsb = nil
-  local opacity = is_windows and 0.0 or 0.82
+  local opacity = 0.82
   if not window:is_focused() then
     text_hsb = UNFOCUSED_FOREGROUND_TEXT_HSB
     opacity = UNFOCUSED_WINDOW_BACKGROUND_OPACITY
