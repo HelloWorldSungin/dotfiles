@@ -184,10 +184,17 @@ if command -v starship >/dev/null 2>&1; then
   fi
 fi
 
-# Auto-cd to work directory if starting at HOME (preserves active workspace in Herdr)
-if [ "$PWD" = "$HOME" ] || [ "$PWD" = "/" ]; then
-  if [ -d "/s/mrcy/ems/users/skim" ]; then
-    cd "/s/mrcy/ems/users/skim"
+# Auto-cd on new workspace creation, but preserve active workspace directory in existing spaces/panes
+WORK_DIR="/s/mrcy/ems/users/skim"
+if [ -d "$WORK_DIR" ]; then
+  if [ -n "$HERDR_SPACE" ]; then
+    HERDR_STATE_FILE="/tmp/.herdr_${USER}_spaces_${HERDR_SESSION:-default}"
+    if ! grep -qx "$HERDR_SPACE" "$HERDR_STATE_FILE" 2>/dev/null; then
+      echo "$HERDR_SPACE" >> "$HERDR_STATE_FILE" 2>/dev/null || true
+      cd "$WORK_DIR"
+    fi
+  elif [ "$PWD" = "$HOME" ] || [ "$PWD" = "/" ]; then
+    cd "$WORK_DIR"
   fi
 fi
 
@@ -198,7 +205,7 @@ if [ -t 1 ] && [ -n "$PS1" ] && [ -z "$ZSH_VERSION" ] && command -v zsh >/dev/nu
 fi
 # <<< Sungin Dotfiles Environment <<<
 EOF
-success "Configured ~/.bashrc_custom (with auto-cd and Zsh auto-launch)"
+success "Configured ~/.bashrc_custom (with workspace auto-cd and Zsh auto-launch)"
 
 # Cleanly write ~/.zshrc if writable
 if [ -w "${HOME}" ] || [ -w "${HOME}/.zshrc" 2>/dev/null ]; then
@@ -221,15 +228,22 @@ if command -v starship >/dev/null 2>&1; then
   eval "$(starship init zsh)"
 fi
 
-# Auto-cd to work directory if starting at HOME (preserves active workspace in Herdr)
-if [ "$PWD" = "$HOME" ] || [ "$PWD" = "/" ]; then
-  if [ -d "/s/mrcy/ems/users/skim" ]; then
-    cd "/s/mrcy/ems/users/skim"
+# Auto-cd on new workspace creation, but preserve active workspace directory in existing spaces/panes
+WORK_DIR="/s/mrcy/ems/users/skim"
+if [ -d "$WORK_DIR" ]; then
+  if [ -n "$HERDR_SPACE" ]; then
+    HERDR_STATE_FILE="/tmp/.herdr_${USER}_spaces_${HERDR_SESSION:-default}"
+    if ! grep -qx "$HERDR_SPACE" "$HERDR_STATE_FILE" 2>/dev/null; then
+      echo "$HERDR_SPACE" >> "$HERDR_STATE_FILE" 2>/dev/null || true
+      cd "$WORK_DIR"
+    fi
+  elif [ "$PWD" = "$HOME" ] || [ "$PWD" = "/" ]; then
+    cd "$WORK_DIR"
   fi
 fi
 # <<< Sungin Dotfiles Environment <<<
 EOF
-success "Configured ~/.zshrc (with auto-cd)"
+success "Configured ~/.zshrc (with workspace auto-cd)"
 fi
 
 # Switch login shell to zsh if requested & available

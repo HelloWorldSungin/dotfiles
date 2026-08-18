@@ -94,10 +94,17 @@ in
         source "$HOME/.zshrc.local"
       fi
 
-      # Auto-cd to work directory if starting at HOME (preserves active workspace directory in Herdr)
-      if [[ "$PWD" == "$HOME" || "$PWD" == "/" ]]; then
-        if [[ -d "/s/mrcy/ems/users/skim" ]]; then
-          cd "/s/mrcy/ems/users/skim"
+      # Auto-cd on new workspace creation, but preserve active workspace directory in existing spaces/panes
+      WORK_DIR="/s/mrcy/ems/users/skim"
+      if [[ -d "$WORK_DIR" ]]; then
+        if [[ -n "$HERDR_SPACE" ]]; then
+          HERDR_STATE_FILE="/tmp/.herdr_${USER}_spaces_${HERDR_SESSION:-default}"
+          if ! grep -qx "$HERDR_SPACE" "$HERDR_STATE_FILE" 2>/dev/null; then
+            echo "$HERDR_SPACE" >> "$HERDR_STATE_FILE" 2>/dev/null || true
+            cd "$WORK_DIR"
+          fi
+        elif [[ "$PWD" == "$HOME" || "$PWD" == "/" ]]; then
+          cd "$WORK_DIR"
         fi
       fi
     '';
