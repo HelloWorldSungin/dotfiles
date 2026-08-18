@@ -93,6 +93,11 @@ in
       if [[ -f "$HOME/.zshrc.local" ]]; then
         source "$HOME/.zshrc.local"
       fi
+
+      # Auto-cd to work directory if present
+      if [[ -d "/s/mrcy/ems/users/skim" ]]; then
+        cd "/s/mrcy/ems/users/skim"
+      fi
     '';
     shellAliases = {
       g = "git";

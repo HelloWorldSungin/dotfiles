@@ -183,6 +183,11 @@ if command -v starship >/dev/null 2>&1; then
     eval "$(starship init bash)"
   fi
 fi
+
+# Auto-cd to work directory on interactive startup if present
+if [ -d "/s/mrcy/ems/users/skim" ]; then
+  cd "/s/mrcy/ems/users/skim"
+fi
 # <<< Sungin Dotfiles Environment <<<
 '
 
@@ -195,25 +200,19 @@ if [ -t 1 ] && [ -n \"\$PS1\" ] && [ -z \"\$ZSH_VERSION\" ] && command -v zsh >/
 fi
 "
 
-if ! grep -q "Sungin Dotfiles Environment" "${HOME}/.bashrc_custom" 2>/dev/null; then
-  printf "\n%s\n" "$BASHRC_CUSTOM_BLOCK" >> "${HOME}/.bashrc_custom"
-  success "Configured ~/.bashrc_custom (with Zsh auto-launch)"
-else
-  # If already configured without the zsh auto-launch, append it
-  if ! grep -q "Auto-launch Zsh" "${HOME}/.bashrc_custom" 2>/dev/null; then
-    printf '\n# Auto-launch Zsh for interactive terminals\nif [ -t 1 ] && [ -n "$PS1" ] && [ -z "$ZSH_VERSION" ] && command -v zsh >/dev/null 2>&1; then\n  export SHELL="$(which zsh)"\n  exec zsh -l\nfi\n' >> "${HOME}/.bashrc_custom"
-  fi
-  success "~/.bashrc_custom already configured with Zsh auto-launch."
-fi
+# Cleanly update ~/.bashrc_custom
+touch "${HOME}/.bashrc_custom"
+sed -i '/# >>> Sungin Dotfiles Environment >>>/,/# <<< Sungin Dotfiles Environment <<</d' "${HOME}/.bashrc_custom" 2>/dev/null || true
+sed -i '/# Auto-launch Zsh for interactive terminals/,/exec zsh -l/d' "${HOME}/.bashrc_custom" 2>/dev/null || true
+printf "%s\n" "$BASHRC_CUSTOM_BLOCK" >> "${HOME}/.bashrc_custom"
+success "Configured ~/.bashrc_custom (with auto-cd and Zsh auto-launch)"
 
-# Create / update .zshrc if writable
+# Cleanly update ~/.zshrc if writable
 if [ -w "${HOME}" ] || [ -w "${HOME}/.zshrc" 2>/dev/null ]; then
-  if ! grep -q "Sungin Dotfiles Environment" "${HOME}/.zshrc" 2>/dev/null; then
-    printf "\n%s\n" "$SHELL_RC_BLOCK" >> "${HOME}/.zshrc" 2>/dev/null || true
-    success "Configured ~/.zshrc"
-  else
-    success "~/.zshrc already configured."
-  fi
+  touch "${HOME}/.zshrc" 2>/dev/null || true
+  sed -i '/# >>> Sungin Dotfiles Environment >>>/,/# <<< Sungin Dotfiles Environment <<</d' "${HOME}/.zshrc" 2>/dev/null || true
+  printf "%s\n" "$SHELL_RC_BLOCK" >> "${HOME}/.zshrc" 2>/dev/null || true
+  success "Configured ~/.zshrc (with auto-cd)"
 fi
 
 # Switch login shell to zsh if requested & available
