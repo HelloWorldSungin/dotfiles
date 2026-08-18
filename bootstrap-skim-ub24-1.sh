@@ -8,6 +8,7 @@ DOTFILES="${HOME}/dotfiles"
 NVIM_VERSION="v0.10.4"
 LAZYGIT_VERSION="v0.44.1"
 STARSHIP_VERSION="v1.22.1"
+HERDR_VERSION="v0.8.0"
 NODE_VERSION="v22.14.0"
 
 step() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
@@ -25,7 +26,7 @@ fi
 mkdir -p "${HOME}/.local/bin" "${HOME}/.config" "${HOME}/.npm-global/bin"
 export PATH="${HOME}/.local/bin:${HOME}/.npm-global/bin:/usr/local/bin:${PATH}"
 
-step "1/7 System packages via APT"
+step "1/8 System packages via APT"
 if command -v sudo >/dev/null 2>&1; then
   info "Updating apt package list..."
   sudo apt-get update -y || echo "  (Warning: some apt repos failed, continuing with available sources)"
@@ -59,7 +60,7 @@ else
   info "sudo not available, skipping apt installation."
 fi
 
-step "2/7 Modern Neovim (${NVIM_VERSION})"
+step "2/8 Modern Neovim (${NVIM_VERSION})"
 INSTALLED_NVIM_VER=""
 if command -v nvim >/dev/null 2>&1; then
   INSTALLED_NVIM_VER=$(nvim --version | head -n 1 | awk '{print $2}')
@@ -78,7 +79,7 @@ else
   success "Neovim ${NVIM_VERSION} installed to /usr/local/bin/nvim"
 fi
 
-step "3/7 Lazygit (${LAZYGIT_VERSION})"
+step "3/8 Lazygit (${LAZYGIT_VERSION})"
 if command -v lazygit >/dev/null 2>&1; then
   success "lazygit is already installed."
 else
@@ -91,7 +92,7 @@ else
   success "lazygit installed to /usr/local/bin/lazygit"
 fi
 
-step "4/7 Starship Prompt (${STARSHIP_VERSION})"
+step "4/8 Starship Prompt (${STARSHIP_VERSION})"
 if command -v starship >/dev/null 2>&1; then
   success "starship is already installed."
 else
@@ -104,7 +105,23 @@ else
   success "starship installed to /usr/local/bin/starship"
 fi
 
-step "5/7 Node.js (${NODE_VERSION})"
+step "5/8 Herdr Session Layer (${HERDR_VERSION})"
+if command -v herdr >/dev/null 2>&1; then
+  success "herdr is already installed."
+else
+  info "Downloading Herdr from GitHub Releases..."
+  TMP_HERDR=$(mktemp -d)
+  if curl -fsSL "https://github.com/herdrdev/herdr/releases/download/${HERDR_VERSION}/herdr-linux-x86_64" -o "${TMP_HERDR}/herdr"; then
+    sudo install -m 755 "${TMP_HERDR}/herdr" /usr/local/bin/herdr
+    success "herdr installed to /usr/local/bin/herdr"
+  else
+    info "GitHub asset download failed; falling back to install script..."
+    curl -fsSL https://herdr.dev/install.sh | sh || true
+  fi
+  rm -rf "${TMP_HERDR}"
+fi
+
+step "6/8 Node.js (${NODE_VERSION})"
 if command -v node >/dev/null 2>&1; then
   success "Node.js $(node --version) is already installed."
 else
@@ -124,7 +141,7 @@ else
   rm -rf "${TMP_NODE}"
 fi
 
-step "6/7 Symlink Dotfiles & Shell Configuration (Bash & Zsh)"
+step "7/8 Symlink Dotfiles & Shell Configuration (Bash & Zsh)"
 # Neovim config
 if [ -L "${HOME}/.config/nvim" ]; then
   success "~/.config/nvim symlink already in place."
@@ -132,6 +149,15 @@ else
   [ -d "${HOME}/.config/nvim" ] && mv "${HOME}/.config/nvim" "${HOME}/.config/nvim.backup.$(date +%s)"
   ln -sf "${DOTFILES}/config/nvim" "${HOME}/.config/nvim"
   success "Symlinked ~/.config/nvim -> ~/dotfiles/config/nvim"
+fi
+
+# Herdr config
+mkdir -p "${HOME}/.config/herdr"
+if [ -L "${HOME}/.config/herdr/config.toml" ]; then
+  success "~/.config/herdr/config.toml symlink already in place."
+else
+  ln -sf "${DOTFILES}/config/herdr/config.toml" "${HOME}/.config/herdr/config.toml"
+  success "Symlinked ~/.config/herdr/config.toml -> ~/dotfiles/config/herdr/config.toml"
 fi
 
 # Shell Aliases & Environment Block
@@ -200,7 +226,7 @@ if [ -n "$ZSH_BIN" ] && [ "$(getent passwd "$USER" | cut -d: -f7)" != "$ZSH_BIN"
   fi
 fi
 
-step "7/7 Pre-sync Neovim Plugins"
+step "8/8 Pre-sync Neovim Plugins"
 info "Syncing Neovim plugins headlessly (lazy.nvim)..."
 nvim --headless "+Lazy! sync" +qa || true
 success "Neovim plugins synchronized."
