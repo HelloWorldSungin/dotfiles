@@ -97,11 +97,32 @@ return {
       pcall(function()
         require("telescope").load_extension("git_worktree")
       end)
+
+      -- Guard telescope git_branches against cwd being inside .git
+      local ok_b, builtin = pcall(require, "telescope.builtin")
+      if ok_b and builtin and type(builtin.git_branches) == "function" and not builtin._guarded_git then
+        local orig_git_branches = builtin.git_branches
+        builtin.git_branches = function(opts)
+          opts = opts or {}
+          local cwd = vim.fs.normalize(opts.cwd or (vim.uv or vim.loop).cwd() or "")
+          if cwd:find("/%.git") then
+            opts.cwd = cwd:gsub("/%.git$", ""):gsub("/%.git/.*$", "")
+          end
+          return orig_git_branches(opts)
+        end
+        builtin._guarded_git = true
+      end
     end,
     keys = {
       {
         "<leader>wm",
         function()
+          local current_cwd = vim.fs.normalize((vim.uv or vim.loop).cwd() or "")
+          if current_cwd:find("/%.git") then
+            local clean_cwd = current_cwd:gsub("/%.git$", ""):gsub("/%.git/.*$", "")
+            pcall(vim.api.nvim_set_current_dir, clean_cwd)
+          end
+
           local ok_tele, telescope = pcall(require, "telescope")
           if ok_tele then
             pcall(telescope.load_extension, "git_worktree")
@@ -115,10 +136,10 @@ return {
 
                   local function safe_delete_worktree(path, force)
                     local worktree = require("git-worktree")
-                    local current_cwd = vim.fs.normalize((vim.uv or vim.loop).cwd() or "")
+                    local cwd = vim.fs.normalize((vim.uv or vim.loop).cwd() or "")
                     local target_path = vim.fs.normalize(path or "")
 
-                    if current_cwd == target_path or current_cwd:find(target_path, 1, true) then
+                    if cwd == target_path or cwd:find(target_path, 1, true) then
                       local lines = vim.fn.systemlist("git worktree list")
                       local main_path = lines[1] and lines[1]:match("^(%S+)")
                       if main_path and (vim.uv or vim.loop).fs_stat(main_path) and main_path ~= target_path then
@@ -161,6 +182,12 @@ return {
       {
         "<leader>wc",
         function()
+          local current_cwd = vim.fs.normalize((vim.uv or vim.loop).cwd() or "")
+          if current_cwd:find("/%.git") then
+            local clean_cwd = current_cwd:gsub("/%.git$", ""):gsub("/%.git/.*$", "")
+            pcall(vim.api.nvim_set_current_dir, clean_cwd)
+          end
+
           local ok, telescope = pcall(require, "telescope")
           if ok then
             pcall(telescope.load_extension, "git_worktree")
