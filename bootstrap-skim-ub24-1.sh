@@ -161,11 +161,23 @@ fi
 '
 
 # Write / update ~/.bashrc_custom
+BASHRC_CUSTOM_BLOCK="${SHELL_RC_BLOCK}
+# Auto-launch Zsh for interactive terminals
+if [ -t 1 ] && [ -n \"\$PS1\" ] && [ -z \"\$ZSH_VERSION\" ] && command -v zsh >/dev/null 2>&1; then
+  export SHELL=\"\$(which zsh)\"
+  exec zsh -l
+fi
+"
+
 if ! grep -q "Sungin Dotfiles Environment" "${HOME}/.bashrc_custom" 2>/dev/null; then
-  printf "\n%s\n" "$SHELL_RC_BLOCK" >> "${HOME}/.bashrc_custom"
-  success "Configured ~/.bashrc_custom"
+  printf "\n%s\n" "$BASHRC_CUSTOM_BLOCK" >> "${HOME}/.bashrc_custom"
+  success "Configured ~/.bashrc_custom (with Zsh auto-launch)"
 else
-  success "~/.bashrc_custom already configured."
+  # If already configured without the zsh auto-launch, append it
+  if ! grep -q "Auto-launch Zsh" "${HOME}/.bashrc_custom" 2>/dev/null; then
+    printf '\n# Auto-launch Zsh for interactive terminals\nif [ -t 1 ] && [ -n "$PS1" ] && [ -z "$ZSH_VERSION" ] && command -v zsh >/dev/null 2>&1; then\n  export SHELL="$(which zsh)"\n  exec zsh -l\nfi\n' >> "${HOME}/.bashrc_custom"
+  fi
+  success "~/.bashrc_custom already configured with Zsh auto-launch."
 fi
 
 # Create / update .zshrc if writable
