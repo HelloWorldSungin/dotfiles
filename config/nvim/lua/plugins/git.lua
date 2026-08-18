@@ -83,8 +83,8 @@ return {
     },
   },
   {
-    -- Git Worktree: interactive worktree switching & creation with Telescope
-    "ThePrimeagen/git-worktree.nvim",
+    -- Git Worktree: interactive worktree switching & creation with Telescope (polarmutex modern fork)
+    "polarmutex/git-worktree.nvim",
     dependencies = {
       "nvim-lua/plenary.nvim",
       "nvim-telescope/telescope.nvim",
