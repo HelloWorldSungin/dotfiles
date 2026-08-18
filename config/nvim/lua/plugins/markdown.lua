@@ -28,5 +28,6 @@ return {
         end,
       })
       pcall(require("render-markdown").setup, opts)
+    end,
   },
 }
