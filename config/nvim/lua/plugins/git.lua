@@ -91,8 +91,20 @@ return {
     },
     config = function()
       local ok, wt = pcall(require, "git-worktree")
-      if ok and wt and type(wt.setup) == "function" then
-        wt.setup({})
+      if ok and wt then
+        if type(wt.setup) == "function" then
+          wt.setup({})
+        end
+        if type(wt.create_worktree) == "function" and not wt._patched_create then
+          local orig_create = wt.create_worktree
+          wt.create_worktree = function(path, branch, upstream)
+            if branch and type(branch) == "string" then
+              branch = branch:gsub("^remotes/origin/", ""):gsub("^origin/", ""):gsub("^remotes/", "")
+            end
+            return orig_create(path, branch, upstream)
+          end
+          wt._patched_create = true
+        end
       end
       pcall(function()
         require("telescope").load_extension("git_worktree")
@@ -164,6 +176,17 @@ return {
           local ok, telescope = pcall(require, "telescope")
           if ok then
             pcall(telescope.load_extension, "git_worktree")
+            local ok_wt, wt = pcall(require, "git-worktree")
+            if ok_wt and wt and type(wt.create_worktree) == "function" and not wt._patched_create then
+              local orig_create = wt.create_worktree
+              wt.create_worktree = function(path, branch, upstream)
+                if branch and type(branch) == "string" then
+                  branch = branch:gsub("^remotes/origin/", ""):gsub("^origin/", ""):gsub("^remotes/", "")
+                end
+                return orig_create(path, branch, upstream)
+              end
+              wt._patched_create = true
+            end
             if telescope.extensions and telescope.extensions.git_worktree then
               telescope.extensions.git_worktree.create_git_worktree()
               return
