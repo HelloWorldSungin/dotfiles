@@ -36,6 +36,8 @@ if command -v sudo >/dev/null 2>&1; then
     build-essential \
     git \
     zsh \
+    zsh-autosuggestions \
+    zsh-syntax-highlighting \
     curl \
     wget \
     jq \
@@ -46,6 +48,15 @@ if command -v sudo >/dev/null 2>&1; then
     ripgrep \
     fd-find \
     fzf || true
+
+  # Ensure fallback clone of zsh plugins if not installed via apt
+  mkdir -p "${HOME}/.zsh"
+  if [ ! -d "${HOME}/.zsh/zsh-autosuggestions" ]; then
+    git clone --depth 1 https://github.com/zsh-users/zsh-autosuggestions "${HOME}/.zsh/zsh-autosuggestions" 2>/dev/null || true
+  fi
+  if [ ! -d "${HOME}/.zsh/zsh-syntax-highlighting" ]; then
+    git clone --depth 1 https://github.com/zsh-users/zsh-syntax-highlighting.git "${HOME}/.zsh/zsh-syntax-highlighting" 2>/dev/null || true
+  fi
 
   # Ubuntu package name aliases
   if command -v fdfind >/dev/null 2>&1 && ! command -v fd >/dev/null 2>&1; then
@@ -223,6 +234,30 @@ alias gd="git diff"
 alias gl="git log --oneline -20"
 alias gpl="git pull --rebase"
 
+# Zsh History configuration
+HISTFILE="$HOME/.zsh_history"
+HISTSIZE=50000
+SAVEHIST=50000
+setopt HIST_IGNORE_DUPS HIST_FIND_NO_DUPS SHARE_HISTORY
+
+# Load Zsh Autosuggestions
+if [ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]; then
+  source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+elif [ -f "$HOME/.zsh/zsh-autosuggestions/zsh-autosuggestions.zsh" ]; then
+  source "$HOME/.zsh/zsh-autosuggestions/zsh-autosuggestions.zsh"
+fi
+
+# Load Zsh Syntax Highlighting
+if [ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]; then
+  source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+elif [ -f "$HOME/.zsh/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]; then
+  source "$HOME/.zsh/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
+fi
+
+# Keybindings: Accept ghost-text autosuggestions with Ctrl-F or Ctrl-A
+bindkey '^f' autosuggest-accept 2>/dev/null || true
+bindkey '^a' autosuggest-accept 2>/dev/null || true
+
 # Starship Prompt initialization
 if command -v starship >/dev/null 2>&1; then
   eval "$(starship init zsh)"
@@ -243,7 +278,7 @@ if [ -d "$WORK_DIR" ]; then
 fi
 # <<< Sungin Dotfiles Environment <<<
 EOF
-success "Configured ~/.zshrc (with workspace auto-cd)"
+success "Configured ~/.zshrc (with workspace auto-cd, autosuggestions, and syntax highlighting)"
 fi
 
 # Switch login shell to zsh if requested & available

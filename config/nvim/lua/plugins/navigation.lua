@@ -124,6 +124,7 @@ return {
         ["<C-v>"] = "actions.select_vsplit",
         ["<C-s>"] = "actions.select_split",
         ["v"] = "actions.select_vsplit",
+        ["s"] = "actions.select_split",
         ["-"] = "actions.select_split",
         ["f"] = pick_directory_and_open_in_oil,
         ["<C-f>"] = pick_directory_and_open_in_oil,
