@@ -91,43 +91,8 @@ return {
     },
     config = function()
       local ok, wt = pcall(require, "git-worktree")
-      if ok and wt then
-        if type(wt.setup) == "function" then
-          wt.setup({
-            update_on_change = true,
-            clearjumps_on_change = true,
-          })
-        end
-
-        -- Ensure Neovim updates its working directory (:cd) and opens Oil on worktree switch/create
-        if type(wt.on_tree_update) == "function" then
-          wt.on_tree_update(function(op, metadata)
-            local path = type(metadata) == "table" and (metadata.path or metadata[1]) or metadata
-            if path and type(path) == "string" then
-              local full_path = vim.fn.fnamemodify(path, ":p")
-              if vim.fn.isdirectory(full_path) == 1 then
-                pcall(vim.api.nvim_set_current_dir, full_path)
-                vim.schedule(function()
-                  local ok_oil, oil = pcall(require, "oil")
-                  if ok_oil and oil then
-                    pcall(oil.open, full_path)
-                  end
-                end)
-              end
-            end
-          end)
-        end
-
-        if type(wt.create_worktree) == "function" and not wt._patched_create then
-          local orig_create = wt.create_worktree
-          wt.create_worktree = function(path, branch, upstream)
-            if branch and type(branch) == "string" then
-              branch = branch:gsub("^remotes/origin/", ""):gsub("^origin/", ""):gsub("^remotes/", "")
-            end
-            return orig_create(path, branch, upstream)
-          end
-          wt._patched_create = true
-        end
+      if ok and wt and type(wt.setup) == "function" then
+        wt.setup({})
       end
       pcall(function()
         require("telescope").load_extension("git_worktree")
