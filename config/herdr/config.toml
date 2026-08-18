@@ -7,7 +7,9 @@ onboarding = false
 # and copy the sections you want to change into this file.
 #
 # After editing, apply without restarting sessions:
-#   herdr server reload-config
+[terminal]
+# Ensure new split panes and tabs inherit current working directory of existing active pane
+new_cwd = "follow"
 
 [ui]
 agent_panel_sort = "spaces"

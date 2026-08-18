@@ -184,9 +184,11 @@ if command -v starship >/dev/null 2>&1; then
   fi
 fi
 
-# Auto-cd to work directory on interactive startup if present
-if [ -d "/s/mrcy/ems/users/skim" ]; then
-  cd "/s/mrcy/ems/users/skim"
+# Auto-cd to work directory if starting at HOME (preserves active workspace in Herdr)
+if [ "$PWD" = "$HOME" ] || [ "$PWD" = "/" ]; then
+  if [ -d "/s/mrcy/ems/users/skim" ]; then
+    cd "/s/mrcy/ems/users/skim"
+  fi
 fi
 
 # Auto-launch Zsh for interactive terminals
@@ -219,9 +221,11 @@ if command -v starship >/dev/null 2>&1; then
   eval "$(starship init zsh)"
 fi
 
-# Auto-cd to work directory on interactive startup if present
-if [ -d "/s/mrcy/ems/users/skim" ]; then
-  cd "/s/mrcy/ems/users/skim"
+# Auto-cd to work directory if starting at HOME (preserves active workspace in Herdr)
+if [ "$PWD" = "$HOME" ] || [ "$PWD" = "/" ]; then
+  if [ -d "/s/mrcy/ems/users/skim" ]; then
+    cd "/s/mrcy/ems/users/skim"
+  fi
 fi
 # <<< Sungin Dotfiles Environment <<<
 EOF

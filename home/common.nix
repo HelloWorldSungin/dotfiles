@@ -94,9 +94,11 @@ in
         source "$HOME/.zshrc.local"
       fi
 
-      # Auto-cd to work directory if present
-      if [[ -d "/s/mrcy/ems/users/skim" ]]; then
-        cd "/s/mrcy/ems/users/skim"
+      # Auto-cd to work directory if starting at HOME (preserves active workspace directory in Herdr)
+      if [[ "$PWD" == "$HOME" || "$PWD" == "/" ]]; then
+        if [[ -d "/s/mrcy/ems/users/skim" ]]; then
+          cd "/s/mrcy/ems/users/skim"
+        fi
       fi
     '';
     shellAliases = {
