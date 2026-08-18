@@ -70,10 +70,10 @@ if [[ "$INSTALLED_NVIM_VER" == v0.10* || "$INSTALLED_NVIM_VER" == 0.10* ]]; then
 else
   info "Downloading Neovim ${NVIM_VERSION} from GitHub Releases..."
   TMP_NVIM=$(mktemp -d)
-  curl -fsSL "https://github.com/neovim/neovim/releases/download/${NVIM_VERSION}/nvim-linux64.tar.gz" -o "${TMP_NVIM}/nvim-linux64.tar.gz"
-  sudo rm -rf /usr/local/nvim-linux64
-  sudo tar -C /usr/local -xzf "${TMP_NVIM}/nvim-linux64.tar.gz"
-  sudo ln -sf /usr/local/nvim-linux64/bin/nvim /usr/local/bin/nvim
+  curl -fsSL "https://github.com/neovim/neovim/releases/download/${NVIM_VERSION}/nvim-linux-x86_64.tar.gz" -o "${TMP_NVIM}/nvim-linux-x86_64.tar.gz"
+  sudo rm -rf /usr/local/nvim-linux-x86_64 /usr/local/nvim-linux64
+  sudo tar -C /usr/local -xzf "${TMP_NVIM}/nvim-linux-x86_64.tar.gz"
+  sudo ln -sf /usr/local/nvim-linux-x86_64/bin/nvim /usr/local/bin/nvim
   rm -rf "${TMP_NVIM}"
   success "Neovim ${NVIM_VERSION} installed to /usr/local/bin/nvim"
 fi
