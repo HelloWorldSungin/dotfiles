@@ -82,4 +82,103 @@ return {
       end,
     },
   },
+  {
+    -- Git Worktree: interactive worktree switching & creation with Telescope
+    "ThePrimeagen/git-worktree.nvim",
+    dependencies = {
+      "nvim-lua/plenary.nvim",
+      "nvim-telescope/telescope.nvim",
+    },
+    config = function()
+      local ok, wt = pcall(require, "git-worktree")
+      if ok and wt and type(wt.setup) == "function" then
+        wt.setup({})
+      end
+      pcall(function()
+        require("telescope").load_extension("git_worktree")
+      end)
+    end,
+    keys = {
+      {
+        "<leader>wm",
+        function()
+          local ok_tele, telescope = pcall(require, "telescope")
+          if ok_tele then
+            pcall(telescope.load_extension, "git_worktree")
+            local ext = telescope.extensions and telescope.extensions.git_worktree
+            local picker_fn = ext and (ext.git_worktrees or ext.git_worktree)
+            if type(picker_fn) == "function" then
+              picker_fn({
+                attach_mappings = function(prompt_bufnr, map)
+                  local actions = require("telescope.actions")
+                  local action_state = require("telescope.actions.state")
+
+                  local function safe_delete_worktree(path, force)
+                    local worktree = require("git-worktree")
+                    local current_cwd = vim.fs.normalize((vim.uv or vim.loop).cwd() or "")
+                    local target_path = vim.fs.normalize(path or "")
+
+                    if current_cwd == target_path or current_cwd:find(target_path, 1, true) then
+                      local lines = vim.fn.systemlist("git worktree list")
+                      local main_path = lines[1] and lines[1]:match("^(%S+)")
+                      if main_path and (vim.uv or vim.loop).fs_stat(main_path) and main_path ~= target_path then
+                        pcall(vim.api.nvim_set_current_dir, main_path)
+                      else
+                        local parent = vim.fs.normalize(target_path .. "/..")
+                        pcall(vim.api.nvim_set_current_dir, parent)
+                      end
+                    end
+
+                    worktree.delete_worktree(target_path, force)
+                  end
+
+                  map("i", "<C-d>", function()
+                    local selection = action_state.get_selected_entry()
+                    if selection then
+                      actions.close(prompt_bufnr)
+                      local path = selection.path or selection.value or selection[1]
+                      if path then safe_delete_worktree(path, false) end
+                    end
+                  end)
+                  map("n", "d", function()
+                    local selection = action_state.get_selected_entry()
+                    if selection then
+                      actions.close(prompt_bufnr)
+                      local path = selection.path or selection.value or selection[1]
+                      if path then safe_delete_worktree(path, false) end
+                    end
+                  end)
+                  return true
+                end,
+              })
+              return
+            end
+          end
+          vim.cmd("Telescope git_worktree git_worktrees")
+        end,
+        desc = "Git Worktree: Manage / Switch / Delete",
+      },
+      {
+        "<leader>wc",
+        function()
+          local ok, telescope = pcall(require, "telescope")
+          if ok then
+            pcall(telescope.load_extension, "git_worktree")
+            if telescope.extensions and telescope.extensions.git_worktree then
+              telescope.extensions.git_worktree.create_git_worktree()
+              return
+            end
+          end
+          vim.cmd("Telescope git_worktree create_git_worktree")
+        end,
+        desc = "Git Worktree: Create",
+      },
+    },
+  },
+  {
+    "nvim-telescope/telescope.nvim",
+    tag = "0.1.8",
+    cmd = "Telescope",
+    dependencies = { "nvim-lua/plenary.nvim" },
+  },
 }
