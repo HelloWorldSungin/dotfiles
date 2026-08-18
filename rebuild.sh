@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Apply the current Nix config. Run after ANY change to flake.nix or
-# home/*.nix (config/ changes need no rebuild - they're live symlinks).
+# Apply the current Nix config for skim-ub24-1.
 set -euo pipefail
 cd "$HOME/dotfiles"
 
@@ -11,14 +10,7 @@ if ! command -v nix >/dev/null 2>&1; then
   fi
 fi
 
-TARGET="${1:-}"
-if [ -z "$TARGET" ]; then
-  if [ "$(uname -s)" = "Darwin" ]; then
-    TARGET="sunginkim@macbook"
-  else
-    TARGET="sungin@ct110"
-  fi
-fi
+TARGET="${1:-skim@skim-ub24-1}"
 
 if command -v home-manager >/dev/null 2>&1; then
   home-manager switch --flake ".#$TARGET" -b backup

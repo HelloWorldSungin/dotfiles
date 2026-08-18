@@ -107,23 +107,15 @@ in
       ccdr = "claude --dangerously-skip-permissions -r";
       cca = "claude --enable-auto-mode";
       ccar = "claude --enable-auto-mode -r";
-      ccm = "claude-monitor --plan max20 --theme dark";
-      cspend = "npx claude-spend";
-      pi-fusion = "pi -e $HOME/.pi/agent/extensions/fusion-harness/fusion-harness.ts --architect openai-codex/gpt-5.6-sol --architect-thinking xhigh --builder zai/glm-5.2 --builder-thinking max";
-
-      # ArkNode AI & LOQ server management
-      arknode-ai-sleep = "ssh root@192.168.68.10 \"systemctl suspend\"";
-      arknode-ai-wake = "wakeonlan 10:ff:e0:a1:52:48 && echo \"⏳ Waiting 10 seconds for ArkNode AI to wake...\" && sleep 10 && echo \"✅ ArkNode AI should be awake! Connecting...\" && ssh root@192.168.68.10";
-      arknode-ai-status = "ping -c 2 192.168.68.10 && ssh root@192.168.68.10 \"uptime && echo && pct list\"";
-      agent-tunnel = "ssh -L 9119:127.0.0.1:9119 -N root@192.168.68.83";
-      codebase-gui = "codebase-memory-mcp --ui=true --port=9749";
-      ct110-lav-gateway = "ssh -N ct110-lav";
     };
   };
 
   programs.starship = {
     enable = true;
     enableZshIntegration = true;
+    settings = {
+      command_timeout = 1000;
+    };
   };
 
   programs.fzf = {
