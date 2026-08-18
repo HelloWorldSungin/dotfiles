@@ -7,25 +7,28 @@ local is_windows = wezterm.target_triple:find("windows") ~= nil
 
 -- Prefer EGL rendering for maximum performance and GPU compatibility on Windows / Linux
 config.prefer_egl = true
+config.front_end = "WebGpu"
 
 -- Same theme as nvim on the server: one continuous visual surface.
 config.color_scheme = "rose-pine-moon"
 
--- Glyphs (herdr sidebar, starship prompt, claude spinner) render on THIS
--- client machine, which is why the nerd font lives here and not on the server.
+-- Platform-specific visual & font settings
 if is_windows then
   config.font = wezterm.font_with_fallback({ "Hack Nerd Font", "Cascadia Code", "Consolas" })
   config.font_size = 12.0
+  -- On Windows 11, Acrylic / Mica requires window_background_opacity to be 0.0
+  -- so the Desktop Window Manager (DWM) can blur the wallpaper behind it.
   config.win32_system_backdrop = "Acrylic"
+  config.window_background_opacity = 0.0
 else
   config.font = wezterm.font_with_fallback({ "Hack Nerd Font", "Menlo" })
   config.font_size = 15.0
+  config.window_background_opacity = 0.82
   config.macos_window_background_blur = 50
 end
 
 -- Frameless-but-resizable window.
 config.window_decorations = "RESIZE"
-config.window_background_opacity = 0.88
 config.hide_tab_bar_if_only_one_tab = true
 
 -- The servers have xterm-256color terminfo but not wezterm's own.
@@ -69,7 +72,7 @@ config.keys = {
 
 -- Dim unfocused windows so the focused one is obvious at a glance.
 local UNFOCUSED_FOREGROUND_TEXT_HSB = { hue = 1.0, saturation = 0.25, brightness = 0.45 }
-local UNFOCUSED_WINDOW_BACKGROUND_OPACITY = 0.65
+local UNFOCUSED_WINDOW_BACKGROUND_OPACITY = is_windows and 0.0 or 0.62
 
 local function same_text_hsb(actual, expected)
   if actual == nil or expected == nil then
@@ -82,7 +85,8 @@ end
 
 wezterm.on("window-focus-changed", function(window)
   local overrides = window:get_config_overrides() or {}
-  local text_hsb, opacity
+  local text_hsb = nil
+  local opacity = is_windows and 0.0 or 0.82
   if not window:is_focused() then
     text_hsb = UNFOCUSED_FOREGROUND_TEXT_HSB
     opacity = UNFOCUSED_WINDOW_BACKGROUND_OPACITY
