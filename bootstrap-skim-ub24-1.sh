@@ -160,8 +160,8 @@ else
   success "Symlinked ~/.config/herdr/config.toml -> ~/dotfiles/config/herdr/config.toml"
 fi
 
-# Shell Aliases & Environment Block
-SHELL_RC_BLOCK='
+# Cleanly write ~/.bashrc_custom
+cat << 'EOF' > "${HOME}/.bashrc_custom"
 # >>> Sungin Dotfiles Environment >>>
 export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:$PATH"
 export EDITOR="nvim"
@@ -188,31 +188,44 @@ fi
 if [ -d "/s/mrcy/ems/users/skim" ]; then
   cd "/s/mrcy/ems/users/skim"
 fi
-# <<< Sungin Dotfiles Environment <<<
-'
 
-# Write / update ~/.bashrc_custom
-BASHRC_CUSTOM_BLOCK="${SHELL_RC_BLOCK}
 # Auto-launch Zsh for interactive terminals
-if [ -t 1 ] && [ -n \"\$PS1\" ] && [ -z \"\$ZSH_VERSION\" ] && command -v zsh >/dev/null 2>&1; then
-  export SHELL=\"\$(which zsh)\"
+if [ -t 1 ] && [ -n "$PS1" ] && [ -z "$ZSH_VERSION" ] && command -v zsh >/dev/null 2>&1; then
+  export SHELL="$(which zsh)"
   exec zsh -l
 fi
-"
-
-# Cleanly update ~/.bashrc_custom
-touch "${HOME}/.bashrc_custom"
-sed -i '/# >>> Sungin Dotfiles Environment >>>/,/# <<< Sungin Dotfiles Environment <<</d' "${HOME}/.bashrc_custom" 2>/dev/null || true
-sed -i '/# Auto-launch Zsh for interactive terminals/,/exec zsh -l/d' "${HOME}/.bashrc_custom" 2>/dev/null || true
-printf "%s\n" "$BASHRC_CUSTOM_BLOCK" >> "${HOME}/.bashrc_custom"
+# <<< Sungin Dotfiles Environment <<<
+EOF
 success "Configured ~/.bashrc_custom (with auto-cd and Zsh auto-launch)"
 
-# Cleanly update ~/.zshrc if writable
+# Cleanly write ~/.zshrc if writable
 if [ -w "${HOME}" ] || [ -w "${HOME}/.zshrc" 2>/dev/null ]; then
-  touch "${HOME}/.zshrc" 2>/dev/null || true
-  sed -i '/# >>> Sungin Dotfiles Environment >>>/,/# <<< Sungin Dotfiles Environment <<</d' "${HOME}/.zshrc" 2>/dev/null || true
-  printf "%s\n" "$SHELL_RC_BLOCK" >> "${HOME}/.zshrc" 2>/dev/null || true
-  success "Configured ~/.zshrc (with auto-cd)"
+cat << 'EOF' > "${HOME}/.zshrc"
+# >>> Sungin Dotfiles Environment >>>
+export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:$PATH"
+export EDITOR="nvim"
+export NPM_CONFIG_PREFIX="$HOME/.npm-global"
+
+alias v="nvim"
+alias lg="lazygit"
+alias g="git"
+alias gs="git status"
+alias gd="git diff"
+alias gl="git log --oneline -20"
+alias gpl="git pull --rebase"
+
+# Starship Prompt initialization
+if command -v starship >/dev/null 2>&1; then
+  eval "$(starship init zsh)"
+fi
+
+# Auto-cd to work directory on interactive startup if present
+if [ -d "/s/mrcy/ems/users/skim" ]; then
+  cd "/s/mrcy/ems/users/skim"
+fi
+# <<< Sungin Dotfiles Environment <<<
+EOF
+success "Configured ~/.zshrc (with auto-cd)"
 fi
 
 # Switch login shell to zsh if requested & available
