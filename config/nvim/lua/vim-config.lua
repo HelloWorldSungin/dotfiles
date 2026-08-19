@@ -41,8 +41,8 @@ if use_osc52 then
       ["*"] = osc52.copy("*"),
     },
     paste = {
-      ["+"] = osc52.paste("+"),
-      ["*"] = osc52.paste("*"),
+      ["+"] = function() return {} end,
+      ["*"] = function() return {} end,
     },
   }
 end
