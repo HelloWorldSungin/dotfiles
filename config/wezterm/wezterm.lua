@@ -18,6 +18,11 @@ if is_windows then
   config.font_size = 12.0
   config.win32_system_backdrop = "Acrylic"
   config.window_background_opacity = 0.92
+
+  -- Automatically set DISPLAY to MobaXterm / VcXsrv local X-server (127.0.0.1:0.0)
+  config.set_environment_variables = {
+    DISPLAY = "127.0.0.1:0.0",
+  }
 else
   config.font = wezterm.font_with_fallback({ "Hack Nerd Font", "Menlo" })
   config.font_size = 15.0
@@ -32,6 +37,14 @@ config.hide_tab_bar_if_only_one_tab = true
 -- The servers have xterm-256color terminfo but not wezterm's own.
 config.term = "xterm-256color"
 
+-- Launch menu for connecting to skim-ub24-1 with trusted X11 forwarding
+config.launch_menu = {
+  {
+    label = "SSH to skim-ub24-1 (with X11 GUI Forwarding)",
+    args = { "ssh", "-Y", "skim-ub24-1" },
+  },
+}
+
 -- SSH Domain Configuration for Ubuntu VM (skim-ub24-1)
 config.ssh_domains = {
   {
@@ -44,6 +57,15 @@ config.ssh_domains = {
 
 -- Keybindings (Windows & macOS compatible)
 config.keys = {
+  -- Launch new tab connected to skim-ub24-1 with X11 forwarding (Ctrl+Shift+U)
+  {
+    key = "u",
+    mods = "CTRL|SHIFT",
+    action = wezterm.action.SpawnCommandInNewTab({
+      args = { "ssh", "-Y", "skim-ub24-1" },
+    }),
+  },
+
   -- QuickSelect (Cmd+Shift+X or Ctrl+Shift+X) - pick URLs, git hashes, filepaths
   { key = "x", mods = "CMD|SHIFT", action = wezterm.action.QuickSelect },
   { key = "x", mods = "CTRL|SHIFT", action = wezterm.action.QuickSelect },
