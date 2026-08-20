@@ -52,28 +52,6 @@ local function grep_by_extension()
   end)
 end
 
-local function quickfix_replace()
-  local qf_list = vim.fn.getqflist()
-  if #qf_list == 0 then
-    vim.notify("Quickfix list is empty. Run <leader>s and press <Ctrl-q> first!", vim.log.levels.WARN)
-    return
-  end
-
-  vim.ui.input({ prompt = "Find text to replace in Quickfix: " }, function(target)
-    if not target or target == "" then return end
-    vim.ui.input({ prompt = "Replace with: " }, function(replacement)
-      if replacement == nil then return end
-      local cmd = string.format("cfdo %%s/%s/%s/g | update", vim.fn.escape(target, "/"), vim.fn.escape(replacement, "/"))
-      local ok, err = pcall(vim.cmd, cmd)
-      if ok then
-        vim.notify(string.format("Replaced '%s' -> '%s' across quickfix files", target, replacement), vim.log.levels.INFO)
-      else
-        vim.notify("Replace failed: " .. tostring(err), vim.log.levels.ERROR)
-      end
-    end)
-  end)
-end
-
 local function toggle_quickfix()
   local qf_open = false
   for _, win in ipairs(vim.fn.getwininfo()) do
@@ -107,7 +85,6 @@ return {
       { "<leader>fd", pick_directory_and_open_in_oil, desc = "Find directory & open in Oil" },
       { "<leader>s", function() Snacks.picker.grep() end, desc = "Grep project" },
       { "<leader>se", grep_by_extension, desc = "Grep by file extension (e.g. vhd)" },
-      { "<leader>sr", quickfix_replace, desc = "Search & replace in Quickfix" },
       { "<leader>q", toggle_quickfix, desc = "Toggle Quickfix window" },
       { "<leader>b", function() Snacks.picker.buffers() end, desc = "Buffers" },
       { "gd", function() Snacks.picker.lsp_definitions() end, desc = "Goto definition" },

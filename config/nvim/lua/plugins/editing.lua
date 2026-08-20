@@ -1,5 +1,56 @@
--- Multi-cursor editing plugins
+-- Editing and search-and-replace plugins
 return {
+  {
+    -- grug-far: modern, interactive visual find-and-replace with live diffs and file filtering
+    "MagicDuck/grug-far.nvim",
+    opts = { headerMaxWidth = 80 },
+    cmd = "GrugFar",
+    keys = {
+      {
+        "<leader>sr",
+        function()
+          local grug = require("grug-far")
+          local ext = vim.bo.buftype == "" and vim.fn.expand("%:e")
+          grug.open({
+            transient = true,
+            prefills = {
+              filesFilter = ext and ext ~= "" and ("*." .. ext) or nil,
+            },
+          })
+        end,
+        mode = { "n", "v" },
+        desc = "Search & Replace (grug-far)",
+      },
+      {
+        "<leader>sw",
+        function()
+          local grug = require("grug-far")
+          local ext = vim.bo.buftype == "" and vim.fn.expand("%:e")
+          grug.open({
+            transient = true,
+            prefills = {
+              search = vim.fn.expand("<cword>"),
+              filesFilter = ext and ext ~= "" and ("*." .. ext) or nil,
+            },
+          })
+        end,
+        desc = "Search & Replace current word (grug-far)",
+      },
+      {
+        "<leader>sf",
+        function()
+          local grug = require("grug-far")
+          grug.open({
+            transient = true,
+            prefills = {
+              paths = vim.fn.expand("%"),
+            },
+          })
+        end,
+        desc = "Search & Replace in current file (grug-far)",
+      },
+    },
+  },
   {
     -- vim-visual-multi: VS Code-style multi-cursor selection.
     -- Press Ctrl-N on a word to select it and spawn cursors on subsequent matches.
