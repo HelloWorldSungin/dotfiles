@@ -1,0 +1,544 @@
+#!/usr/bin/env node
+
+/**
+ * publish-llm-quota: Publishes LLM subscription quota metrics to shared SMB folder
+ * Target: ~/shared/quota/<provider>.json (schema: fm-quota-sidecar.v1)
+ */
+
+const fs = require("node:fs");
+const path = require("node:path");
+const os = require("node:os");
+const { execFile } = require("node:child_process");
+const { createDecipheriv, createHash, pbkdf2Sync } = require("node:crypto");
+const http = require("node:http");
+const https = require("node:https");
+
+const SHARED_DIR = process.env.QUOTA_SHARED_DIR || path.join(os.homedir(), "shared");
+const QUOTA_DIR = path.join(SHARED_DIR, "quota");
+const IS_DRY_RUN = process.argv.includes("--print") || process.argv.includes("--dry-run");
+
+function isoNow() {
+  return new Date().toISOString();
+}
+
+function safeExec(cmd, args, timeoutMs = 5000) {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { timeout: timeoutMs, maxBuffer: 2 * 1024 * 1024 }, (err, stdout) => {
+      if (err) reject(err);
+      else resolve(stdout.toString());
+    });
+  });
+}
+
+async function getEnvFromShell(name) {
+  if (!/^[A-Z][A-Z0-9_]*$/.test(name)) return undefined;
+  try {
+    const val = await safeExec("/bin/zsh", ["-i", "-c", `printf %s "\${${name}-}"`], 5000);
+    const trimmed = val.trim();
+    return trimmed || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Provider 1: MiniMax
+// -----------------------------------------------------------------------------
+async function collectMiniMax() {
+  let apiKey = process.env.MINIMAX_API_KEY?.trim() || (await getEnvFromShell("MINIMAX_API_KEY"));
+  if (!apiKey) throw new Error("MiniMax API key not found in env or login shell");
+
+  const res = await fetch("https://www.minimax.io/v1/token_plan/remains", {
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+  });
+
+  if (!res.ok) throw new Error(`MiniMax API HTTP ${res.status}`);
+  const body = await res.json();
+
+  if (body?.base_resp?.status_code !== 0 || !Array.isArray(body?.model_remains)) {
+    throw new Error("Invalid response structure from MiniMax API");
+  }
+
+  const general = body.model_remains.find((m) => m.model_name === "general") || body.model_remains[0];
+  if (!general) throw new Error("No model quota found in MiniMax response");
+
+  const sessionRem = general.current_interval_remaining_percent ?? 100;
+  const weeklyRem = general.current_weekly_remaining_percent ?? 100;
+
+  const windows = [
+    {
+      id: "session",
+      label: "session (5h)",
+      percent_remaining: Math.min(100, Math.max(0, sessionRem)),
+      percent_used: Math.min(100, Math.max(0, 100 - sessionRem)),
+      resets_at: general.end_time ? new Date(general.end_time).toISOString() : null,
+    },
+    {
+      id: "weekly",
+      label: "weekly",
+      percent_remaining: Math.min(100, Math.max(0, weeklyRem)),
+      percent_used: Math.min(100, Math.max(0, 100 - weeklyRem)),
+      resets_at: general.weekly_end_time ? new Date(general.weekly_end_time).toISOString() : null,
+    },
+  ];
+
+  return {
+    provider: "minimax",
+    label: "MiniMax",
+    source: "api.minimax.io/v1/token_plan/remains",
+    windows,
+  };
+}
+
+// -----------------------------------------------------------------------------
+// Provider 2: Z.AI (GLM)
+// -----------------------------------------------------------------------------
+async function collectZai() {
+  let apiKey =
+    process.env.ZAI_API_KEY?.trim() ||
+    process.env.GLM_API_KEY?.trim() ||
+    (await getEnvFromShell("ZAI_API_KEY")) ||
+    (await getEnvFromShell("GLM_API_KEY"));
+  if (!apiKey) throw new Error("Z.AI / GLM API key not found in env or login shell");
+
+  const res = await fetch("https://api.z.ai/api/monitor/usage/quota/limit", {
+    headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
+  });
+
+  if (!res.ok) throw new Error(`Z.AI API HTTP ${res.status}`);
+  const body = await res.json();
+  if (body?.code !== 200 || !body?.data?.limits) throw new Error("Invalid response structure from Z.AI API");
+
+  const limits = body.data.limits.filter((l) => l.type === "TOKENS_LIMIT");
+  const session = limits.find((l) => l.unit === 3);
+  const weekly = limits.find((l) => l.unit === 6);
+
+  const windows = [];
+  if (session && typeof session.percentage === "number") {
+    const used = Math.min(100, Math.max(0, session.percentage));
+    windows.push({
+      id: "session",
+      label: "session (5h)",
+      percent_remaining: 100 - used,
+      percent_used: used,
+      resets_at: session.nextResetTime ? new Date(session.nextResetTime).toISOString() : null,
+    });
+  }
+  if (weekly && typeof weekly.percentage === "number") {
+    const used = Math.min(100, Math.max(0, weekly.percentage));
+    windows.push({
+      id: "weekly",
+      label: "weekly",
+      percent_remaining: 100 - used,
+      percent_used: used,
+      resets_at: weekly.nextResetTime ? new Date(weekly.nextResetTime).toISOString() : null,
+    });
+  }
+
+  if (windows.length === 0) throw new Error("No token limits found in Z.AI response");
+
+  return {
+    provider: "zai",
+    label: "Z.AI (GLM)",
+    source: "api.z.ai/api/monitor/usage/quota/limit",
+    windows,
+  };
+}
+
+// -----------------------------------------------------------------------------
+// Provider 3: OpenCode Go
+// -----------------------------------------------------------------------------
+async function getChromeAuthCookie() {
+  const cookiePath = path.join(os.homedir(), "Library", "Application Support", "Google", "Chrome", "Default", "Cookies");
+  if (!fs.existsSync(cookiePath)) throw new Error("Chrome cookies database not found");
+
+  const hex = (
+    await safeExec("/usr/bin/sqlite3", [
+      "-readonly",
+      "-cmd",
+      ".timeout 1000",
+      cookiePath,
+      "SELECT hex(encrypted_value) FROM cookies WHERE host_key = 'opencode.ai' AND name = 'auth' ORDER BY last_access_utc DESC LIMIT 1;",
+    ])
+  ).trim();
+
+  if (!hex) throw new Error("opencode.ai auth cookie not found in Chrome");
+
+  const password = (await safeExec("/usr/bin/security", ["find-generic-password", "-w", "-s", "Chrome Safe Storage"])).trim();
+  if (!password) throw new Error("Chrome Safe Storage password unavailable");
+
+  const encrypted = Buffer.from(hex, "hex");
+  if (encrypted.length <= 3 || encrypted.subarray(0, 3).toString() !== "v10") throw new Error("Invalid Chrome cookie encryption header");
+
+  const key = pbkdf2Sync(password, "saltysalt", 1003, 16, "sha1");
+  const decipher = createDecipheriv("aes-128-cbc", key, Buffer.alloc(16, 0x20));
+  let decrypted = Buffer.concat([decipher.update(encrypted.subarray(3)), decipher.final()]);
+  const hostDigest = createHash("sha256").update("opencode.ai").digest();
+  if (decrypted.length > 32 && decrypted.subarray(0, 32).equals(hostDigest)) decrypted = decrypted.subarray(32);
+
+  const cookie = decrypted.toString("utf8");
+  if (!cookie.startsWith("Fe26.")) throw new Error("Decrypted auth cookie format invalid");
+  return cookie;
+}
+
+function parseGoWindow(html, field, id, label) {
+  const candidates = [];
+  let start = 0;
+  while ((start = html.indexOf(field, start)) >= 0) {
+    const block = html.slice(start, start + 1200);
+    const percent = Number(block.match(/["']?usagePercent["']?\s*:\s*([0-9.]+)/)?.[1]);
+    const resetSeconds = Number(block.match(/["']?resetInSec["']?\s*:\s*([0-9.]+)/)?.[1]);
+    if (Number.isFinite(percent)) {
+      candidates.push({ percent, resetSeconds: Number.isFinite(resetSeconds) ? resetSeconds : undefined });
+    }
+    start += field.length;
+  }
+  const selected = candidates.sort((a, b) => (b.resetSeconds ?? -1) - (a.resetSeconds ?? -1))[0];
+  if (!selected) return null;
+  const used = Math.min(100, Math.max(0, selected.percent));
+  return {
+    id,
+    label,
+    percent_remaining: Math.round(100 - used),
+    percent_used: Math.round(used),
+    resets_at: selected.resetSeconds !== undefined ? new Date(Date.now() + selected.resetSeconds * 1000).toISOString() : null,
+  };
+}
+
+async function collectOpencodeGo() {
+  const cookie = await getChromeAuthCookie();
+  const zenRes = await fetch("https://opencode.ai/zen", {
+    headers: { Cookie: `auth=${cookie}`, "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" },
+  });
+  const zenHtml = await zenRes.text();
+  const wrkId = zenHtml.match(/\bwrk_[A-Z0-9]+\b/)?.[0];
+  if (!wrkId) throw new Error("Could not extract OpenCode workspace ID");
+
+  const dashRes = await fetch(`https://opencode.ai/workspace/${wrkId}/go`, {
+    headers: { Cookie: `auth=${cookie}`, "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" },
+  });
+  const dashHtml = await dashRes.text();
+
+  const windows = [
+    parseGoWindow(dashHtml, "rollingUsage", "rolling", "5 hour"),
+    parseGoWindow(dashHtml, "weeklyUsage", "weekly", "weekly"),
+    parseGoWindow(dashHtml, "monthlyUsage", "monthly", "monthly"),
+  ].filter(Boolean);
+
+  if (windows.length === 0) throw new Error("No usage windows parsed from OpenCode Go dashboard");
+
+  return {
+    provider: "opencode-go",
+    label: "OpenCode Go",
+    source: "opencode.ai/workspace/go",
+    windows,
+  };
+}
+
+// -----------------------------------------------------------------------------
+// Provider 4: Antigravity / Gemini
+// -----------------------------------------------------------------------------
+async function discoverAntigravityServer() {
+  const output = await safeExec("ps", ["-ax", "-o", "pid=,command="]);
+  for (const line of output.split("\n")) {
+    if (!/language_server/i.test(line) || !/antigravity/i.test(line)) continue;
+    const match = line.match(/^\s*(\d+)\s+(.+)$/);
+    if (!match) continue;
+    const csrf = (match[2].match(/(?:^|\s)--csrf_token(?:=|\s+)([^\s]+)/) || [])[1];
+    const portText = (match[2].match(/(?:^|\s)--extension_server_port(?:=|\s+)([^\s]+)/) || [])[1];
+    if (csrf) return { pid: Number(match[1]), csrf, extensionPort: portText ? Number(portText) : undefined };
+  }
+  return null;
+}
+
+async function getListeningPorts(pid) {
+  try {
+    const output = await safeExec("lsof", ["-nP", "-a", "-p", String(pid), "-iTCP", "-sTCP:LISTEN"]);
+    const ports = new Set();
+    for (const line of output.split("\n")) {
+      const match = line.match(/(?:127\.0\.0\.1|\[::1\]|\*):(\d+)\s+\(LISTEN\)/);
+      if (match) ports.add(Number(match[1]));
+    }
+    return [...ports];
+  } catch {
+    return [];
+  }
+}
+
+function rpcCall(port, csrf, secure) {
+  return new Promise((resolve, reject) => {
+    const req = (secure ? https : http).request(
+      {
+        hostname: "127.0.0.1",
+        port,
+        path: "/exa.language_server_pb.LanguageServerService/GetUserStatus",
+        method: "POST",
+        rejectUnauthorized: false,
+        timeout: 4000,
+        headers: {
+          "content-type": "application/json",
+          "connect-protocol-version": "1",
+          "x-codeium-csrf-token": csrf,
+          "content-length": "2",
+        },
+      },
+      (res) => {
+        let raw = "";
+        res.on("data", (c) => (raw += c));
+        res.on("end", () => {
+          try {
+            resolve({ status: res.statusCode, body: JSON.parse(raw) });
+          } catch {
+            resolve({ status: res.statusCode, body: null });
+          }
+        });
+      }
+    );
+    req.on("error", reject);
+    req.end("{}");
+  });
+}
+
+async function collectAntigravity() {
+  const server = await discoverAntigravityServer();
+  if (!server) throw new Error("Antigravity language server process not running");
+
+  const ports = await getListeningPorts(server.pid);
+  if (server.extensionPort && !ports.includes(server.extensionPort)) ports.push(server.extensionPort);
+
+  let body = null;
+  for (const port of ports) {
+    for (const secure of [true, false]) {
+      try {
+        const res = await rpcCall(port, server.csrf, secure);
+        if (res.status === 200 && res.body) {
+          body = res.body;
+          break;
+        }
+      } catch {
+        // Probe next port/protocol
+      }
+    }
+    if (body) break;
+  }
+
+  if (!body) throw new Error("Failed to communicate with Antigravity language server RPC");
+
+  const root = body.userStatus || body;
+  const cascade = root.cascadeModelConfigData || {};
+  const configs = Array.isArray(cascade.clientModelConfigs) ? cascade.clientModelConfigs : [];
+  const windows = [];
+
+  for (let i = 0; i < configs.length; i++) {
+    const cfg = configs[i];
+    const quota = cfg?.quotaInfo;
+    if (!quota || typeof quota.remainingFraction !== "number") continue;
+    const rawLabel = cfg.displayName || cfg.label || cfg.modelName || cfg.model || `Model ${i + 1}`;
+    const cleanLabel = String(rawLabel).replace(/^models\//, "");
+
+    // Only report Gemini models or primary models
+    if (!/gemini/i.test(cleanLabel) && !/gemini/i.test(cfg.model || "")) continue;
+
+    const remPercent = Math.round(Math.min(100, Math.max(0, quota.remainingFraction * 100)));
+    let resetsAt = null;
+    if (quota.resetTime) {
+      const d = new Date(typeof quota.resetTime === "number" ? quota.resetTime * 1000 : quota.resetTime);
+      if (!isNaN(d.getTime())) resetsAt = d.toISOString();
+    }
+
+    windows.push({
+      id: cfg.model || `gemini-${i}`,
+      label: cleanLabel,
+      percent_remaining: remPercent,
+      percent_used: 100 - remPercent,
+      resets_at: resetsAt,
+    });
+  }
+
+  if (windows.length === 0) throw new Error("No Gemini model quota info returned by Antigravity");
+
+  return {
+    provider: "antigravity",
+    label: "Antigravity / Gemini",
+    source: "local-language-server",
+    windows,
+  };
+}
+
+// -----------------------------------------------------------------------------
+// Provider 5: Cursor
+// -----------------------------------------------------------------------------
+async function collectCursor() {
+  const dbPath = path.join(os.homedir(), "Library", "Application Support", "Cursor", "User", "globalStorage", "state.vscdb");
+  if (!fs.existsSync(dbPath)) throw new Error("Cursor SQLite database not found");
+
+  const query = "SELECT key, value FROM ItemTable WHERE key IN ('cursorAuth/accessToken', 'cursorAuth/stripeMembershipType');";
+  const output = await safeExec("/usr/bin/sqlite3", ["-readonly", "-json", "-cmd", ".timeout 1000", dbPath, query]);
+  const rows = JSON.parse(output || "[]");
+  const values = new Map(rows.map((r) => [r.key, r.value]));
+  const token = values.get("cursorAuth/accessToken");
+  if (!token) throw new Error("Cursor access token not found in local state database");
+
+  const res = await fetch("https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+      "connect-protocol-version": "1",
+    },
+    body: "{}",
+  });
+
+  if (!res.ok) throw new Error(`Cursor API HTTP ${res.status}`);
+  const body = await res.json();
+  const planUsage = body?.planUsage;
+  if (!planUsage) throw new Error("Invalid planUsage response structure from Cursor API");
+
+  let resetsAt = null;
+  if (body.billingCycleEnd) {
+    const endMs = Number(body.billingCycleEnd);
+    if (!isNaN(endMs)) resetsAt = new Date(endMs).toISOString();
+  }
+
+  const windows = [];
+  if (typeof planUsage.totalPercentUsed === "number") {
+    const used = Math.round(Math.min(100, Math.max(0, planUsage.totalPercentUsed)));
+    windows.push({
+      id: "included_usage",
+      label: "included usage",
+      percent_remaining: 100 - used,
+      percent_used: used,
+      resets_at: resetsAt,
+    });
+  }
+  if (typeof planUsage.autoPercentUsed === "number") {
+    const used = Math.round(Math.min(100, Math.max(0, planUsage.autoPercentUsed)));
+    windows.push({
+      id: "auto_usage",
+      label: "auto usage",
+      percent_remaining: 100 - used,
+      percent_used: used,
+      resets_at: resetsAt,
+    });
+  }
+  if (typeof planUsage.apiPercentUsed === "number") {
+    const used = Math.round(Math.min(100, Math.max(0, planUsage.apiPercentUsed)));
+    windows.push({
+      id: "api_usage",
+      label: "API usage",
+      percent_remaining: 100 - used,
+      percent_used: used,
+      resets_at: resetsAt,
+    });
+  }
+
+  if (windows.length === 0) throw new Error("No usage windows parsed from Cursor API");
+
+  return {
+    provider: "cursor",
+    label: "Cursor",
+    source: "api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage",
+    windows,
+  };
+}
+
+// -----------------------------------------------------------------------------
+// Output Writer (Atomic File Rename)
+// -----------------------------------------------------------------------------
+function readExistingFile(filePath) {
+  try {
+    if (fs.existsSync(filePath)) {
+      return JSON.parse(fs.readFileSync(filePath, "utf8"));
+    }
+  } catch {
+    // Ignore read/parse errors
+  }
+  return null;
+}
+
+function writeAtomic(filePath, data) {
+  const tmpPath = `${filePath}.tmp.${process.pid}`;
+  fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2) + "\n", "utf8");
+  fs.renameSync(tmpPath, filePath);
+}
+
+async function processProvider(collectorFn, providerId, defaultLabel) {
+  const targetFile = path.join(QUOTA_DIR, `${providerId}.json`);
+  const existing = readExistingFile(targetFile);
+  const now = isoNow();
+
+  try {
+    const result = await collectorFn();
+    const output = {
+      schema: "fm-quota-sidecar.v1",
+      provider: result.provider,
+      label: result.label,
+      captured_at: now,
+      last_attempt_at: now,
+      status: "ok",
+      source: result.source,
+      windows: result.windows,
+      notes: "",
+    };
+
+    if (IS_DRY_RUN) {
+      console.log(`\n=== [DRY RUN] ${result.label} (${targetFile}) ===`);
+      console.log(JSON.stringify(output, null, 2));
+    } else {
+      writeAtomic(targetFile, output);
+      console.log(`[OK] Updated ${result.label} -> ${targetFile}`);
+    }
+  } catch (err) {
+    const errMsg = err.message || String(err);
+    console.error(`[ERROR] ${defaultLabel}: ${errMsg}`);
+
+    const output = {
+      schema: "fm-quota-sidecar.v1",
+      provider: providerId,
+      label: defaultLabel,
+      captured_at: existing?.captured_at || null,
+      last_attempt_at: now,
+      status: "error",
+      error: errMsg,
+      source: existing?.source || "unknown",
+      windows: existing?.windows || [],
+      notes: existing?.notes || "",
+    };
+
+    if (IS_DRY_RUN) {
+      console.log(`\n=== [DRY RUN ERROR] ${defaultLabel} (${targetFile}) ===`);
+      console.log(JSON.stringify(output, null, 2));
+    } else {
+      writeAtomic(targetFile, output);
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Main Execution
+// -----------------------------------------------------------------------------
+async function main() {
+  if (!IS_DRY_RUN) {
+    if (!fs.existsSync(SHARED_DIR)) {
+      console.log(`Shared folder ${SHARED_DIR} is not mounted or absent. Exiting cleanly.`);
+      process.exit(0);
+    }
+
+    if (!fs.existsSync(QUOTA_DIR)) {
+      fs.mkdirSync(QUOTA_DIR, { recursive: true });
+    }
+  }
+
+  console.log(`Publishing LLM quota to ${QUOTA_DIR} (dry_run=${IS_DRY_RUN})...`);
+
+  await processProvider(collectMiniMax, "minimax", "MiniMax");
+  await processProvider(collectZai, "zai", "Z.AI (GLM)");
+  await processProvider(collectOpencodeGo, "opencode-go", "OpenCode Go");
+  await processProvider(collectAntigravity, "antigravity", "Antigravity / Gemini");
+  await processProvider(collectCursor, "cursor", "Cursor");
+}
+
+main().catch((err) => {
+  console.error("Fatal publisher error:", err);
+  process.exit(1);
+});

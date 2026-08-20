@@ -52,7 +52,30 @@ vim.opt.clipboard = "unnamedplus" -- yank/paste goes through the system clipboar
 
 vim.opt.scrolloff = 16 -- keep 16 lines visible above/below the cursor
 
-vim.opt.undofile = true -- undo history survives closing and reopening files
+-- Persistent undo history
+vim.opt.undofile = true
+
+-- Fix E828 "Cannot open undo file for writing" for deep paths / long worktree names (> 255 chars)
+-- Instead of a single flat filename with % separators exceeding Linux NAME_MAX (255 bytes), recreate the directory tree
+local undo_base = vim.fn.stdpath("state") .. "/undo"
+vim.api.nvim_create_autocmd({ "BufReadPre", "BufWritePre", "BufNewFile" }, {
+  group = vim.api.nvim_create_augroup("SafeUndoDir", { clear = true }),
+  callback = function(args)
+    local file = vim.api.nvim_buf_get_name(args.buf)
+    if file == "" or vim.bo[args.buf].buftype ~= "" then
+      return
+    end
+
+    local file_dir = vim.fn.fnamemodify(file, ":p:h")
+    if file_dir ~= "" and file_dir ~= "." then
+      local target_undodir = undo_base .. "/" .. file_dir:gsub("^/", "")
+      if vim.fn.isdirectory(target_undodir) == 0 then
+        pcall(vim.fn.mkdir, target_undodir, "p")
+      end
+      vim.opt_local.undodir = target_undodir
+    end
+  end,
+})
 
 vim.opt.hidden = true -- allow switching buffers without throwing E37 unsaved changes errors
 
