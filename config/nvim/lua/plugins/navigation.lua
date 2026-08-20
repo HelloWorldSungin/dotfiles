@@ -96,6 +96,8 @@ return {
     lazy = false,
     opts = {
       default_file_explorer = true,
+      skip_confirm_for_simple_edits = false,
+      prompt_save_on_select_new_entry = true,
       view_options = { show_hidden = true },
       keymaps = {
         ["<C-v>"] = "actions.select_vsplit",

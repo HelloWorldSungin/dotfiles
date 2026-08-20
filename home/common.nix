@@ -114,6 +114,15 @@ in
       gd = "git diff";
       gl = "git log --oneline -20";
       gpl = "git pull --rebase";
+      gp = "git push";
+      gpf = "git push --force-with-lease";
+      ga = "git add";
+      gc = "git commit";
+      gco = "git checkout";
+      gb = "git branch";
+      gsw = "git switch";
+      gcl = "git clone --recurse-submodules";
+      gsu = "git submodule update --init --recursive";
       v = "nvim";
       lg = "lazygit";
       rebuild = "~/dotfiles/rebuild.sh";
@@ -145,6 +154,7 @@ in
       user.email = "sunginapp@gmail.com";
       init.defaultBranch = "main";
       pull.rebase = true;
+      submodule.recurse = true;
       credential."https://github.com".helper = "!gh auth git-credential";
       credential."https://gist.github.com".helper = "!gh auth git-credential";
       url."https://github.com/".insteadOf = "git@github.com:";

@@ -94,6 +94,25 @@ return {
       local ok, wt = pcall(require, "git-worktree")
       if ok and wt and type(wt.setup) == "function" then
         wt.setup({})
+
+        -- Automatically sync CWD and re-point Oil to the new worktree when switching or creating
+        if type(wt.on_tree_update) == "function" then
+          wt.on_tree_update(function(op, metadata)
+            if op == wt.Operations.Switch or op == wt.Operations.Create then
+              local path = type(metadata) == "table" and (metadata.path or metadata[1]) or metadata
+              if path and type(path) == "string" and path ~= "." then
+                local full_path = vim.fn.fnamemodify(path, ":p")
+                if vim.fn.isdirectory(full_path) == 1 then
+                  pcall(vim.api.nvim_set_current_dir, full_path)
+                  local ok_oil, oil = pcall(require, "oil")
+                  if ok_oil and oil then
+                    pcall(oil.open, full_path)
+                  end
+                end
+              end
+            end
+          end)
+        end
       end
       pcall(function()
         require("telescope").load_extension("git_worktree")
