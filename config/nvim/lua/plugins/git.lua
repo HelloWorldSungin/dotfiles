@@ -231,9 +231,23 @@ return {
                 if branch and type(branch) == "string" then
                   branch = branch:gsub("^remotes/origin/", ""):gsub("^origin/", ""):gsub("^remotes/", "")
                 end
-                if path and type(path) == "string" then
+                if path and type(path) == "string" and path ~= "" then
                   path = path:gsub("^remotes/origin/", ""):gsub("^origin/", ""):gsub("^remotes/", ""):gsub("/%.git$", ""):gsub("/%.git/.*$", "")
+                else
+                  path = branch
                 end
+
+                -- Resolve real repository root to ensure worktree is never placed inside .git
+                local repo_root = vim.fn.systemlist("git rev-parse --show-toplevel")[1]
+                if not repo_root or repo_root == "" or repo_root:find("fatal") then
+                  repo_root = (vim.uv or vim.loop).cwd() or ""
+                end
+                repo_root = repo_root:gsub("/%.git$", ""):gsub("/%.git/.*$", "")
+
+                if path and not path:match("^/") and not path:match("^~") then
+                  path = repo_root .. "/" .. path
+                end
+
                 return orig_create(path, branch, upstream)
               end
               wt._patched_create = true
