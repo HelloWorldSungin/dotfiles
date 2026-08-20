@@ -276,6 +276,12 @@ if [ -d "$WORK_DIR" ]; then
   fi
 fi
 
+# Reset terminal mouse tracking mode on return to prompt (prevents ;53M scroll leaks)
+_reset_mouse_tracking() {
+  printf '\e[?1000l\e[?1002l\e[?1003l\e[?1006l'
+}
+PROMPT_COMMAND="_reset_mouse_tracking; ${PROMPT_COMMAND:-}"
+
 # Auto-launch Zsh for interactive terminals
 if [ -t 1 ] && [ -n "$PS1" ] && [ -z "$ZSH_VERSION" ] && command -v zsh >/dev/null 2>&1; then
   export SHELL="$(which zsh)"
@@ -383,6 +389,12 @@ bindkey '^a' autosuggest-accept 2>/dev/null || true
 if command -v starship >/dev/null 2>&1; then
   eval "$(starship init zsh)"
 fi
+
+# Reset terminal mouse tracking mode on return to prompt (prevents ;53M scroll leaks)
+_reset_mouse_tracking() {
+  printf '\e[?1000l\e[?1002l\e[?1003l\e[?1006l'
+}
+autoload -Uz add-zsh-hook 2>/dev/null && add-zsh-hook precmd _reset_mouse_tracking 2>/dev/null || true
 
 # Auto-cd on new workspace creation, but preserve active workspace directory in existing spaces/panes
 WORK_DIR="/s/mrcy/ems/users/skim"
