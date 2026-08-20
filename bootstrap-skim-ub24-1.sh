@@ -47,7 +47,12 @@ if command -v sudo >/dev/null 2>&1; then
     tree \
     ripgrep \
     fd-find \
-    fzf || true
+    fzf \
+    environment-modules \
+    xauth \
+    gawk \
+    tcsh \
+    debianutils || true
 
   # Ensure fallback clone of zsh plugins if not installed via apt
   mkdir -p "${HOME}/.zsh"
@@ -214,9 +219,38 @@ alias cdiff="cleartool diff -pred"
 alias chist="cleartool lshistory"
 alias cdesc="cleartool describe"
 
-# Add ClearCase binary directories to PATH if present
-for cdir in /usr/atria/bin /opt/rational/clearcase/bin /var/adm/rational/clearcase/bin; do
-  [ -d "$cdir" ] && export PATH="$cdir:$PATH"
+# Add Enterprise EDA, LSF, Gemini, and ClearCase tools to PATH
+for pdir in \
+  /s/gemini/tools/scripts \
+  /s/gemini/tools/bin \
+  /s/gemini/tools/lsf/10.1.x/10.1/linux2.6-glibc2.3-x86_64/bin \
+  /s/gemini/tools/lsf/10.1/linux2.6-glibc2.3-x86_64/bin \
+  /s/gemini/tools/lsf/bin \
+  /opt/ibm/lsf/bin \
+  /usr/atria/bin \
+  /opt/rational/clearcase/bin \
+  /var/adm/rational/clearcase/bin; do
+  [ -d "$pdir" ] && export PATH="$pdir:$PATH"
+done
+
+# Initialize Environment Modules (module load ...)
+if [ -f /etc/profile.d/modules.sh ]; then
+  source /etc/profile.d/modules.sh
+elif [ -f /usr/share/modules/init/bash ] && [ -n "$BASH_VERSION" ]; then
+  source /usr/share/modules/init/bash
+elif [ -f /usr/share/modules/init/zsh ] && [ -n "$ZSH_VERSION" ]; then
+  source /usr/share/modules/init/zsh
+fi
+
+# Source LSF cluster configuration if available
+for lsf_conf in \
+  /s/gemini/tools/lsf/conf/profile.lsf \
+  /s/gemini/tools/lsf/10.1.x/conf/profile.lsf \
+  /s/gemini/tools/lsf/10.1/conf/profile.lsf; do
+  if [ -f "$lsf_conf" ]; then
+    source "$lsf_conf"
+    break
+  fi
 done
 
 # Starship Prompt initialization
@@ -259,9 +293,38 @@ export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:$PATH"
 export EDITOR="nvim"
 export NPM_CONFIG_PREFIX="$HOME/.npm-global"
 
-# Add ClearCase binary directories to PATH if present
-for cdir in /usr/atria/bin /opt/rational/clearcase/bin /var/adm/rational/clearcase/bin; do
-  [ -d "$cdir" ] && export PATH="$cdir:$PATH"
+# Add Enterprise EDA, LSF, Gemini, and ClearCase tools to PATH
+for pdir in \
+  /s/gemini/tools/scripts \
+  /s/gemini/tools/bin \
+  /s/gemini/tools/lsf/10.1.x/10.1/linux2.6-glibc2.3-x86_64/bin \
+  /s/gemini/tools/lsf/10.1/linux2.6-glibc2.3-x86_64/bin \
+  /s/gemini/tools/lsf/bin \
+  /opt/ibm/lsf/bin \
+  /usr/atria/bin \
+  /opt/rational/clearcase/bin \
+  /var/adm/rational/clearcase/bin; do
+  [ -d "$pdir" ] && export PATH="$pdir:$PATH"
+done
+
+# Initialize Environment Modules (module load ...)
+if [ -f /etc/profile.d/modules.sh ]; then
+  source /etc/profile.d/modules.sh
+elif [ -f /usr/share/modules/init/zsh ] && [ -n "$ZSH_VERSION" ]; then
+  source /usr/share/modules/init/zsh
+elif [ -f /usr/share/modules/init/bash ] && [ -n "$BASH_VERSION" ]; then
+  source /usr/share/modules/init/bash
+fi
+
+# Source LSF cluster configuration if available
+for lsf_conf in \
+  /s/gemini/tools/lsf/conf/profile.lsf \
+  /s/gemini/tools/lsf/10.1.x/conf/profile.lsf \
+  /s/gemini/tools/lsf/10.1/conf/profile.lsf; do
+  if [ -f "$lsf_conf" ]; then
+    source "$lsf_conf"
+    break
+  fi
 done
 
 alias v="nvim"
