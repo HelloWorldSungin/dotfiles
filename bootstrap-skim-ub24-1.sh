@@ -203,6 +203,22 @@ alias gsw="git switch"
 alias gcl="git clone --recurse-submodules"
 alias gsu="git submodule update --init --recursive"
 
+# ClearCase aliases
+alias ct="cleartool"
+alias cco="cleartool checkout -nc"
+alias cci="cleartool checkin -nc"
+alias cunco="cleartool uncheckout -rm"
+alias clsco="cleartool lsco -cview -me"
+alias cpwv="cleartool pwv"
+alias cdiff="cleartool diff -pred"
+alias chist="cleartool lshistory"
+alias cdesc="cleartool describe"
+
+# Add ClearCase binary directories to PATH if present
+for cdir in /usr/atria/bin /opt/rational/clearcase/bin /var/adm/rational/clearcase/bin; do
+  [ -d "$cdir" ] && export PATH="$cdir:$PATH"
+done
+
 # Starship Prompt initialization
 if command -v starship >/dev/null 2>&1; then
   if [ -n "$ZSH_VERSION" ]; then
@@ -243,6 +259,11 @@ export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:$PATH"
 export EDITOR="nvim"
 export NPM_CONFIG_PREFIX="$HOME/.npm-global"
 
+# Add ClearCase binary directories to PATH if present
+for cdir in /usr/atria/bin /opt/rational/clearcase/bin /var/adm/rational/clearcase/bin; do
+  [ -d "$cdir" ] && export PATH="$cdir:$PATH"
+done
+
 alias v="nvim"
 alias lg="lazygit"
 alias g="git"
@@ -259,6 +280,17 @@ alias gb="git branch"
 alias gsw="git switch"
 alias gcl="git clone --recurse-submodules"
 alias gsu="git submodule update --init --recursive"
+
+# ClearCase aliases
+alias ct="cleartool"
+alias cco="cleartool checkout -nc"
+alias cci="cleartool checkin -nc"
+alias cunco="cleartool uncheckout -rm"
+alias clsco="cleartool lsco -cview -me"
+alias cpwv="cleartool pwv"
+alias cdiff="cleartool diff -pred"
+alias chist="cleartool lshistory"
+alias cdesc="cleartool describe"
 
 # Zsh History configuration
 HISTFILE="$HOME/.zsh_history"

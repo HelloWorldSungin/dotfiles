@@ -123,6 +123,15 @@ in
       gsw = "git switch";
       gcl = "git clone --recurse-submodules";
       gsu = "git submodule update --init --recursive";
+      ct = "cleartool";
+      cco = "cleartool checkout -nc";
+      cci = "cleartool checkin -nc";
+      cunco = "cleartool uncheckout -rm";
+      clsco = "cleartool lsco -cview -me";
+      cpwv = "cleartool pwv";
+      cdiff = "cleartool diff -pred";
+      chist = "cleartool lshistory";
+      cdesc = "cleartool describe";
       v = "nvim";
       lg = "lazygit";
       rebuild = "~/dotfiles/rebuild.sh";
