@@ -101,7 +101,8 @@ return {
             if op == wt.Operations.Switch or op == wt.Operations.Create then
               local path = type(metadata) == "table" and (metadata.path or metadata[1]) or metadata
               if path and type(path) == "string" and path ~= "." then
-                local full_path = vim.fn.fnamemodify(path, ":p")
+                local clean_path = path:gsub("/%.git$", ""):gsub("/%.git/.*$", "")
+                local full_path = vim.fn.fnamemodify(clean_path, ":p")
                 if vim.fn.isdirectory(full_path) == 1 then
                   pcall(vim.api.nvim_set_current_dir, full_path)
                   local ok_oil, oil = pcall(require, "oil")
@@ -112,6 +113,18 @@ return {
               end
             end
           end)
+        end
+
+        -- Patch switch_worktree to never enter .git directories
+        if type(wt.switch_worktree) == "function" and not wt._patched_switch then
+          local orig_switch = wt.switch_worktree
+          wt.switch_worktree = function(path)
+            if path and type(path) == "string" then
+              path = path:gsub("/%.git$", ""):gsub("/%.git/.*$", "")
+            end
+            return orig_switch(path)
+          end
+          wt._patched_switch = true
         end
       end
       pcall(function()
@@ -217,6 +230,9 @@ return {
               wt.create_worktree = function(path, branch, upstream)
                 if branch and type(branch) == "string" then
                   branch = branch:gsub("^remotes/origin/", ""):gsub("^origin/", ""):gsub("^remotes/", "")
+                end
+                if path and type(path) == "string" then
+                  path = path:gsub("^remotes/origin/", ""):gsub("^origin/", ""):gsub("^remotes/", ""):gsub("/%.git$", ""):gsub("/%.git/.*$", "")
                 end
                 return orig_create(path, branch, upstream)
               end
