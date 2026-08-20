@@ -5,7 +5,7 @@
 set -euo pipefail
 
 DOTFILES="${HOME}/dotfiles"
-NVIM_VERSION="v0.10.4"
+NVIM_VERSION="v0.12.4"
 LAZYGIT_VERSION="v0.44.1"
 STARSHIP_VERSION="v1.22.1"
 HERDR_VERSION="v0.8.0"
@@ -77,7 +77,7 @@ if command -v nvim >/dev/null 2>&1; then
   INSTALLED_NVIM_VER=$(nvim --version | head -n 1 | awk '{print $2}')
 fi
 
-if [[ "$INSTALLED_NVIM_VER" == v0.10* || "$INSTALLED_NVIM_VER" == 0.10* ]]; then
+if [[ "$INSTALLED_NVIM_VER" == "$NVIM_VERSION" || "$INSTALLED_NVIM_VER" == "${NVIM_VERSION#v}" ]]; then
   success "Neovim ${INSTALLED_NVIM_VER} is already installed."
 else
   info "Downloading Neovim ${NVIM_VERSION} from GitHub Releases..."
