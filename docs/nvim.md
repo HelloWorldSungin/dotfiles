@@ -20,8 +20,10 @@ from GitHub automatically, so a fresh machine just works. `:Lazy` opens its UI
 for inspection. `lazy-lock.json` is written by lazy.nvim and committed, so a
 fresh machine gets the same plugin commits this one runs. Never hand-edit it.
 When intentionally updating, first audit stable releases and update the plugin
-records in `config/dev-tools-versions.sh`, then regenerate the lock with
-lazy.nvim and commit both changes. See `docs/dev-tool-versions.md`.
+records in `config/dev-tools-versions.sh`, and the release-pinned specs in
+`lua/plugins/` carry that tag in a `version` field too - lazy.nvim never moves
+such a plugin past it. Then regenerate the lock with lazy.nvim and commit all of
+it together. See `docs/dev-tool-versions.md`.
 
 ## How you discover keybinds
 
