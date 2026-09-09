@@ -170,10 +170,12 @@ timer, the login-shell startup check, and the updater's checker dependency are
 therefore one derivation rather than four copies that happen to agree.
 
 The login shell runs `dev-tools-check-updates --startup`, which only reads the
-cache the weekly timer refreshes; it never checks a source itself. It reports
-tool state only from a cache inside the same freshness window every other cached
-read uses, and otherwise says the cached audit is stale instead of replaying it
-as current.
+cache the weekly timer refreshes; it never checks a source itself. The timer is
+the only thing that refreshes that cache, so the login line reports tool state
+for eight days after a check - the weekly cadence plus a day of grace - and
+anything older, stamped in the future, or carrying no usable timestamp says the
+cached audit is stale instead of being replayed as current. The four-hour
+freshness window still governs the audit itself, which refreshes when it is run.
 
 `dev-tools-check-updates --json --force --no-cache` is the read-only audit. It
 reports every executable and plugin as installed, pinned, and latest stable,
@@ -242,8 +244,13 @@ writes nothing.
 
 An npm tool's reversal path is proven before anything is decided, by the preview
 and the apply alike. The prior version is read from the same npm prefix a
-reversal reinstalls into, not from the checker's PATH lookup, and it must be
-re-verifiable against the registry; without that evidence the receipt could not
+reversal reinstalls into, not from the checker's PATH lookup - one bounded read of
+the executable that prefix owns, taking its output and errors together under the
+same timeout detection uses, accepted only as an exact version a reinstall could
+restore, and never a name that walks out of the prefix. Nothing installed there,
+an executable that reports no usable version, and one that does not answer in time
+are three different refusals that each say which they were. The observed version
+must also be re-verifiable against the registry; without that evidence the receipt could not
 describe a reversal, and a recorded mutation with no way back is worse than a
 refused one. A package the prefix does not carry, or one whose prefix version
 disagrees with what detection read from PATH, is refused for the same reason: the

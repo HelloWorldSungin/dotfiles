@@ -43,6 +43,8 @@ FAKEBIN="$TMP_ROOT/fakebin"
 PREFIX="$TMP_ROOT/npm-prefix"
 STATE="$TMP_ROOT/state"
 mkdir -p "$FAKEBIN" "$PREFIX/bin" "$STATE"
+RECEIPTS="$TMP_ROOT/receipts"
+mkdir -p "$RECEIPTS"
 NPM_LOG="$TMP_ROOT/npm.log"
 CHECKER_LOG="$TMP_ROOT/checker.log"
 LIFECYCLE_LOG="$TMP_ROOT/lifecycle.log"
@@ -64,7 +66,8 @@ for row in "${NPM_TOOL_PINS[@]}"; do
   # tier writes and where a reversal would read it back from.
   current=unknown
   if [ -x "$TEST_PREFIX/bin/$command_name" ]; then
-    current=$(env NO_UPDATE_NOTIFIER=1 "$TEST_PREFIX/bin/$command_name" --version 2>/dev/null | grep -Eo '[0-9]+(\.[0-9]+){1,3}' | head -1)
+    current=$(timeout "${TEST_NETWORK_TIMEOUT:-15}" env NO_UPDATE_NOTIFIER=1 "$TEST_PREFIX/bin/$command_name" --version 2>&1 \
+      | grep -Eo '[0-9]+(\.[0-9]+){1,3}(-[0-9A-Za-z]+)?' | head -1)
   fi
   [ -n "$current" ] || current=unknown
   [ "$name" = quota-axi ] && [ -n "${TEST_QUOTA_CURRENT:-}" ] && current=$TEST_QUOTA_CURRENT
@@ -164,7 +167,9 @@ run_apply() {
     TEST_PINS="$PINS" TEST_PREFIX="$PREFIX" TEST_FIRSTMATE="$CHECKOUT" TEST_NPM_LOG="$NPM_LOG" TEST_CHECKER_LOG="$CHECKER_LOG" \
     TEST_LIFECYCLE_LOG="$LIFECYCLE_LOG" TEST_BAD_PACKAGE="${TEST_BAD_PACKAGE:-}" TEST_INVALID_CHECKER="${TEST_INVALID_CHECKER:-0}" \
     TEST_STALE_CHECKER_LATEST="${TEST_STALE_CHECKER_LATEST:-}" TEST_WORKER_APPEARS="${TEST_WORKER_APPEARS:-}" \
-    TEST_QUOTA_CURRENT="${TEST_QUOTA_CURRENT:-}" \
+    TEST_QUOTA_CURRENT="${TEST_QUOTA_CURRENT:-}" TEST_NETWORK_TIMEOUT="${TEST_NETWORK_TIMEOUT:-15}" \
+    DEV_TOOLS_UPDATE_NETWORK_TIMEOUT_SECONDS="${TEST_NETWORK_TIMEOUT:-15}" \
+    DEV_TOOLS_APPLY_RECEIPT_DIR="$RECEIPTS" \
     "$APPLY" "$@"
 }
 
@@ -254,6 +259,81 @@ unset TEST_QUOTA_CURRENT
 if grep -Fq 'install -g' "$NPM_LOG"; then fail 'a mutation ran while the prior state was ambiguous'; fi
 [ "$(quota_version)" = "$QUOTA_PRIOR" ] || fail 'the refused package was changed anyway'
 pass 'detection disagreeing with the npm prefix refuses the mutation'
+
+# ---- one bounded version-observation contract, and labels that match the cause
+
+# A tool that prints its banner on stderr is read the same way by detection and by
+# the prefix observer, so it converges instead of being refused for a prior state
+# that is plainly there.
+: >"$NPM_LOG"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'printf "%s %s\\n" >&2\n' "$QUOTA_COMMAND" "$QUOTA_PRIOR"
+} >"$PREFIX/bin/$QUOTA_COMMAND"
+chmod +x "$PREFIX/bin/$QUOTA_COMMAND"
+rm -f "$RECEIPTS"/*.json
+set +e
+json=$(run_apply --json)
+rc=$?
+set -e
+[ "$rc" -eq 0 ] || fail "a stderr version banner blocked the apply: $(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .detail')"
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')" = applied ] \
+  || fail "a stderr version banner was not observed: $(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .detail')"
+set -- "$RECEIPTS"/*.json
+[ -f "$1" ] || fail 'the converged apply wrote no receipt'
+[ "$(jq -r '.tools[] | select(.name=="quota-axi") | .prior' "$1")" = "$QUOTA_PRIOR" ] \
+  || fail 'the receipt did not record the version the prefix reported on stderr'
+seed_quota_prior
+pass 'the prefix observer reads a version the same way detection does'
+
+# Present but unreadable is a different cause from absent, and the refusal says
+# which one it was rather than claiming the prefix carries nothing.
+: >"$NPM_LOG"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'printf "%s (unversioned build)\\n"\n' "$QUOTA_COMMAND"
+} >"$PREFIX/bin/$QUOTA_COMMAND"
+chmod +x "$PREFIX/bin/$QUOTA_COMMAND"
+TEST_QUOTA_CURRENT=$QUOTA_PRIOR
+set +e
+json=$(run_apply --json)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail 'an unreadable installed version exited successfully'
+detail=$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .detail')
+case "$detail" in
+  *'reported no recognisable version'*) : ;;
+  *) fail "an unreadable installed version was refused for the wrong reason: $detail" ;;
+esac
+if grep -Fq 'install -g' "$NPM_LOG"; then fail 'a package with an unreadable prior version was installed anyway'; fi
+
+# The observation is bounded, so a command that never answers cannot hang a run.
+: >"$NPM_LOG"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'sleep 30\n'
+  printf 'printf "%s %s\\n"\n' "$QUOTA_COMMAND" "$QUOTA_PRIOR"
+} >"$PREFIX/bin/$QUOTA_COMMAND"
+chmod +x "$PREFIX/bin/$QUOTA_COMMAND"
+TEST_NETWORK_TIMEOUT=1
+started=$SECONDS
+set +e
+json=$(run_apply --json)
+rc=$?
+set -e
+elapsed=$((SECONDS - started))
+unset TEST_NETWORK_TIMEOUT
+unset TEST_QUOTA_CURRENT
+[ "$rc" -ne 0 ] || fail 'an unresponsive installed command exited successfully'
+detail=$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .detail')
+case "$detail" in
+  *'did not report a version within 1s'*) : ;;
+  *) fail "an unresponsive installed command was refused for the wrong reason: $detail" ;;
+esac
+[ "$elapsed" -lt 20 ] || fail "the observation was not bounded: the run took ${elapsed}s"
+if grep -Fq 'install -g' "$NPM_LOG"; then fail 'a package whose prior version could not be read was installed anyway'; fi
+seed_quota_prior
+pass 'an unreadable or unresponsive prefix command is refused with its own reason, under a bound'
 
 : >"$NPM_LOG"
 TEST_BAD_PACKAGE=quota-axi

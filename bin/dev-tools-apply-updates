@@ -146,6 +146,11 @@ ALLOWLIST_NPM_JSON='["chrome-devtools-axi","gh-axi","gnhf","lavish-axi","quota-a
 # observer alike. A prior version the observer could never read back, or the
 # preflight could never accept, is not a reversal path.
 NPM_VERSION_RE='[0-9]+(\.[0-9]+){2,3}'
+# The version token shape the checker's own detection reads, so both sides of a
+# comparison parse one banner the same way before the strict shape is required.
+NPM_OBSERVED_TOKEN_RE='[0-9]+(\.[0-9]+){1,3}(-[0-9A-Za-z]+)?'
+NPM_OBSERVED=
+NPM_OBSERVE_REASON=
 npm_reversible_version() { printf '%s\n' "$1" | grep -Eq "^$NPM_VERSION_RE\$"; }
 
 run_timed() {
@@ -536,9 +541,10 @@ apply_npm() {
     # the prior state the receipt records is read from the same place. Detection is
     # delegated to the checker, which resolves through PATH; when the two disagree
     # the receipt would name a version reinstalling could not restore.
-    observed=$(observe_npm "$command_name")
+    observe_npm "$command_name"
+    observed=$NPM_OBSERVED
     if [ -z "$observed" ]; then
-      item=$(tier_json refused "the npm prefix $NPM_PREFIX carries no installed $command_name to reverse to; refusing a mutation it could not reverse" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg c "$current" '{name:$n,pinned:$p,detected:$c}')")
+      item=$(tier_json refused "$NPM_OBSERVE_REASON, so there is no prior state to reverse to; refusing a mutation it could not reverse" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg c "$current" '{name:$n,pinned:$p,detected:$c}')")
       results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
     fi
     if [ "$observed" != "$current" ]; then
@@ -572,13 +578,14 @@ apply_npm() {
     if ! receipt_put "$entry"; then
       item=$(tier_json refused 'could not write the mutation receipt; refusing to mutate' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')"); refused=1
     elif run_timed "$TIMEOUT_SECONDS" env NPM_CONFIG_PREFIX="$NPM_PREFIX" "$NPM_BIN" install -g "$package@$pinned" >/dev/null 2>&1; then
-      installed=$(observe_npm "$command_name")
+      observe_npm "$command_name"
+      installed=$NPM_OBSERVED
       if [ "$installed" = "$pinned" ]; then
         receipt_settle "$entry" applied
         item=$(tier_json applied "installed $package@$pinned" "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')")
       else
         receipt_settle "$entry" failed
-        item=$(tier_json failed "installed command did not report exact pin $pinned" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg got "${installed:-unknown}" '{name:$n,pinned:$p,installed:$got}')"); failed=1
+        item=$(tier_json failed "installed command did not report exact pin $pinned${NPM_OBSERVE_REASON:+; $NPM_OBSERVE_REASON}" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg got "${installed:-unknown}" '{name:$n,pinned:$p,installed:$got}')"); failed=1
       fi
     else
       receipt_settle "$entry" failed
@@ -626,10 +633,41 @@ observe_firstmate() {
   $GIT_BIN -C "$FIRSTMATE_PATH" rev-parse HEAD 2>/dev/null || true
 }
 
+# The one bounded read of installed npm state, used by the apply gate, the
+# post-install read-back, the rollback preflight, and every reconciliation. It
+# reads the exact executable the npm prefix owns - never PATH - takes stdout and
+# stderr together under the same timeout the checker's detection uses, and accepts
+# only an exact version a reversal could reinstall. NPM_OBSERVED carries that
+# version; when it is empty NPM_OBSERVE_REASON says which of those failed.
 observe_npm() {
-  local command_name=$1
-  [ -n "$command_name" ] && [ -x "$NPM_PREFIX/bin/$command_name" ] || return 0
-  env NO_UPDATE_NOTIFIER=1 "$NPM_PREFIX/bin/$command_name" --version 2>/dev/null | grep -Eo "$NPM_VERSION_RE" | head -1 || true
+  local command_name=$1 path output token
+  NPM_OBSERVED=
+  NPM_OBSERVE_REASON=
+  case "$command_name" in
+    ''|.|..|*/*)
+      NPM_OBSERVE_REASON='the recorded command is not a plain executable name inside the npm prefix'
+      return 0
+      ;;
+  esac
+  path=$NPM_PREFIX/bin/$command_name
+  if [ ! -x "$path" ]; then
+    NPM_OBSERVE_REASON="the npm prefix $NPM_PREFIX carries no installed $command_name"
+    return 0
+  fi
+  output=$(run_timed "$NETWORK_TIMEOUT" env NO_UPDATE_NOTIFIER=1 "$path" --version 2>&1) || {
+    NPM_OBSERVE_REASON="$command_name in the npm prefix did not report a version within ${NETWORK_TIMEOUT}s"
+    return 0
+  }
+  token=$(printf '%s\n' "$output" | grep -Eo "$NPM_OBSERVED_TOKEN_RE" | head -1 || true)
+  if [ -z "$token" ]; then
+    NPM_OBSERVE_REASON="$command_name in the npm prefix reported no recognisable version"
+    return 0
+  fi
+  if ! npm_reversible_version "$token"; then
+    NPM_OBSERVE_REASON="$command_name in the npm prefix reports $token, which is not an exact version a reversal could reinstall"
+    return 0
+  fi
+  NPM_OBSERVED=$token
 }
 
 # Non-mutating tier preconditions, evaluated in the preflight. Each prints the
@@ -712,11 +750,13 @@ rollback_npm() {
   if [ "$ATTENDED" -eq 0 ]; then set_tier ready "attended reinstall of $package@$prior from $source would restore the recorded prior version"; return; fi
   detect_workers
   [ "$WG_STATUS" = clear ] || { set_tier refused 'a Firstmate worker lane appeared during the preflight'; return; }
-  [ "$(observe_npm "$command_name")" = "$target" ] || { set_tier refused 'the installed version left the recorded applied version during the preflight'; return; }
+  observe_npm "$command_name"
+  [ "$NPM_OBSERVED" = "$target" ] || { set_tier refused 'the installed version left the recorded applied version during the preflight'; return; }
   refusal=$(preflight_npm_refusal "$entry")
   [ -z "$refusal" ] || { set_tier refused "$refusal"; return; }
   if run_timed "$TIMEOUT_SECONDS" env NPM_CONFIG_PREFIX="$NPM_PREFIX" "$NPM_BIN" install -g "$source" >/dev/null 2>&1; then
-    installed=$(observe_npm "$command_name")
+    observe_npm "$command_name"
+    installed=$NPM_OBSERVED
     if [ "$installed" = "$prior" ]; then
       receipt_reconcile "$entry" "$prior" at_target rolled_back
       set_tier rolled_back "reinstalled $package@$prior from $source"
@@ -725,7 +765,8 @@ rollback_npm() {
       set_tier failed "reinstalled command did not report the recorded prior version $prior"
     fi
   else
-    receipt_reconcile "$entry" "$(observe_npm "$command_name")" at_target rollback_failed
+    observe_npm "$command_name"
+    receipt_reconcile "$entry" "$NPM_OBSERVED" at_target rollback_failed
     set_tier failed "npm install failed for $source"
   fi
 }
@@ -760,7 +801,10 @@ rollback_preflight() {
     if [ -z "$phase" ]; then
       case "$tier" in
         firstmate) observed=$(observe_firstmate) ;;
-        npm_global) observed=$(observe_npm "$(printf '%s' "$entry" | jq -r '.command // ""')") ;;
+        npm_global)
+          observe_npm "$(printf '%s' "$entry" | jq -r '.command // ""')"
+          observed=$NPM_OBSERVED
+          ;;
       esac
       prior=$(printf '%s' "$entry" | jq -r '.prior')
       target=$(printf '%s' "$entry" | jq -r '.target')

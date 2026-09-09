@@ -498,22 +498,56 @@ printf '%s' "$gzip_entry" | jq -e '.detail | test("no recognised evidence class"
   || fail 'an unclassed pin row did not say why it was not measured'
 pass 'a pin row without a recognised evidence class is refused, not measured through PATH'
 
-# ------------------- the login banner never claims a stale cache as current
+# ------------------- the login banner is bounded by the refresh cadence
 
 # The login shell runs `--startup`, which only reads the cache; the weekly timer
-# is what refreshes it. Claims therefore have to be bounded by the same freshness
-# window every other cached read uses.
-jq -cn '{schema_version:4,checked_at_epoch:1000,tools:[
-  {name:"npm:example",current:"1.0.0",pinned:"1.1.0",latest_stable:"1.1.0",status:"drifted"},
-  {name:"nix:example",current:"2.0.0",pinned:"2.0.0",latest_stable:"2.0.0",status:"up_to_date"}]}' >"$FIXTURE/cache.json"
+# is the only thing that refreshes it. So the banner accepts a week plus a day of
+# grace - eight days - and calls anything older stale rather than claiming it.
+CACHED_AT=1000
+EIGHT_DAYS=$((8 * 24 * 60 * 60))
+write_startup_cache() { # checked_at_epoch
+  jq -cn --argjson at "$1" '{schema_version:4,checked_at_epoch:$at,tools:[
+    {name:"npm:example",current:"1.0.0",pinned:"1.1.0",latest_stable:"1.1.0",status:"drifted"},
+    {name:"nix:example",current:"2.0.0",pinned:"2.0.0",latest_stable:"2.0.0",status:"up_to_date"}]}' >"$FIXTURE/cache.json"
+}
+write_startup_cache "$CACHED_AT"
+
+: >"$CALL_LOG"
 startup=$(run_checker --startup)
-printf '%s\n' "$startup" | grep -Fq 'npm:example drifted' || fail 'a fresh cache did not report the drifted tool at login'
+printf '%s\n' "$startup" | grep -Fq 'npm:example drifted' || fail 'a usable cache did not report the drifted tool at login'
 if printf '%s\n' "$startup" | grep -Fq 'nix:example'; then fail 'the login banner reported a tool that is up to date'; fi
-startup=$(TEST_NOW_EPOCH=$((1000 + 14400 + 1)) run_checker --startup)
-if printf '%s\n' "$startup" | grep -Fq 'npm:example'; then fail 'the login banner replayed a stale cache as current tool state'; fi
-printf '%s\n' "$startup" | grep -Fq 'outside its freshness window' \
-  || fail 'the login banner did not say the cached audit was stale'
+[ ! -s "$CALL_LOG" ] || fail 'the login banner checked a source instead of only reading the cache'
+
+# One second inside eight days still reports; the cache TTL that governs the
+# audit itself (four hours) must not govern this line.
+startup=$(TEST_NOW_EPOCH=$((CACHED_AT + EIGHT_DAYS - 1)) run_checker --startup)
+printf '%s\n' "$startup" | grep -Fq 'npm:example drifted' \
+  || fail 'a cache one second inside eight days was treated as stale'
+
+# At exactly eight days, and beyond it, nothing is claimed.
+for now in $((CACHED_AT + EIGHT_DAYS)) $((CACHED_AT + EIGHT_DAYS + 86400)); do
+  startup=$(TEST_NOW_EPOCH=$now run_checker --startup)
+  if printf '%s\n' "$startup" | grep -Fq 'npm:example'; then
+    fail "the login banner replayed a cache $((now - CACHED_AT))s old as current tool state"
+  fi
+  printf '%s\n' "$startup" | grep -Fq 'older than eight days' \
+    || fail 'the login banner did not say the cached audit was stale'
+done
+
+# A cache stamped in the future is skew, not freshness, and binds nothing.
+startup=$(TEST_NOW_EPOCH=$((CACHED_AT - 1)) run_checker --startup)
+if printf '%s\n' "$startup" | grep -Fq 'npm:example'; then fail 'a future-stamped cache was claimed as current'; fi
+printf '%s\n' "$startup" | grep -Fq 'older than eight days' || fail 'a future-stamped cache was not reported unusable'
+
+jq -cn '{schema_version:4,checked_at_epoch:"recently",tools:[
+  {name:"npm:example",current:"1.0.0",pinned:"1.1.0",latest_stable:"1.1.0",status:"drifted"}]}' >"$FIXTURE/cache.json"
+startup=$(run_checker --startup)
+if printf '%s\n' "$startup" | grep -Fq 'npm:example'; then fail 'a cache with no usable timestamp was claimed as current'; fi
+
+# Nothing bound at all says nothing: there is no audit to be stale about.
+printf 'not a cache\n' >"$FIXTURE/cache.json"
+[ -z "$(run_checker --startup)" ] || fail 'an unreadable cache produced a login claim'
 rm -f "$FIXTURE/cache.json"
-pass 'the login banner reports tool state only from a cache inside its freshness window'
+pass 'the login banner reports tool state for eight days after a check and nothing older'
 
 printf '\nall dev-tools-check-updates tests passed\n'

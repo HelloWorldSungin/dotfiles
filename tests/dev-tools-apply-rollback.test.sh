@@ -381,6 +381,31 @@ mv "$TMP_ROOT/gh-axi.saved" "$PREFIX/bin/$GH_COMMAND"
 git -C "$CHECKOUT" reset -q --hard "$TARGET_COMMIT"
 pass 'an absent or unreadable tool refuses its tier rather than overwriting it'
 
+# --------------------------------- a command name that leaves the prefix refuses
+
+# The receipt is operator-supplied input by the time a reversal reads it. Its
+# recorded command names the executable the npm prefix owns, so a name that walks
+# out of the prefix is not observed at all - otherwise an unrelated build there
+# could be mistaken for the recorded applied state and reinstalled over.
+: >"$NPM_LOG"
+mkdir -p "$PREFIX/escape"
+printf '#!%s\nprintf "%s %s\\n"\n' "$BASH_BIN" "$QUOTA_COMMAND" "$QUOTA_VERSION" >"$PREFIX/escape/$QUOTA_COMMAND"
+chmod +x "$PREFIX/escape/$QUOTA_COMMAND"
+ESCAPED="$RECEIPTS/escaped-command.json"
+jq --arg c "../escape/$QUOTA_COMMAND" \
+  '.tools |= map(if .name=="quota-axi" then .command = $c else . end)' "$RECEIPT" >"$ESCAPED"
+set +e
+json=$(run_rollback "$ESCAPED" --attended --json)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail 'a recorded command name outside the npm prefix exited successfully'
+[ "$(tool_status "$json" quota-axi)" = refused ] \
+  || fail 'a recorded command name outside the npm prefix was observed as the installed tool'
+no_install_ran || fail 'a recorded command name outside the npm prefix reached a mutation'
+[ "$(tool_version "$QUOTA_COMMAND")" = "$QUOTA_VERSION" ] || fail 'the refused escape still changed the tool'
+git -C "$CHECKOUT" reset -q --hard "$TARGET_COMMIT"
+pass 'a recorded command name that leaves the npm prefix is never read as installed state'
+
 # --------------------------------- unavailable or changed prior evidence refuses
 
 : >"$NPM_LOG"
