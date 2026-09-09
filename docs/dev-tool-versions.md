@@ -173,17 +173,34 @@ Bootstrap invokes it after the exact Nix and Home Manager bootstrap.
 
 Both scopes refuse while any Firstmate worker lane exists and recheck that guard
 immediately before mutation; a lane found by that recheck is reported in the
-result's `worker_guard`, not only in the tier it deferred. Dry-run performs no
-install, merge, or fetch. Herdr, no-mistakes, GBrain, Nix, agent harnesses, and
-Baby Menu are never apply targets.
+result's `worker_guard`, not only in the tier it deferred. Herdr, no-mistakes,
+GBrain, Nix, agent harnesses, and Baby Menu are never apply targets.
+
+Dry-run installs and merges nothing, and writes nothing to the Firstmate
+checkout - no ref, object, index, `FETCH_HEAD`, or configuration. It does answer
+the Firstmate tier from the same authoritative remote the real run uses, because
+a preview computed from whatever is already fetched locally would report
+`skipped` in exactly the pending-update case where the real run applies. The
+observed local default branch and the remote default branch are read into two
+temporary refs in a private throwaway bare repository, with the same URL and ref
+selection the apply path uses, and compared there: `would_apply` only on proven
+ancestry, `up_to_date` only on equality, and a refusal when the checkout is
+ahead of or diverged from the pin. Anything that cannot be proven - an
+unreachable remote, a remote that moves mid-check, a missing object, temporary
+state that cannot be created or removed - is reported as `unknown` and exits
+non-zero rather than predicting success. The apply path repeats its own fetch
+and ancestry verification and never trusts a dry-run result.
 
 Every real mutation is preceded by a mode-0600 receipt written atomically under
 `$DEV_TOOLS_APPLY_RECEIPT_DIR` (by default `$XDG_STATE_HOME/dev-tools-apply-updates`).
 It records each affected tool, its exact prior commit or version, its exact
 target, the independently verified remote or registry evidence for both, and
-per-tool and per-tier completion status. A receipt that cannot be written
-refuses the mutation it would have covered, so nothing is ever changed without a
-record, and a receipt that could not record every outcome is reported as
+per-tool and per-tier completion status. The receipt directory is created and
+secured only when the run creates it; an operator-supplied
+`DEV_TOOLS_APPLY_RECEIPT_DIR` keeps its own mode, and one that is missing or
+unwritable refuses the mutation instead of being repaired in place. A receipt
+that cannot be written refuses the mutation it would have covered, so nothing is
+ever changed without a record, and a receipt that could not record every outcome is reported as
 `receipt.status: incomplete` in both output modes and exits non-zero even when
 the tools themselves converged. Dry-run names the receipt it would write and
 writes nothing.
@@ -202,6 +219,11 @@ Rollback is attended, never automatic, and never restarts a service:
 dev-tools-apply-updates --rollback <receipt>              # check preconditions only
 dev-tools-apply-updates --rollback <receipt> --attended   # perform the reversal
 ```
+
+Without `--attended` nothing is written at all - not a tool, and not one byte of
+the receipt. The full preflight below still runs and reports the reconciliation
+an attended run would record, so an archived or read-only receipt can be
+inspected without altering it or failing on an append that was never requested.
 
 The recorded status is never trusted on its own. Every status that can follow a
 real mutation - `applied`, `pending`, `failed`, and `rollback_failed` - is
@@ -236,8 +258,8 @@ discard of local changes - and an npm reinstall of only the exact prior version
 the receipt records. Each re-confirms observed state, the worker lane, and the
 prior artifact evidence immediately before mutating.
 
-Reconciliation appends the observed state and the outcome to the receipt, in
-place and mode 0600, and re-derives each tier's completion status from its own
+An attended reversal appends the observed state and the outcome to the receipt,
+in place and mode 0600, and re-derives each tier's completion status from its own
 tool entries so no apply-era tier status outlives the tools it described; a
 partly reversed tier reports the worst outcome among them. The receipt's parent
 directory is the operator's and its mode is never changed. The recorded prior, target, and evidence fields are never

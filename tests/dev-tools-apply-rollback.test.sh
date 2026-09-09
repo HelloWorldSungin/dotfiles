@@ -276,6 +276,8 @@ converged || fail 'the rollback preview mutated a tool'
 no_install_ran || fail 'the rollback preview installed a package'
 [ "$(jq -r '.tiers.npm_global.status' "$RECEIPT")" = applied ] \
   || fail 'a check-only rollback relabelled a tier that nothing happened to'
+[ "$(printf '%s' "$json" | jq -r '.receipt.status')" = unchanged ] \
+  || fail 'a check-only rollback claimed to have settled the receipt'
 pass 'an unattended rollback reconciles state at the recorded target and performs nothing'
 
 # --------------------------------- an in-flight lane refuses both tiers
@@ -545,14 +547,46 @@ chmod 755 "$SHARED"
 SHARED_RECEIPT="$SHARED/receipt.json"
 jq '.tools |= map(. + {status:"applied"} | del(.observed, .reconciliation, .reconciled_at))' "$RECEIPT" >"$SHARED_RECEIPT"
 chmod 600 "$SHARED_RECEIPT"
-json=$(run_rollback "$SHARED_RECEIPT" --json)
+json=$(run_rollback "$SHARED_RECEIPT" --attended --json)
 [ "$(tool_status "$json" quota-axi)" = reconciled ] || fail 'the shared-directory receipt was not reconciled'
 [ "$(file_mode "$SHARED")" = 755 ] || fail "rollback changed the operator's receipt directory mode to $(file_mode "$SHARED")"
 [ "$(file_mode "$SHARED_RECEIPT")" = 600 ] || fail 'the reconciled receipt is no longer mode 0600'
 [ "$(jq -r '.tools[] | select(.name=="quota-axi") | .status' "$SHARED_RECEIPT")" = reconciled_at_prior ] \
   || fail 'the shared-directory receipt was not settled in place'
 [ "$(find "$SHARED" -mindepth 1 | wc -l)" -eq 1 ] || fail 'rollback left a temp file beside the receipt'
-pass 'rollback settles the receipt in place and never changes its parent directory mode'
+pass 'an attended rollback settles the receipt in place and never changes its parent directory mode'
+
+# --------------------------------- a check-only rollback writes nothing at all
+
+# `--rollback` without `--attended` is documented as check-only, so an archived
+# or read-only receipt must survive it byte for byte and must not fail the run.
+CHECKONLY="$TMP_ROOT/check-only"
+mkdir -p "$CHECKONLY"
+ARCHIVED="$CHECKONLY/receipt.json"
+jq '.tools |= map(. + {status:"failed"} | del(.observed, .reconciliation, .reconciled_at))
+    | .tiers.npm_global.status = "failed" | .tiers.firstmate.status = "failed"' "$RECEIPT" >"$ARCHIVED"
+BEFORE=$(cat "$ARCHIVED")
+BEFORE_MTIME=$(stat -c '%Y' "$ARCHIVED" 2>/dev/null || stat -f '%m' "$ARCHIVED")
+json=$(run_rollback "$ARCHIVED" --json)
+[ "$(tool_status "$json" quota-axi)" = reconciled ] || fail 'the check-only run did not report the reconciliation it would record'
+[ "$(printf '%s' "$json" | jq -r '.receipt.status')" = unchanged ] || fail 'a check-only run claimed to have settled the receipt'
+[ "$(cat "$ARCHIVED")" = "$BEFORE" ] || fail 'a check-only rollback rewrote the receipt'
+[ "$(stat -c '%Y' "$ARCHIVED" 2>/dev/null || stat -f '%m' "$ARCHIVED")" = "$BEFORE_MTIME" ] \
+  || fail 'a check-only rollback touched the receipt timestamp'
+[ "$(jq -r '.tiers.npm_global.status' "$ARCHIVED")" = failed ] \
+  || fail 'a check-only rollback destroyed the recorded apply-era tier status'
+[ "$(find "$CHECKONLY" -mindepth 1 | wc -l)" -eq 1 ] || fail 'a check-only rollback left a temp file beside the receipt'
+
+chmod 500 "$CHECKONLY"
+set +e
+json=$(run_rollback "$ARCHIVED" --json)
+rc=$?
+set -e
+chmod 700 "$CHECKONLY"
+[ "$rc" -eq 0 ] || fail "inspecting a read-only receipt exited $rc"
+[ "$(printf '%s' "$json" | jq -r '.receipt.status')" = unchanged ] \
+  || fail 'inspecting a read-only receipt claimed a stale append that was never requested'
+pass 'a check-only rollback leaves the receipt and its evidence completely untouched'
 
 # --------------------------------- a receipt that cannot be appended is stale
 
@@ -562,9 +596,9 @@ STALE_RECEIPT="$READONLY/receipt.json"
 jq '.tools |= map(. + {status:"applied"} | del(.observed, .reconciliation, .reconciled_at))' "$RECEIPT" >"$STALE_RECEIPT"
 chmod 500 "$READONLY"
 set +e
-json=$(run_rollback "$STALE_RECEIPT" --json)
+json=$(run_rollback "$STALE_RECEIPT" --attended --json)
 rc=$?
-human=$(run_rollback "$STALE_RECEIPT" 2>&1)
+human=$(run_rollback "$STALE_RECEIPT" --attended 2>&1)
 set -e
 [ "$rc" -ne 0 ] || fail 'a receipt that could not be appended exited successfully'
 [ "$(printf '%s' "$json" | jq -r '.receipt.status')" = stale ] || fail 'a failed receipt append was not reported as stale'
@@ -572,7 +606,7 @@ set -e
   || fail 'the test fixture does not actually leave the on-disk receipt unchanged'
 printf '%s\n' "$human" | grep -Fq 'receipt is stale' || fail 'human output did not warn about the stale receipt'
 chmod 700 "$READONLY"
-pass 'a reversal whose receipt append fails reports a stale receipt and exits non-zero'
+pass 'an attended reversal whose receipt append fails reports a stale receipt and exits non-zero'
 
 # --------------------------------- unusable receipts fail closed
 
@@ -629,5 +663,32 @@ grep -q 'receipt is incomplete' "$TMP_ROOT/incomplete.err" || fail 'human output
 rm -f "$RECEIPTS"
 mkdir -p "$RECEIPTS"
 pass 'an outcome that cannot be recorded is reported as incomplete and exits non-zero'
+
+# --------------------------------- an operator-supplied receipt directory is theirs
+
+OPERATOR_DIR="$TMP_ROOT/operator-receipts"
+mkdir -p "$OPERATOR_DIR"
+chmod 755 "$OPERATOR_DIR"
+reset_to_prior
+json=$(TEST_RECEIPT_DIR="$OPERATOR_DIR" run_tool --json)
+[ "$(printf '%s' "$json" | jq -r '.receipt.status')" = written ] || fail 'the apply did not write into the operator directory'
+[ "$(file_mode "$OPERATOR_DIR")" = 755 ] \
+  || fail "the apply changed the operator's receipt directory mode to $(file_mode "$OPERATOR_DIR")"
+OPERATOR_RECEIPT=$(printf '%s' "$json" | jq -r '.receipt.path')
+[ "$(file_mode "$OPERATOR_RECEIPT")" = 600 ] || fail 'the receipt itself is not mode 0600'
+converged || fail 'the operator-directory run did not converge'
+
+chmod 500 "$OPERATOR_DIR"
+reset_to_prior
+set +e
+json=$(TEST_RECEIPT_DIR="$OPERATOR_DIR" run_tool --json)
+rc=$?
+set -e
+chmod 700 "$OPERATOR_DIR"
+[ "$rc" -ne 0 ] || fail 'an unwritable receipt directory exited successfully'
+[ "$(printf '%s' "$json" | jq -r '.tiers.firstmate.detail')" = 'could not write the mutation receipt; refusing to mutate' ] \
+  || fail 'an unwritable receipt directory did not refuse the mutation'
+at_prior || fail 'an unwritable receipt directory still mutated a tool'
+pass 'the apply secures only a directory it creates and refuses an unusable one'
 
 printf '\nall dev-tools-apply-updates receipt and rollback tests passed\n'

@@ -35,6 +35,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   re-verifies exact artifacts, refuses when any
   Firstmate worker lane is in flight (a `state/*.meta` file, mirroring
   `firstmate/bin/fm-supervision-lib.sh`), and is packaged on PATH with no timer.
+  `--dry-run` verifies the Firstmate tier against the real remote in a private
+  throwaway repository - never the checkout - so a preview matches the apply.
   Every real mutation is preceded by a mode-0600 receipt under
   `$DEV_TOOLS_APPLY_RECEIPT_DIR`; reversal is `--rollback <receipt> --attended`,
   is never automatic, and reconciles each tool's observed state against the

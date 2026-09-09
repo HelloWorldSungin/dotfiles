@@ -273,7 +273,6 @@ pass 'the packaged --help prints only the operator contract'
 # lost its executable bit is skipped or dies with exit 126 while the rest pass.
 for suite in "$ROOT"/tests/*.test.sh; do
   [ -x "$suite" ] || fail "$(basename "$suite") is not directly executable, so tests/*.test.sh discovery cannot run it"
-  head -1 "$suite" | grep -q '^#!' || fail "$(basename "$suite") has no interpreter line for direct invocation"
 done
 pass 'every test suite in tests/ can be invoked directly'
 

@@ -12,7 +12,9 @@
 # GBrain, harness CLIs, Baby Menu, and other report-only tools are also excluded.
 #
 # Every real mutation is preceded by a mode-0600 receipt, written atomically
-# under $DEV_TOOLS_APPLY_RECEIPT_DIR. It records each affected tool, its exact
+# under $DEV_TOOLS_APPLY_RECEIPT_DIR. That directory is only created and secured
+# when this run creates it; an operator-supplied one keeps its own mode, and an
+# unusable one refuses the mutation instead of being repaired. It records each affected tool, its exact
 # prior commit or version, its exact target, the independently verified remote
 # or registry evidence for both, and per-tool and per-tier completion status. A
 # receipt that cannot be written refuses the mutation it would have covered, and
@@ -21,11 +23,18 @@
 # Partial apply is expected and recorded: each tool carries its own completion
 # status, so a run that converges one package and refuses another leaves an
 # accurate per-tool record while the tier reports the worst case. Dry-run names
-# the receipt it would write and writes nothing.
+# the receipt it would write and writes nothing, and answers the Firstmate tier
+# from the same authoritative remote the real run uses - fetched into a private
+# throwaway repository, never into the checkout - so its preview matches what an
+# apply would do instead of guessing from whatever is already fetched locally.
+# Anything it cannot prove is `unknown` and exits non-zero.
 #
 # Rollback is attended, never automatic, and never restarts a service:
 #   dev-tools-apply-updates --rollback <receipt>              # check only
 #   dev-tools-apply-updates --rollback <receipt> --attended   # perform
+# Without --attended nothing is written at all - not a tool, and not one byte of
+# the receipt. The full preflight still runs and reports the reconciliation an
+# attended run would record, so an archived receipt can be inspected safely.
 # It never trusts the recorded status alone. Every status that can follow a real
 # mutation - applied, pending, failed, and rollback_failed - is observed and
 # reconciled; only a terminal reconciled or rolled_back entry is left alone. One
@@ -42,7 +51,7 @@
 # Reversal is then `git reset --hard <prior commit>` - never a force, and never
 # a discard of local changes - and an npm reinstall of only the exact recorded
 # prior version, each re-confirming state and evidence immediately beforehand.
-# Reconciliation appends the observed state and outcome to the receipt and
+# An attended reversal appends the observed state and outcome to the receipt and
 # re-derives each tier's completion from its own tool entries, so no apply-era
 # tier status outlives the tools it described; recorded prior, target, and
 # evidence are never rewritten to match the machine. A reversal whose receipt
@@ -196,10 +205,16 @@ receipt_replace() {
   return 0
 }
 
-# The apply direction owns its receipt directory and provisions it privately.
+# The apply direction provisions its own receipt directory privately, but an
+# operator-supplied one already exists and its metadata is theirs: only a
+# directory this run creates is secured, and an unusable one refuses the write
+# rather than being repaired in place.
 receipt_write() {
-  mkdir -p "$RECEIPT_DIR" 2>/dev/null || return 1
-  chmod 700 "$RECEIPT_DIR" 2>/dev/null || true
+  if [ ! -d "$RECEIPT_DIR" ]; then
+    mkdir -p "$RECEIPT_DIR" 2>/dev/null || return 1
+    chmod 700 "$RECEIPT_DIR" 2>/dev/null || true
+  fi
+  [ -w "$RECEIPT_DIR" ] && [ -x "$RECEIPT_DIR" ] || return 1
   receipt_replace || return 1
   RECEIPT_WRITTEN=1
   return 0
@@ -238,6 +253,69 @@ pin_for_npm() {
   return 1
 }
 
+# Dry-run answers the same question the real run answers, from the same remote,
+# without touching the checkout. Everything happens in a private throwaway bare
+# repository: the observed local default branch is read into one temporary ref,
+# the authoritative remote default branch is fetched into another with the exact
+# URL and ref selection the apply path uses, and the comparison runs there. No
+# ref, object, index, FETCH_HEAD, or configuration of the real repository is
+# written. Anything that cannot be proven - an unreachable or moving remote, a
+# missing object, a failed import, state that cannot be cleaned up - is reported
+# as `unknown` and exits non-zero rather than predicting success.
+DRY_TMP=
+DRY_STATUS=
+DRY_DETAIL=
+firstmate_dry_run_cleanup() {
+  [ -n "$DRY_TMP" ] || return 0
+  rm -rf "$DRY_TMP" 2>/dev/null
+  if [ -e "$DRY_TMP" ]; then
+    DRY_STATUS=unknown
+    DRY_DETAIL="private temporary dry-run state could not be removed: $DRY_TMP"
+  fi
+  DRY_TMP=
+}
+trap firstmate_dry_run_cleanup EXIT
+
+firstmate_dry_run_probe() {
+  local pinned=$1 local_head=$2 gd remote_head fetched_local fetched_remote
+  DRY_TMP=$(mktemp -d "${TMPDIR:-/tmp}/dev-tools-apply-dry-run.XXXXXX" 2>/dev/null) ||
+    { DRY_STATUS=unknown; DRY_DETAIL='could not create private temporary state for the dry-run check'; return; }
+  gd="$DRY_TMP/verify.git"
+  $GIT_BIN init --quiet --bare "$gd" 2>/dev/null ||
+    { DRY_STATUS=unknown; DRY_DETAIL='could not initialise private temporary state for the dry-run check'; return; }
+  run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" --git-dir="$gd" fetch --quiet --no-tags "$FIRSTMATE_PATH" \
+    '+refs/heads/main:refs/dev-tools/local' 2>/dev/null ||
+    { DRY_STATUS=unknown; DRY_DETAIL='could not read the local default branch into private temporary state'; return; }
+  fetched_local=$($GIT_BIN --git-dir="$gd" rev-parse refs/dev-tools/local 2>/dev/null || true)
+  [ "$fetched_local" = "$local_head" ] ||
+    { DRY_STATUS=unknown; DRY_DETAIL='the local default branch moved while it was being read'; return; }
+  remote_head=$(run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" ls-remote "$FIRSTMATE_REPO" refs/heads/main 2>/dev/null | awk '$2 == "refs/heads/main" {print $1; exit}')
+  [ -n "$remote_head" ] ||
+    { DRY_STATUS=unknown; DRY_DETAIL='could not reach the authoritative Firstmate main branch'; return; }
+  run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" --git-dir="$gd" fetch --quiet --no-tags "$FIRSTMATE_REPO" \
+    '+refs/heads/main:refs/dev-tools/remote' 2>/dev/null ||
+    { DRY_STATUS=unknown; DRY_DETAIL='could not fetch the authoritative Firstmate main branch into private temporary state'; return; }
+  fetched_remote=$($GIT_BIN --git-dir="$gd" rev-parse refs/dev-tools/remote 2>/dev/null || true)
+  [ -n "$fetched_remote" ] ||
+    { DRY_STATUS=unknown; DRY_DETAIL='the authoritative Firstmate main branch produced no commit'; return; }
+  [ "$fetched_remote" = "$remote_head" ] ||
+    { DRY_STATUS=unknown; DRY_DETAIL='the authoritative Firstmate main branch moved during verification'; return; }
+  $GIT_BIN --git-dir="$gd" cat-file -e "$pinned^{commit}" 2>/dev/null ||
+    { DRY_STATUS=refused; DRY_DETAIL='the exact pin is absent from the authoritative Firstmate main branch'; return; }
+  $GIT_BIN --git-dir="$gd" merge-base --is-ancestor "$pinned" refs/dev-tools/remote 2>/dev/null ||
+    { DRY_STATUS=refused; DRY_DETAIL='the exact pin is not contained in the authoritative Firstmate main branch'; return; }
+  if [ "$fetched_local" = "$pinned" ]; then
+    DRY_STATUS=up_to_date; DRY_DETAIL="already at pinned commit $pinned"; return
+  fi
+  if $GIT_BIN --git-dir="$gd" merge-base --is-ancestor refs/dev-tools/local "$pinned" 2>/dev/null; then
+    DRY_STATUS=would_apply; DRY_DETAIL="would fast-forward main to exact pin $pinned"; return
+  fi
+  if $GIT_BIN --git-dir="$gd" merge-base --is-ancestor "$pinned" refs/dev-tools/local 2>/dev/null; then
+    DRY_STATUS=refused; DRY_DETAIL='the local default branch is ahead of the exact pin'; return
+  fi
+  DRY_STATUS=refused; DRY_DETAIL='the local default branch has diverged from the exact pin'
+}
+
 apply_firstmate() {
   local detection=$1 row current pinned latest branch remote_head fetch_out prior entry
   row=$(printf '%s' "$detection" | jq -ce '.tools[] | select(.name == "firstmate")' 2>/dev/null || true)
@@ -259,12 +337,9 @@ apply_firstmate() {
   fi
   if [ "$WG_STATUS" = active ]; then set_tier deferred 'workers active'; return; fi
   if [ "$DRY_RUN" -eq 1 ]; then
-    if $GIT_BIN -C "$FIRSTMATE_PATH" cat-file -e "$pinned^{commit}" 2>/dev/null &&
-       $GIT_BIN -C "$FIRSTMATE_PATH" merge-base --is-ancestor HEAD "$pinned" 2>/dev/null; then
-      set_tier would_apply "would fast-forward main to exact pin $pinned" "$(jq -cn --arg p "$pinned" '{pinned:$p}')"
-    else
-      set_tier skipped 'exact pinned commit is not a known clean fast-forward'
-    fi
+    firstmate_dry_run_probe "$pinned" "$current"
+    firstmate_dry_run_cleanup
+    set_tier "$DRY_STATUS" "$DRY_DETAIL" "$(jq -cn --arg p "$pinned" '{pinned:$p}')"
     return
   fi
   remote_head=$(run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" ls-remote "$FIRSTMATE_REPO" refs/heads/main 2>/dev/null | awk '$2 == "refs/heads/main" {print $1; exit}')
@@ -578,8 +653,12 @@ rollback_main() {
         *" $tier "*) set_tier refused 'another tool in this tier has an unreconcilable state; refusing the whole tier' ;;
         *)
           if [ "$phase" = at_prior ]; then
-            receipt_reconcile "$entry" "$observed" at_prior reconciled_at_prior
-            set_tier reconciled "already at the recorded prior $observed; no rollback needed"
+            if [ "$ATTENDED" -eq 1 ]; then
+              receipt_reconcile "$entry" "$observed" at_prior reconciled_at_prior
+              set_tier reconciled "already at the recorded prior $observed; no rollback needed"
+            else
+              set_tier reconciled "already at the recorded prior $observed; an attended run would settle it as reconciled"
+            fi
           else
             case "$tier" in
               firstmate) rollback_firstmate "$entry" ;;
@@ -594,8 +673,11 @@ rollback_main() {
       '{tier:$t,name:$n,prior:$prior,target:$target,observed:$o} + .')
     results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]')
   done <<<"$(printf '%s' "$PLAN" | jq -c '.[]')"
-  [ "$RECEIPT_TOUCHED" -eq 0 ] || receipt_settle_tiers
-  if [ "$RECEIPT_STALE" -eq 1 ]; then receipt_state=stale; bad=1; else receipt_state=settled; fi
+  if [ "$ATTENDED" -eq 0 ]; then receipt_state=unchanged
+  else
+    [ "$RECEIPT_TOUCHED" -eq 0 ] || receipt_settle_tiers
+    if [ "$RECEIPT_STALE" -eq 1 ]; then receipt_state=stale; bad=1; else receipt_state=settled; fi
+  fi
   RESULT=$(jq -cn --argjson attended "$ATTENDED" --arg path "$ROLLBACK_RECEIPT" --arg status "$WG_STATUS" \
     --argjson count "$WG_COUNT" --arg detail "$WG_DETAIL" --argjson tools "$results" \
     --arg receipt_status "$receipt_state" \
@@ -669,6 +751,6 @@ else
 fi
 
 EXIT_CODE=0
-printf '%s' "$RESULT" | jq -e '[.tiers[] | select(.status == "failed" or .status == "refused")] | length == 0' >/dev/null || EXIT_CODE=1
+printf '%s' "$RESULT" | jq -e '[.tiers[] | select(.status == "failed" or .status == "refused" or .status == "unknown")] | length == 0' >/dev/null || EXIT_CODE=1
 [ "$(receipt_status)" = incomplete ] && EXIT_CODE=1
 exit "$EXIT_CODE"
