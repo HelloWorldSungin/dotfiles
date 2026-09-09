@@ -87,5 +87,8 @@ live symlink into the repo, and `~/.codex/config.toml` is patched by a
 home-manager activation step (`bin/codex-set-context-window`) that merges only
 that one key - the file stays machine-owned, so project trust entries, hook
 approvals and TUI preferences are untouched, and repeat rebuilds are a no-op.
+An activation step has no removal path the way a declared file does: dropping it
+from `home/common.nix` leaves the key behind, so back the setting out by editing
+`~/.codex/config.toml` by hand.
 Both tools read their config at startup, so **start a new session** to pick the
 change up; no model reselection is needed.

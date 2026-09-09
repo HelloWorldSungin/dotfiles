@@ -163,6 +163,17 @@ assert_eq "$(cat "$cfg3")" "model_context_window = 872000" \
   "a missing config is created containing only the owned key"
 pass "a missing config.toml is created with only the owned key"
 
+# The value an activation actually writes is the script's own default: nothing
+# sets CODEX_MODEL_CONTEXT_WINDOW on the rebuild path, and every assertion above
+# pins it. `env -u` keeps that hermetic while covering the committed value -
+# Codex's advertised maximum for Sol, Terra and Luna.
+cfg4="$TMP_ROOT/committed-default/config.toml"
+env -u CODEX_MODEL_CONTEXT_WINDOW CODEX_CONFIG_FILE="$cfg4" "$MERGE" \
+  || fail "merge failed with CODEX_MODEL_CONTEXT_WINDOW unset"
+assert_eq "$(cat "$cfg4")" "model_context_window = 872000" \
+  "an activation with an empty environment must write Codex's 872000 maximum"
+pass "the committed default is 872000, Codex's advertised maximum"
+
 # The merge must never touch model selection or effort.
 grep -qx 'model = "gpt-5.6-sol"' "$cfg" || fail "the selected model was altered"
 grep -qx 'model_reasoning_effort = "high"' "$cfg" || fail "the reasoning effort was altered"
