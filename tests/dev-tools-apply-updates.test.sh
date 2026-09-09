@@ -85,12 +85,19 @@ source "$TEST_PINS"
 [ -n "${TEST_WORKER_APPEARS:-}" ] && printf 'lane\n' >"$TEST_WORKER_APPEARS"
 if [ "$1" = view ]; then
   spec=$2
+  package=${spec%@*}
+  version=${spec##*@}
   for row in "${NPM_TOOL_PINS[@]}"; do
-    IFS='|' read -r name command_name package pinned integrity guarded _channel <<<"$row"
+    IFS='|' read -r name _command_name candidate pinned integrity guarded _channel <<<"$row"
     [ "$guarded" = yes ] || continue
-    [ "$spec" = "$package@$pinned" ] || continue
+    [ "$candidate" = "$package" ] || continue
+    if [ "$version" != "$pinned" ]; then
+      # The installed prior version, published with its own integrity.
+      jq -cn --arg v "$version" --arg i "sha512-prior-$version" '{version:$v,"dist.integrity":$i}'
+      exit 0
+    fi
     [ "$name" = "${TEST_BAD_PACKAGE:-}" ] && integrity=sha512-wrong
-    jq -cn --arg v "$pinned" --arg i "$integrity" '{version:$v,"dist.integrity":$i}'
+    jq -cn --arg v "$version" --arg i "$integrity" '{version:$v,"dist.integrity":$i}'
     exit 0
   done
   exit 1

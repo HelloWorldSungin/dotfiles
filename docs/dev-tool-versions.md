@@ -211,6 +211,12 @@ record, and a receipt that could not record every outcome is reported as
 the tools themselves converged. Dry-run names the receipt it would write and
 writes nothing.
 
+An npm tool whose currently installed version cannot be re-verified against the
+registry is refused rather than installed. Without that evidence the receipt
+could not describe a reversal, and a recorded mutation with no way back is worse
+than a refused one; the other allowlisted packages are unaffected and stay
+reversible.
+
 Partial apply is expected and recorded rather than hidden. Each tool carries its
 own completion status, so a run that converges one package and fails or refuses
 another leaves an accurate per-tool record while the tier reports the worst
@@ -264,7 +270,10 @@ discard of local changes - and an npm reinstall of only the exact prior version
 the receipt records. Each re-confirms observed state, the worker lane, and the
 prior artifact evidence immediately before mutating.
 
-An attended reversal appends the observed state and the outcome to the receipt,
+An attended reversal that changes nothing - every tool refused, or nothing left
+to reverse - reports `receipt.status: unchanged`, exactly like the check-only
+form, because not one byte of the receipt was written. One that does settle
+appends the observed state and the outcome to the receipt,
 in place and mode 0600, and re-derives each tier's completion status from its own
 tool entries so no apply-era tier status outlives the tools it described; a
 partly reversed tier reports the worst outcome among them. The receipt's parent

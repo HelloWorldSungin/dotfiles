@@ -156,7 +156,11 @@ SH
 cat >"$STUBS/npm" <<SH
 #!$BASH_BIN
 if [ "\$1" = view ]; then
-  printf '{"version":"%s","dist.integrity":"%s"}\n' '$QUOTA_VERSION' '$QUOTA_INTEGRITY'
+  version=\${2##*@}
+  if [ "\$version" = '$QUOTA_VERSION' ]; then integrity='$QUOTA_INTEGRITY'
+  else integrity="sha512-prior-\$version"
+  fi
+  printf '{"version":"%s","dist.integrity":"%s"}\n' "\$version" "\$integrity"
   exit 0
 fi
 if [ "\$1" = install ]; then

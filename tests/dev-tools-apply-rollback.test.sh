@@ -203,6 +203,8 @@ head_commit() { git -C "$CHECKOUT" rev-parse HEAD; }
 tool_version() { env NO_UPDATE_NOTIFIER=1 "$PREFIX/bin/$1" --version 2>/dev/null | grep -Eo '[0-9]+(\.[0-9]+){2,3}' | head -1; }
 tool_status() { printf '%s' "$1" | jq -r --arg n "$2" '.tools[] | select(.name==$n) | .status'; }
 tool_detail() { printf '%s' "$1" | jq -r --arg n "$2" '.tools[] | select(.name==$n) | .detail'; }
+package_status() { printf '%s' "$1" | jq -r --arg n "$2" '.tiers.npm_global.packages[] | select(.name==$n) | .status'; }
+package_detail() { printf '%s' "$1" | jq -r --arg n "$2" '.tiers.npm_global.packages[] | select(.name==$n) | .detail'; }
 converged() { [ "$(head_commit)" = "$TARGET_COMMIT" ] && [ "$(tool_version "$QUOTA_COMMAND")" = "$QUOTA_VERSION" ] && [ "$(tool_version "$GH_COMMAND")" = "$GH_VERSION" ]; }
 at_prior() { [ "$(head_commit)" = "$PRIOR_COMMIT" ] && [ "$(tool_version "$QUOTA_COMMAND")" = "$QUOTA_PRIOR" ] && [ "$(tool_version "$GH_COMMAND")" = "$GH_PRIOR" ]; }
 no_install_ran() { ! grep -Fq 'install -g' "$NPM_LOG"; }
@@ -305,7 +307,11 @@ for tool in firstmate quota-axi gh-axi; do
 done
 converged || fail 'an in-flight lane still mutated a tool'
 no_install_ran || fail 'an in-flight lane still reinstalled a package'
-pass 'an in-flight Firstmate lane refuses the npm tier as well as Firstmate'
+[ "$(printf '%s' "$json" | jq -r '.receipt.status')" = unchanged ] \
+  || fail 'an attended reversal that refused every tool still claimed to have settled the receipt'
+[ "$(jq -r '.tiers.npm_global.status' "$RECEIPT")" = applied ] \
+  || fail 'an attended reversal that changed nothing still rewrote the receipt'
+pass 'an in-flight Firstmate lane refuses the npm tier as well as Firstmate and settles nothing'
 
 # --------------------------------- a dirty checkout refuses rollback
 
@@ -717,5 +723,39 @@ json=$(TEST_RECEIPT_DIR="$CREATED_DIR" run_tool --json)
 [ "$(printf '%s' "$json" | jq -r '.receipt.status')" = written ] || fail 'the apply did not create its own receipt directory'
 [ "$(file_mode "$CREATED_DIR")" = 700 ] || fail "a directory the run created is not private: $(file_mode "$CREATED_DIR")"
 pass 'the apply secures only a directory it creates and refuses an unusable location'
+
+# --------------------------------- an unrecordable reversal path refuses
+
+# The installed version is gone from the registry, so no prior evidence can be
+# captured for it. Installing anyway would leave the tool irreversible.
+reset_to_prior
+unpublish "quota-axi@$QUOTA_PRIOR"
+: >"$NPM_LOG"
+set +e
+json=$(run_tool --json)
+rc=$?
+set -e
+publish "quota-axi@$QUOTA_PRIOR" "$QUOTA_PRIOR_INTEGRITY"
+[ "$rc" -ne 0 ] || fail 'a mutation with no reversal path exited successfully'
+[ "$(package_status "$json" quota-axi)" = refused ] || fail 'a mutation with no reversal path was not refused'
+case "$(package_detail "$json" quota-axi)" in
+  "could not verify registry evidence for the installed version $QUOTA_PRIOR;"*) : ;;
+  *) fail "an unrecordable mutation was refused for the wrong reason: $(package_detail "$json" quota-axi)" ;;
+esac
+! grep -Fq "install -g quota-axi@$QUOTA_VERSION" "$NPM_LOG" || fail 'a package with no reversal path was still installed'
+[ "$(tool_version "$QUOTA_COMMAND")" = "$QUOTA_PRIOR" ] || fail 'a package with no reversal path was still changed'
+
+# The sibling with good evidence converges, and the receipt it produced is still
+# fully reversible - one tool's missing evidence must not poison the tier.
+[ "$(package_status "$json" gh-axi)" = applied ] || fail 'the sibling package was blocked by an unrelated missing evidence'
+PARTIAL_RECEIPT=$(printf '%s' "$json" | jq -r '.receipt.path')
+[ "$(jq -r '[.tools[] | select(.name=="quota-axi")] | length' "$PARTIAL_RECEIPT")" -eq 0 ] \
+  || fail 'the receipt recorded a tool that was never mutated'
+[ "$(jq -r '.tools[] | select(.name=="gh-axi") | .prior_evidence.integrity' "$PARTIAL_RECEIPT")" = "$GH_PRIOR_INTEGRITY" ] \
+  || fail 'the receipt lost the sibling prior evidence'
+json=$(run_rollback "$PARTIAL_RECEIPT" --attended --json)
+[ "$(tool_status "$json" gh-axi)" = rolled_back ] || fail 'the receipt from a partly refused apply was not reversible'
+[ "$(tool_version "$GH_COMMAND")" = "$GH_PRIOR" ] || fail 'the sibling package was not restored'
+pass 'an npm mutation whose reversal path cannot be recorded is refused, and its siblings stay reversible'
 
 printf '\nall dev-tools-apply-updates receipt and rollback tests passed\n'

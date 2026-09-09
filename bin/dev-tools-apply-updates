@@ -21,6 +21,10 @@
 # receipt that cannot be written refuses the mutation it would have covered, and
 # one that could not record every outcome is reported as incomplete and exits
 # non-zero even when the tools themselves converged.
+# An npm tool whose currently installed version cannot be re-verified against the
+# registry is refused rather than installed: without that evidence the receipt
+# could not describe a reversal, and a recorded mutation that cannot be undone is
+# worse than a refused one. The packages around it are unaffected.
 # Partial apply is expected and recorded: each tool carries its own completion
 # status, so a run that converges one package and refuses another leaves an
 # accurate per-tool record while the tier reports the worst case. Dry-run names
@@ -56,9 +60,11 @@
 # Reversal is then `git reset --hard <prior commit>` - never a force, and never
 # a discard of local changes - and an npm reinstall of only the exact recorded
 # prior version, each re-confirming state and evidence immediately beforehand.
-# An attended reversal appends the observed state and outcome to the receipt and
-# re-derives each tier's completion from its own tool entries, so no apply-era
-# tier status outlives the tools it described; recorded prior, target, and
+# An attended reversal that changes nothing - every tool refused, or nothing left
+# to reverse - reports the receipt as `unchanged`, exactly like the check-only
+# form, because not one byte of it was written. One that does settle appends the
+# observed state and outcome and re-derives each tier's completion from its own
+# tool entries, so no apply-era tier status outlives the tools it described; recorded prior, target, and
 # evidence are never rewritten to match the machine. A reversal whose receipt
 # append fails is reported as a stale receipt and exits non-zero, so stale
 # evidence is never mistaken for completion.
@@ -437,15 +443,21 @@ apply_npm() {
       results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); continue
     fi
     # The prior version's own registry evidence is captured before the install so
-    # rollback can tell an unavailable prior artifact from a changed one.
+    # rollback can tell an unavailable prior artifact from a changed one. Without
+    # it the install would be irreversible, so the mutation is refused instead of
+    # recorded with an empty reversal path.
     prior_json=$(run_timed "$NETWORK_TIMEOUT" "$NPM_BIN" view "$package@$current" version dist.integrity --json 2>/dev/null || true)
     prior_version=$(printf '%s' "$prior_json" | jq -r '.version // ""' 2>/dev/null || true)
     prior_integrity=$(printf '%s' "$prior_json" | jq -r '."dist.integrity" // .dist.integrity // ""' 2>/dev/null || true)
     [ "$prior_version" = "$current" ] || prior_integrity=
+    if [ -z "$prior_integrity" ]; then
+      item=$(tier_json refused "could not verify registry evidence for the installed version $current; refusing a mutation it could not reverse" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg c "$current" '{name:$n,pinned:$p,prior:$c}')")
+      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
+    fi
     entry=$(jq -cn --arg n "$name" --arg cmd "$command_name" --arg pkg "$package" --arg prior "$current" \
       --arg target "$pinned" --arg pi "$prior_integrity" --arg ti "$verified_integrity" \
       '{tier:"npm_global",name:$n,command:$cmd,package:$pkg,prior:$prior,target:$target,
-        prior_evidence:{kind:"npm-registry",package:$pkg,version:$prior,integrity:$pi,available:($pi != "")},
+        prior_evidence:{kind:"npm-registry",package:$pkg,version:$prior,integrity:$pi,available:true},
         target_evidence:{kind:"npm-registry",package:$pkg,version:$target,integrity:$ti},
         status:"pending"}')
     if ! receipt_put "$entry"; then
@@ -695,9 +707,9 @@ rollback_main() {
       '{tier:$t,name:$n,prior:$prior,target:$target,observed:$o} + .')
     results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]')
   done <<<"$(printf '%s' "$PLAN" | jq -c '.[]')"
-  if [ "$ATTENDED" -eq 0 ]; then receipt_state=unchanged
+  if [ "$ATTENDED" -eq 0 ] || [ "$RECEIPT_TOUCHED" -eq 0 ]; then receipt_state=unchanged
   else
-    [ "$RECEIPT_TOUCHED" -eq 0 ] || receipt_settle_tiers
+    receipt_settle_tiers
     if [ "$RECEIPT_STALE" -eq 1 ]; then receipt_state=stale; bad=1; else receipt_state=settled; fi
   fi
   RESULT=$(jq -cn --argjson attended "$ATTENDED" --arg path "$ROLLBACK_RECEIPT" --arg status "$WG_STATUS" \
