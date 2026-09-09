@@ -19,6 +19,7 @@ return {
   {
     -- nvim-autopairs: automatically insert closing brackets (), [], {}, "", ''
     "windwp/nvim-autopairs",
+    version = "0.10.0",
     event = "InsertEnter",
     opts = {},
   },

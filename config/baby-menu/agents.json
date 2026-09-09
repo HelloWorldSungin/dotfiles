@@ -9,12 +9,12 @@
     "name": "opencode",
     "label": "OpenCode",
     "command": "opencode",
-    "launchCommand": "npx -y opencode-ai acp"
+    "launchCommand": "npx -y opencode-ai@1.18.30 acp"
   },
   {
     "name": "omp",
     "label": "OMP",
     "command": "omp",
-    "launchCommand": "npx omp-acp"
+    "launchCommand": "npx -y omp-acp@0.1.2"
   }
 ]

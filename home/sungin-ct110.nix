@@ -1,9 +1,17 @@
 { config, lib, pkgs, ... }:
 
 let
+  devToolsPins = pkgs.writeText "dev-tools-versions.sh" (builtins.readFile ../config/dev-tools-versions.sh);
+  devToolsFlakeLock = pkgs.writeText "flake.lock" (builtins.readFile ../flake.lock);
+  nvimPluginLock = pkgs.writeText "nvim-lazy-lock.json" (builtins.readFile ../config/nvim/lazy-lock.json);
   devToolsUpdateChecker = pkgs.writeShellApplication {
     name = "dev-tools-check-updates";
-    text = builtins.readFile ../bin/dev-tools-check-updates;
+    text = ''
+      export DEV_TOOLS_PINS_FILE=${devToolsPins}
+      export DEV_TOOLS_FLAKE_LOCK_FILE=${devToolsFlakeLock}
+      export DEV_TOOLS_NVIM_LOCK_FILE=${nvimPluginLock}
+      ${builtins.readFile ../bin/dev-tools-check-updates}
+    '';
     bashOptions = [ ]; # The checker deliberately handles source failures itself.
     runtimeInputs = with pkgs; [
       coreutils
@@ -21,7 +29,10 @@ let
   # is on its runtime PATH so the tool's own detection delegation resolves.
   devToolsApplyUpdates = pkgs.writeShellApplication {
     name = "dev-tools-apply-updates";
-    text = builtins.readFile ../bin/dev-tools-apply-updates;
+    text = ''
+      export DEV_TOOLS_PINS_FILE=${devToolsPins}
+      ${builtins.readFile ../bin/dev-tools-apply-updates}
+    '';
     bashOptions = [ ]; # Applies each tier independently and handles failures itself.
     runtimeInputs = with pkgs; [
       coreutils
@@ -91,16 +102,29 @@ in
   # ------------------------------------------------------------------ ssh
   programs.ssh = {
     enable = true;
-    matchBlocks."gitea.arknode" = {
-      hostname = "192.168.68.101";
-      port = 2222;
-      user = "git";
-      identityFile = "~/.ssh/id_ed25519";
+    enableDefaultConfig = false;
+    settings."*" = {
+      ForwardAgent = false;
+      AddKeysToAgent = "no";
+      Compression = false;
+      ServerAliveInterval = 0;
+      ServerAliveCountMax = 3;
+      HashKnownHosts = false;
+      UserKnownHostsFile = "~/.ssh/known_hosts";
+      ControlMaster = "no";
+      ControlPath = "~/.ssh/master-%r@%n:%p";
+      ControlPersist = "no";
     };
-    matchBlocks."loq" = {
-      hostname = "192.168.68.83";
-      user = "root";
-      identityFile = "~/.ssh/id_ed25519";
+    settings."gitea.arknode" = {
+      HostName = "192.168.68.101";
+      Port = 2222;
+      User = "git";
+      IdentityFile = "~/.ssh/id_ed25519";
+    };
+    settings."loq" = {
+      HostName = "192.168.68.83";
+      User = "root";
+      IdentityFile = "~/.ssh/id_ed25519";
     };
   };
 }

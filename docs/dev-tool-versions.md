@@ -1,0 +1,188 @@
+# Developer and agent tool version ownership
+
+`config/dev-tools-versions.sh` is the machine-readable owner for external tool
+pins. `flake.lock` owns the immutable Nix input revisions, and
+`config/nvim/lazy-lock.json` owns Neovim plugin commits. The pins below were
+verified on 2026-09-09 against each publisher's registry, release feed, or
+manifest. A version is stable only when the publisher's stable/default registry
+tag or a non-draft, non-prerelease release says so. Numeric tags containing
+alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
+
+## Exact external pins
+
+| Tool | Exact pin | Authority and stable judgment | Fresh install | Apply boundary |
+|---|---:|---|---|---|
+| Determinate Nix Installer | 3.22.3 | Determinate GitHub GA release, with v3.22.0 prerelease excluded | Versioned installer URL plus recorded installer SHA-256 | Report only |
+| Claude Code | 2.1.236 | Official npm `stable` dist-tag. The moving `latest` 2.1.266 is deliberately not the stable channel | Exact npm package and registry integrity | Report only |
+| Codex | 0.153.4 | Official npm default tag; 0.154.0 alpha builds excluded | Exact npm package and registry integrity | Report only |
+| OpenCode 1 | 1.18.30 | Official npm default tag and matching GA release; OpenCode 2 beta and snapshots excluded | Exact npm package and registry integrity | Report only |
+| Pi | 0.85.1 | `@earendil-works/pi-coding-agent` default tag. The retired Mario Zechner package is not the fleet distribution | Exact npm package and registry integrity | Report only |
+| Antigravity CLI | 1.1.28 | Google's per-platform production manifest | Exact publisher asset and SHA-512 from that manifest | Report only; its own self-update remains an upstream limitation |
+| Cursor Agent | 2026.09.08-6caf4ff | Version embedded in Cursor's official moving installer | No automated install; observed snapshot only | Report only |
+| Treehouse | 2.3.0 | Latest non-draft, non-prerelease GitHub release | Exact release archive and publisher checksum | Report only |
+| no-mistakes | 1.70.1 | Latest GitHub GA release; 1.71.0 and 1.72.0 prereleases excluded | Exact release archive and publisher checksum | Attended only |
+| Herdr | 0.9.0 | `herdr.dev/latest.json`; newer preview builds excluded | Exact manifest asset and publisher checksum, only when absent | Attended only |
+| GBrain | 0.48.5.0 | Latest non-draft, non-prerelease `garrytan/gbrain` release | Not installed here | Firstmate-owned attended migration |
+| gnhf | 0.1.49 | npm default tag | Exact npm package and registry integrity | Guarded exact apply |
+| gh-axi | 0.1.35 | npm default tag | Exact npm package and registry integrity | Guarded exact apply |
+| tasks-axi | 0.2.5 | npm default tag | Exact npm package and registry integrity | Guarded exact apply |
+| quota-axi | 0.1.41 | npm default tag | Exact npm package and registry integrity | Guarded exact apply |
+| chrome-devtools-axi | 0.1.34 | npm default tag | Exact npm package and registry integrity | Guarded exact apply |
+| lavish-axi | 0.1.67 | npm default tag | Exact npm package and registry integrity | Guarded exact apply |
+| OpenCode ACP invocation | 1.18.30 | npm default tag | Exact `npx` spec in `config/baby-menu/agents.json` | Report only |
+| OMP ACP invocation | 0.1.2 | npm default tag | Exact `npx` spec in `config/baby-menu/agents.json` | Report only |
+| claude-spend invocation | 1.0.6 | npm default tag | Exact `npx` spec in `home/common.nix` | Report only |
+| Firstmate source | `0fe226c93efd...` | No upstream releases exist, so the audited default-branch commit is the explicit exception | Exact commit | Guarded exact fast-forward only |
+| Baby Menu source | 0.1.24 / `65eb280ea0e0...` | Latest non-prerelease `baby-menu-v0.1.24` release | Exact release commit | Report only |
+| actions/checkout | v7.0.1 / `3d3c42e5aac5...` | Latest GitHub GA action release | Exact workflow action SHA | CI only |
+| Determinate Nix Installer action | v22 / `ef8a148080ab...` | Latest GitHub GA action release | Exact workflow action SHA | CI only |
+
+The authoritative feeds used for the audit are the
+[npm registry](https://registry.npmjs.org/) for npm packages,
+[GitHub Releases](https://docs.github.com/en/rest/releases/releases#get-the-latest-release)
+for GitHub-distributed binaries and plugins,
+[Herdr's stable manifest](https://herdr.dev/latest.json), Google's
+platform-specific Antigravity production manifests, the
+[Cursor installer](https://cursor.com/install), and the stable NixOS and Home
+Manager release branches. Exact repository and package identifiers live beside
+the values in `config/dev-tools-versions.sh`, so the checker does not infer an
+owner from an executable name.
+
+The Cursor CLI is already an intentional beta dependency in this repository.
+Cursor documents only a moving installer and auto-update commands, with no
+supported exact-version selector or publisher checksum. The repository does not
+pretend otherwise. Bootstrap records the observed build and installer SHA-256,
+but never runs the installer because the script can fetch a different moving
+binary after its own bytes were recorded. `dev-tools-check-updates` exposes the
+installed, observed, and currently advertised builds separately, and flags any
+change to the audited installer snapshot.
+
+Antigravity publishes exact, checksummed assets, so bootstrap can reproduce the
+initial install. Its binary also self-updates during ordinary use and exposes no
+documented disable switch. The checker therefore makes post-install drift
+visible instead of claiming the pin controls the running binary forever.
+
+## Nix-owned inventory
+
+The stable package authority is Nixpkgs 26.05 at
+`93108a538f079596c9a16c72cf03e9322782b6dd`. Home Manager is the matching
+26.05 input at `fd0956c99c41ae3c13a73a638f1f7e963aebc4ab`. This supersedes the
+deprecated 25.11 channel. The lock file carries the content hashes.
+
+| Package | Version | Package | Version |
+|---|---:|---|---:|
+| gh | 2.100.0 | lazygit | 0.61.1 |
+| nodejs_22 | 22.23.2 | uv | 0.11.21 |
+| bats | 1.12.0 | ripgrep | 15.1.0 |
+| fd | 10.4.2 | fzf | 0.72.0 |
+| jq | 1.8.2 | tree | 2.3.2 |
+| htop | 3.5.1 | unzip | 6.0 |
+| neovim | 0.12.4 | zsh | 5.9.1 |
+| starship | 1.25.1 | tea | 0.14.0 |
+| chromium | 152.0.7977.82 | ghdl | 6.0.0 |
+| gtkwave | 3.3.127 | coreutils | 9.11 |
+| curl | 8.21.0 | gawk | 5.4.1 |
+| git | 2.54.0 | gnugrep | 3.12 |
+| gnused | 4.10 | diffutils | 3.12 |
+| gnutar | 1.35 | | |
+
+The table includes user-facing packages and runtime inputs of the
+repository-owned tool scripts. Home Manager modules also own home-manager,
+Neovim, zsh, Starship, fzf, and Git. Neovim's fourteen plugin commits remain
+independently exact in `config/nvim/lazy-lock.json`; the initial lazy.nvim clone
+uses the exact v11.17.5 GA tag instead of the moving `stable` alias, and the lock
+then enforces its audited commit.
+
+## Neovim plugin pins
+
+Plugins with a GitHub release feed use the latest non-draft, non-prerelease
+release. Projects without releases are pinned to the audited default-branch
+commit and are marked as an explicit limitation rather than described as a
+release. The checker compares the installed checkout, lock-file commit, and
+current authoritative release or branch commit.
+
+| Plugin | Stable source | Exact commit |
+|---|---|---|
+| codewindow.nvim | No releases; default branch at audit time | `a8e175043ce3baaa89e0a6b5171bcd920aab3dad` |
+| diffview.nvim | No releases; default branch at audit time | `4516612fe98ff56ae0415a259ff6361a89419b0a` |
+| gitsigns.nvim | v2.1.0 GA | `a462f416e2ce4744531c6256252dee99a7d34a83` |
+| lazy.nvim | v11.17.5 GA | `85c7ff3711b730b4030d03144f6db6375044ae82` |
+| neogit | v2.0.0 GA | `43fa47fb61773b0d90a78ebc2521ea8faaeebd86` |
+| nvim-treesitter | No releases; default branch at audit time | `5cb0114e6242625db56dd6440e945ed1ece10bc7` |
+| nvim-autopairs | 0.10.0 GA tag | `23320e75953ac82e559c610bec5a90d9c6dfa743` |
+| oil.nvim | v2.16.0 GA | `17c0a8faaf48298a0c0cfb0d757c0eaee4ff7a32` |
+| plenary.nvim | No releases; default branch at audit time | `74b06c6c75e4eeb3108ec01852001636d85a932b` |
+| render-markdown.nvim | v8.13.0 GA | `f422cb5c6855f150e2ddcfaf44e7157b98b34f6a` |
+| rose-pine | v3.0.2 GA | `f01eac6eedf6197509dde8b66de0263207ee1877` |
+| snacks.nvim | v2.31.0 GA | `e6fd58c82f2f3fcddd3fe81703d47d6d48fc7b9f` |
+| vim-visual-multi | No releases; default branch at audit time | `a6975e7c1ee157615bbc80fc25e4392f71c344d4` |
+| which-key.nvim | v3.17.0 GA | `fcbf4eea17cb299c02557d576f0d568878e354a4` |
+
+## Intentionally not managed here
+
+- GBrain installation and upgrades belong to Firstmate because they require its
+  backup, schema migration, retrieval evaluation, and rollback gate. This repo
+  reports GBrain drift but never changes its runtime.
+- WezTerm is the documented Mac terminal, while optional `pngpaste` is a
+  Homebrew helper. Neither Homebrew installation is owned by this repository.
+- The Mac NVM path for Node 20.20.2 and the Bun, Antigravity IDE, and Mavis
+  paths are compatibility entries for separately managed installations.
+- Oh My Pi (`omp`) completion wiring, `claude-monitor`, and
+  `codebase-memory-mcp` aliases target separately installed optional tools.
+- `wakeonlan`, `pbcopy`, `scp`, `sqlite3`, `xclip`, `xsel`, and `wl-copy` are
+  operating-system or optional integration helpers. PowerShell, macOS
+  `security`, and the documented MobaXterm terminal are host-owned. The Windows
+  Nerd Font script registers operator-supplied files; it does not select or
+  download a font release.
+- The Baby Menu extension contract mentions a separately managed `pnpm`
+  developer command, and its quota integration probes an optional separately
+  installed Grok CLI. Neither is a repository-owned install.
+- Credentials, logins, project trust, hook approvals, TUI preferences, and the
+  machine-owned Codex config remain mutable state. Home Manager merges only the
+  Codex context-window key and does not replace that file.
+
+## Check, install, and apply boundaries
+
+`dev-tools-check-updates --json --force --no-cache` is the read-only audit. It
+reports every executable and plugin as installed, pinned, and latest stable,
+reports Nix input and package pins, and names intentionally unmanaged tools.
+Source failures are `unknown`, never silently current. Cursor instead exposes
+`latest_stable: unavailable` plus `latest_observed`, because upstream provides
+no stable exact-version channel.
+
+`dev-tools-install-pinned` is fresh-machine, install-if-absent behavior. It
+refuses unknown tool names, unsafe versions, registry-integrity drift, publisher
+checksum drift, and an existing non-repository clone target. It does not upgrade
+an existing tool. It also refuses an explicit Cursor install because no exact
+upstream channel exists; a full bootstrap reports and skips that limitation.
+Bootstrap invokes it after the exact Nix and Home Manager bootstrap.
+
+`dev-tools-apply-updates` has only two mutation scopes:
+
+1. Fast-forward Firstmate's `main` branch to the exact recorded commit, after
+   proving the commit belongs to the freshly read remote branch.
+2. Install the six named npm tools at the exact versions in the pin record,
+   after independently re-reading each exact version and integrity from npm.
+
+Both scopes refuse while any Firstmate worker lane exists and recheck that guard
+immediately before mutation. Dry-run performs no install, merge, or fetch.
+Herdr, no-mistakes, GBrain, Nix, agent harnesses, and Baby Menu are never apply
+targets.
+
+## Attended runtime upgrade sequence
+
+1. Land and fast-forward the pin change before running any repository script.
+2. Wait until all Firstmate worker lanes and no-mistakes validation runs are
+   clear. Record the checker output and take any tool-specific backup first.
+3. Preview the two safe scopes with `dev-tools-apply-updates --dry-run`, then run
+   the guarded apply if its independently verified exact versions are correct.
+4. Upgrade no-mistakes separately in an attended window. Confirm there is no
+   active shared-daemon work before touching its binary or daemon, then validate
+   the installed version against the pin.
+5. Upgrade Herdr separately in an attended window using its publisher-owned
+   update flow. Review client/server compatibility and release notes first, and
+   verify the live fleet is clear before any server lifecycle action.
+6. Upgrade GBrain only through Firstmate's documented backup, baseline,
+   compatibility, migration, smoke-test, evaluation, and rollback procedure.
+7. Re-run the read-only checker. Any unknown source, version mismatch, or
+   prerelease result is a refusal to declare convergence.

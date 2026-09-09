@@ -4,6 +4,7 @@ return {
     -- keybind you can press next. This is how you learn the keymaps without
     -- memorizing docs up front.
     "folke/which-key.nvim",
+    version = "v3.17.0",
     event = "VeryLazy",
     opts = {},
   },
@@ -12,6 +13,7 @@ return {
     -- editor and terminal read as one surface.
     "rose-pine/neovim",
     name = "rose-pine",
+    version = "v3.0.2",
     priority = 1000,
     config = function()
       require("rose-pine").setup({ variant = "moon" })

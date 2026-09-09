@@ -1,0 +1,300 @@
+#!/usr/bin/env bash
+# Install the repository's externally distributed tool pins without upgrading
+# anything already present. Intended for bootstrap on a fresh user account.
+set -euo pipefail
+
+SELF_DIR=$(cd "$(dirname "$0")" && pwd)
+ROOT=$(cd "$SELF_DIR/.." && pwd)
+PINS_FILE=${DEV_TOOLS_PINS_FILE:-$ROOT/config/dev-tools-versions.sh}
+CURL_BIN=${DEV_TOOLS_INSTALL_CURL_BIN:-curl}
+NPM_BIN=${DEV_TOOLS_INSTALL_NPM_BIN:-npm}
+GIT_BIN=${DEV_TOOLS_INSTALL_GIT_BIN:-git}
+SHA256_BIN=${DEV_TOOLS_INSTALL_SHA256_BIN:-sha256sum}
+SHA512_BIN=${DEV_TOOLS_INSTALL_SHA512_BIN:-sha512sum}
+TAR_BIN=${DEV_TOOLS_INSTALL_TAR_BIN:-tar}
+INSTALL_BIN=${DEV_TOOLS_INSTALL_INSTALL_BIN:-install}
+LOCAL_BIN=${DEV_TOOLS_INSTALL_LOCAL_BIN:-${HOME:?}/.local/bin}
+NPM_PREFIX=${DEV_TOOLS_UPDATE_NPM_PREFIX:-${HOME:?}/.npm-global}
+DRY_RUN=0
+ONLY=
+export PATH="$LOCAL_BIN:$NPM_PREFIX/bin:$PATH"
+
+usage() {
+  cat <<'EOF'
+dev-tools-install-pinned - install exact fresh-machine developer-tool pins.
+
+Usage: dev-tools-install-pinned [--dry-run] [--only TOOL]
+
+Existing commands and repositories are never upgraded or replaced. Exact npm
+versions are re-verified against their recorded registry integrity before npm
+installs them. Release archives are checked against publisher checksums. Herdr
+and no-mistakes are install-if-absent only; this command never starts, stops,
+restarts, reloads, updates, or runs setup hooks for either service.
+
+Cursor is the sole unpinnable exception: upstream offers only a moving beta
+installer and auto-update channel. This command never runs that installer.
+The read-only checker exposes its observed version and installer drift instead.
+See docs/dev-tool-versions.md.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dry-run|-n) DRY_RUN=1 ;;
+    --only) [ "$#" -ge 2 ] || { usage >&2; exit 2; }; ONLY=$2; shift ;;
+    --help|-h) usage; exit 0 ;;
+    *) printf 'dev-tools-install-pinned: unknown argument: %s\n' "$1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+[ -f "$PINS_FILE" ] || { printf 'dev-tools-install-pinned: pins unavailable: %s\n' "$PINS_FILE" >&2; exit 2; }
+# shellcheck source=../config/dev-tools-versions.sh
+# shellcheck disable=SC1091
+source "$PINS_FILE"
+
+selected() { [ -z "$ONLY" ] || [ "$ONLY" = "$1" ]; }
+say() { printf '%s\n' "$*"; }
+
+safe_version() {
+  printf '%s\n' "$1" | grep -Eq '^[0-9]+(\.[0-9]+){2,3}$'
+}
+
+safe_commit() { printf '%s\n' "$1" | grep -Eq '^[0-9a-f]{40}$'; }
+
+installed_version() {
+  local command_name=$1 out
+  command -v "$command_name" >/dev/null 2>&1 || return 1
+  out=$(env NO_UPDATE_NOTIFIER=1 "$command_name" --version 2>/dev/null) || return 1
+  printf '%s\n' "$out" | grep -Eo '[0-9]+(\.[0-9]+){2,3}(-[0-9A-Za-z]+)?' | head -1
+}
+
+install_npm_pin() {
+  local name=$1 command_name=$2 package=$3 version=$4 integrity=$5 _guarded=$6 _channel=$7 actual registry_json registry_version registry_integrity
+  selected "$name" || return 0
+  if command -v "$command_name" >/dev/null 2>&1; then
+    actual=$(installed_version "$command_name" || printf unknown)
+    say "skip $name: installed $actual (pin $version; compare with dev-tools-check-updates)"
+    return 0
+  fi
+  safe_version "$version" || { say "refuse $name: unsafe exact version '$version'" >&2; return 1; }
+  if [ "$DRY_RUN" -eq 1 ]; then
+    say "would install $package@$version (integrity $integrity)"
+    return 0
+  fi
+  registry_json=$($NPM_BIN view "$package@$version" version dist.integrity --json 2>/dev/null || true)
+  registry_version=$(printf '%s' "$registry_json" | jq -r '.version // ""' 2>/dev/null || true)
+  registry_integrity=$(printf '%s' "$registry_json" | jq -r '."dist.integrity" // .dist.integrity // ""' 2>/dev/null || true)
+  if [ "$registry_version" != "$version" ] || [ "$registry_integrity" != "$integrity" ]; then
+    say "refuse $name: registry version or integrity differs from the recorded pin" >&2
+    return 1
+  fi
+  NPM_CONFIG_PREFIX="$NPM_PREFIX" "$NPM_BIN" install -g "$package@$version"
+  actual=$(installed_version "$command_name" || true)
+  [ "$actual" = "$version" ] || { say "refuse $name: installed version '${actual:-unknown}' != pin $version" >&2; return 1; }
+  say "installed $name $version"
+}
+
+platform() {
+  local os arch
+  case "$(uname -s)" in Darwin) os=darwin ;; Linux) os=linux ;; *) return 1 ;; esac
+  case "$(uname -m)" in x86_64|amd64) arch=amd64 ;; arm64|aarch64) arch=arm64 ;; *) return 1 ;; esac
+  printf '%s-%s\n' "$os" "$arch"
+}
+
+sha_for() {
+  local wanted=$1 row key tree_sha nm_sha herdr_sha
+  for row in "${RELEASE_SHA256_PINS[@]}"; do
+    IFS='|' read -r key tree_sha nm_sha herdr_sha <<<"$row"
+    [ "$key" = "$PLATFORM" ] || continue
+    case "$wanted" in treehouse) printf '%s\n' "$tree_sha" ;; no-mistakes) printf '%s\n' "$nm_sha" ;; herdr) printf '%s\n' "$herdr_sha" ;; esac
+    return 0
+  done
+  return 1
+}
+
+fetch() {
+  $CURL_BIN -fsSL --connect-timeout 10 --max-time 120 "$1" -o "$2"
+}
+
+verify_sha256() {
+  local file=$1 expected=$2 actual
+  actual=$($SHA256_BIN "$file" | awk '{print $1}')
+  [ "$actual" = "$expected" ]
+}
+
+install_release_tool() {
+  local name=$1 version=$2 expected filename url tmp binary
+  selected "$name" || return 0
+  safe_version "$version" || { say "refuse $name: unsafe stable version '$version'" >&2; return 1; }
+  if command -v "$name" >/dev/null 2>&1; then
+    say "skip $name: installed $(installed_version "$name" || printf unknown) (pin $version; report-only)"
+    return 0
+  fi
+  expected=$(sha_for "$name") || { say "refuse $name: unsupported platform $PLATFORM" >&2; return 1; }
+  case "$name" in
+    treehouse)
+      filename="treehouse-v${version}-${PLATFORM}.tar.gz"
+      url="https://github.com/kunchenguid/treehouse/releases/download/v${version}/${filename}"
+      ;;
+    no-mistakes)
+      filename="no-mistakes-v${version}-${PLATFORM}.tar.gz"
+      url="https://github.com/kunchenguid/no-mistakes/releases/download/v${version}/${filename}"
+      ;;
+    *) return 2 ;;
+  esac
+  if [ "$DRY_RUN" -eq 1 ]; then
+    say "would install $name $version from $url (sha256 $expected)"
+    return 0
+  fi
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/dev-tool-install.XXXXXX")
+  trap 'rm -rf "$tmp"' RETURN
+  fetch "$url" "$tmp/$filename"
+  verify_sha256 "$tmp/$filename" "$expected" || { say "refuse $name: publisher checksum mismatch" >&2; return 1; }
+  $TAR_BIN -xzf "$tmp/$filename" -C "$tmp"
+  binary="$tmp/$name"
+  [ -f "$binary" ] || { say "refuse $name: archive has no expected binary" >&2; return 1; }
+  mkdir -p "$LOCAL_BIN"
+  $INSTALL_BIN -m 0755 "$binary" "$LOCAL_BIN/$name"
+  say "installed $name $version"
+  trap - RETURN
+  rm -rf "$tmp"
+}
+
+install_herdr() {
+  local expected url tmp actual target
+  selected herdr || return 0
+  safe_version "$HERDR_VERSION" || { say "refuse herdr: unsafe stable version '$HERDR_VERSION'" >&2; return 1; }
+  if command -v herdr >/dev/null 2>&1; then
+    say "skip herdr: installed $(installed_version herdr || printf unknown) (pin $HERDR_VERSION; attended-only)"
+    return 0
+  fi
+  expected=$(sha_for herdr) || { say "refuse herdr: unsupported platform $PLATFORM" >&2; return 1; }
+  case "$PLATFORM" in
+    linux-amd64) target=linux-x86_64 ;;
+    linux-arm64) target=linux-aarch64 ;;
+    darwin-amd64) target=macos-x86_64 ;;
+    darwin-arm64) target=macos-aarch64 ;;
+    *) say "refuse herdr: unsupported platform $PLATFORM" >&2; return 1 ;;
+  esac
+  url="https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-${target}"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    say "would install herdr $HERDR_VERSION from $url (sha256 $expected; never start or restart it)"
+    return 0
+  fi
+  tmp=$(mktemp "${TMPDIR:-/tmp}/herdr.XXXXXX")
+  fetch "$url" "$tmp"
+  verify_sha256 "$tmp" "$expected" || { rm -f "$tmp"; say 'refuse herdr: publisher checksum mismatch' >&2; return 1; }
+  mkdir -p "$LOCAL_BIN"
+  $INSTALL_BIN -m 0755 "$tmp" "$LOCAL_BIN/herdr"
+  rm -f "$tmp"
+  actual=$(installed_version herdr || true)
+  [ "$actual" = "$HERDR_VERSION" ] || { say "refuse herdr: installed version '${actual:-unknown}' != pin $HERDR_VERSION" >&2; return 1; }
+  say "installed herdr $HERDR_VERSION without starting it"
+}
+
+install_antigravity() {
+  local row key url expected tmp archive actual
+  selected agy || selected antigravity || return 0
+  safe_version "$ANTIGRAVITY_VERSION" || { say "refuse agy: unsafe stable version '$ANTIGRAVITY_VERSION'" >&2; return 1; }
+  if command -v agy >/dev/null 2>&1; then
+    say "skip agy: installed $(installed_version agy || printf unknown) (pin $ANTIGRAVITY_VERSION)"
+    return 0
+  fi
+  url=''; expected=''
+  for row in "${ANTIGRAVITY_ASSET_PINS[@]}"; do
+    IFS='|' read -r key url expected <<<"$row"
+    [ "$key" = "$PLATFORM" ] && break
+    url=''; expected=''
+  done
+  [ -n "$url" ] || { say "refuse agy: unsupported platform $PLATFORM" >&2; return 1; }
+  if [ "$DRY_RUN" -eq 1 ]; then
+    say "would install agy $ANTIGRAVITY_VERSION from publisher manifest asset (sha512 $expected)"
+    return 0
+  fi
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/antigravity-install.XXXXXX")
+  archive="$tmp/agy.tar.gz"
+  fetch "$url" "$archive"
+  actual=$($SHA512_BIN "$archive" | awk '{print $1}')
+  [ "$actual" = "$expected" ] || { rm -rf "$tmp"; say 'refuse agy: publisher checksum mismatch' >&2; return 1; }
+  $TAR_BIN -xzf "$archive" -C "$tmp" antigravity
+  mkdir -p "$LOCAL_BIN"
+  $INSTALL_BIN -m 0755 "$tmp/antigravity" "$LOCAL_BIN/agy"
+  rm -rf "$tmp"
+  say "installed agy $ANTIGRAVITY_VERSION"
+}
+
+install_cursor_unavailable() {
+  selected cursor-agent || return 0
+  if command -v cursor-agent >/dev/null 2>&1; then
+    say "skip cursor-agent: installed $(installed_version cursor-agent || printf unknown) (snapshot $CURSOR_AGENT_OBSERVED_VERSION; upstream beta auto-updates)"
+    return 0
+  fi
+  if [ -z "$ONLY" ]; then
+    say 'skip cursor-agent: upstream provides no supported exact-version install; install it separately and audit drift with dev-tools-check-updates'
+    return 0
+  fi
+  say 'refuse cursor-agent: upstream provides no supported exact-version install; install it separately and audit drift with dev-tools-check-updates' >&2
+  return 1
+}
+
+install_repo_pin() {
+  local name=$1 repo=$2 path=$3 rev=$4 checkout_mode=$5 parent tmp checkout
+  selected "$name" || return 0
+  safe_commit "$rev" || { say "refuse $name: unsafe exact commit '$rev'" >&2; return 1; }
+  if [ -d "$path/.git" ]; then
+    say "skip $name: repository exists (compare its HEAD with pin $rev)"
+    return 0
+  fi
+  if [ -e "$path" ]; then
+    say "refuse $name: target exists but is not a Git checkout: $path" >&2
+    return 1
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    say "would clone $repo and check out exact commit $rev into $path"
+    return 0
+  fi
+  parent=${path%/*}; [ "$parent" != "$path" ] || parent=.
+  mkdir -p "$parent"
+  tmp=$(mktemp -d "$parent/.${name}-install.XXXXXX")
+  checkout="$tmp/repository"
+  trap 'rm -rf "$tmp"' RETURN
+  $GIT_BIN clone --quiet --filter=blob:none --no-checkout "$repo" "$checkout"
+  if [ "$checkout_mode" = main ]; then
+    $GIT_BIN -C "$checkout" checkout --quiet -B main "$rev"
+    $GIT_BIN -C "$checkout" branch --set-upstream-to=origin/main main >/dev/null 2>&1 || true
+  else
+    $GIT_BIN -C "$checkout" checkout --quiet --detach "$rev"
+  fi
+  [ "$($GIT_BIN -C "$checkout" rev-parse HEAD)" = "$rev" ] || { say "refuse $name: checked-out revision does not match pin" >&2; return 1; }
+  mv "$checkout" "$path"
+  trap - RETURN
+  rm -rf "$tmp"
+}
+
+PLATFORM=$(platform) || { say 'dev-tools-install-pinned: unsupported operating system or architecture' >&2; exit 1; }
+
+matched=0
+for row in "${NPM_TOOL_PINS[@]}"; do
+  IFS='|' read -r name command_name package version integrity guarded channel <<<"$row"
+  if selected "$name"; then matched=1; fi
+  install_npm_pin "$name" "$command_name" "$package" "$version" "$integrity" "$guarded" "$channel"
+done
+
+for name in treehouse no-mistakes; do
+  selected "$name" && matched=1
+  case "$name" in
+    treehouse) install_release_tool "$name" "$TREEHOUSE_VERSION" ;;
+    no-mistakes) install_release_tool "$name" "$NO_MISTAKES_VERSION" ;;
+  esac
+done
+selected herdr && matched=1; install_herdr
+(selected agy || selected antigravity) && matched=1; install_antigravity
+selected cursor-agent && matched=1; install_cursor_unavailable
+selected firstmate && matched=1; install_repo_pin firstmate https://github.com/kunchenguid/firstmate.git "${DEV_TOOLS_FIRSTMATE_PATH:-$HOME/firstmate}" "$FIRSTMATE_REV" main
+selected baby-menu && matched=1; install_repo_pin baby-menu https://github.com/kunchenguid/baby-menu.git "${DEV_TOOLS_BABY_MENU_PATH:-$HOME/baby-menu}" "$BABY_MENU_REV" detached
+
+if [ -n "$ONLY" ] && [ "$matched" -eq 0 ]; then
+  say "dev-tools-install-pinned: unknown tool: $ONLY" >&2
+  exit 2
+fi

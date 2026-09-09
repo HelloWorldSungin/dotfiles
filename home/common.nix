@@ -3,9 +3,17 @@
 let
   dotfiles = "${config.home.homeDirectory}/dotfiles";
   link = path: config.lib.file.mkOutOfStoreSymlink "${dotfiles}/${path}";
+  devToolsPins = pkgs.writeText "dev-tools-versions.sh" (builtins.readFile ../config/dev-tools-versions.sh);
+  devToolsFlakeLock = pkgs.writeText "flake.lock" (builtins.readFile ../flake.lock);
+  nvimPluginLock = pkgs.writeText "nvim-lazy-lock.json" (builtins.readFile ../config/nvim/lazy-lock.json);
   devToolsUpdateChecker = pkgs.writeShellApplication {
     name = "dev-tools-check-updates";
-    text = builtins.readFile ../bin/dev-tools-check-updates;
+    text = ''
+      export DEV_TOOLS_PINS_FILE=${devToolsPins}
+      export DEV_TOOLS_FLAKE_LOCK_FILE=${devToolsFlakeLock}
+      export DEV_TOOLS_NVIM_LOCK_FILE=${nvimPluginLock}
+      ${builtins.readFile ../bin/dev-tools-check-updates}
+    '';
     bashOptions = [ ]; # The checker deliberately handles source failures itself.
     runtimeInputs = with pkgs; [
       coreutils
@@ -17,6 +25,14 @@ let
       jq
       nodejs_22
     ];
+  };
+  devToolsPinnedInstaller = pkgs.writeShellApplication {
+    name = "dev-tools-install-pinned";
+    text = ''
+      export DEV_TOOLS_PINS_FILE=${devToolsPins}
+      ${builtins.readFile ../bin/dev-tools-install-pinned}
+    '';
+    runtimeInputs = with pkgs; [ coreutils curl gawk git gnugrep gnutar jq nodejs_22 ];
   };
   codexSetContextWindow = pkgs.writeShellApplication {
     name = "codex-set-context-window";
@@ -31,6 +47,7 @@ in
 
   home.packages = with pkgs; [
     devToolsUpdateChecker
+    devToolsPinnedInstaller
     gh
     lazygit
     nodejs_22
@@ -62,6 +79,12 @@ in
     defaultEditor = true;
     viAlias = true;
     vimAlias = true;
+    # Preserve the pre-26.05 provider defaults explicitly across channel updates.
+    withPython3 = true;
+    withRuby = true;
+    # Home Manager 26.05 generates provider Lua. Keep it in the wrapper so it
+    # does not collide with the live out-of-store nvim configuration tree.
+    sideloadInitLua = true;
   };
   xdg.configFile."nvim".source = link "config/nvim";
 
@@ -84,8 +107,8 @@ in
   home.file.".pi/agent/extensions/fusion-harness".source = link "pi/extensions/fusion-harness";
 
   # ------------------------------------------------- pi model overrides
-  # Opts GPT-5.6 Sol, GPT-5.6 Terra and GPT-6 Astra into OpenAI's 1,050,000-token
-  # long-context window. `modelOverrides` patches the three built-in models in
+  # Opts GPT-5.6 Sol and GPT-5.6 Terra into OpenAI's 1,050,000-token long-context
+  # window. `modelOverrides` patches the two built-in models in
   # place, so the rest of the openai-codex catalog (Luna included) keeps its
   # 272,000 default and every built-in model's pricing metadata is preserved.
   # See docs/agents.md.
@@ -130,7 +153,7 @@ in
       cca = "claude --enable-auto-mode";
       ccar = "claude --enable-auto-mode -r";
       ccm = "claude-monitor --plan max20 --theme dark";
-      cspend = "npx claude-spend";
+      cspend = "npx -y claude-spend@1.0.6";
       pi-fusion = "pi -e $HOME/.pi/agent/extensions/fusion-harness/fusion-harness.ts --architect openai-codex/gpt-5.6-sol --architect-thinking xhigh --builder zai/glm-5.2 --builder-thinking max";
 
       # ArkNode AI & LOQ server management

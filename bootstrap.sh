@@ -5,6 +5,8 @@
 set -euo pipefail
 
 DOTFILES="$HOME/dotfiles"
+PINS_FILE="$DOTFILES/config/dev-tools-versions.sh"
+PINNED_INSTALLER="$DOTFILES/bin/dev-tools-install-pinned"
 IS_DARWIN=false
 if [ "$(uname -s)" = "Darwin" ]; then
   IS_DARWIN=true
@@ -19,17 +21,20 @@ if [ "$(cd "$(dirname "$0")" && pwd)" != "$DOTFILES" ]; then
   exit 1
 fi
 
+# shellcheck source=config/dev-tools-versions.sh
+# shellcheck disable=SC1091
+source "$PINS_FILE"
+
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 
-install_if_missing() {
-  local name="$1"
-  shift
-  if command -v "$name" >/dev/null 2>&1; then
-    echo "  ✓ $name is already installed, skipping."
+verify_sha256() {
+  local file=$1 expected=$2 actual
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual=$(sha256sum "$file" | awk '{print $1}')
   else
-    echo "  -> Installing $name..."
-    "$@"
+    actual=$(shasum -a 256 "$file" | awk '{print $1}')
   fi
+  [ "$actual" = "$expected" ]
 }
 
 step "1/6 Nix (Determinate, multi-user daemon)"
@@ -37,10 +42,21 @@ if command -v nix >/dev/null 2>&1; then
   echo "  ✓ Nix is already installed."
 elif [ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
   echo "  -> Sourcing existing Nix daemon profile..."
+  # shellcheck disable=SC1091
   . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
 else
-  echo "  -> Installing Nix via Determinate Systems installer..."
-  curl -fsSL https://install.determinate.systems/nix | sh -s -- install --no-confirm
+  echo "  -> Installing Nix via exact Determinate installer v${NIX_INSTALLER_VERSION}..."
+  NIX_INSTALLER_TMP=$(mktemp "${TMPDIR:-/tmp}/nix-installer.XXXXXX")
+  trap 'rm -f "$NIX_INSTALLER_TMP"' EXIT
+  curl -fsSL "$NIX_INSTALLER_SCRIPT_URL" -o "$NIX_INSTALLER_TMP"
+  verify_sha256 "$NIX_INSTALLER_TMP" "$NIX_INSTALLER_SCRIPT_SHA256" || {
+    echo "Determinate installer checksum mismatch; refusing to execute it." >&2
+    exit 1
+  }
+  sh "$NIX_INSTALLER_TMP" install --no-confirm
+  rm -f "$NIX_INSTALLER_TMP"
+  trap - EXIT
+  # shellcheck disable=SC1091
   . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
 fi
 nix --version
@@ -49,7 +65,7 @@ step "2/6 home-manager switch (packages, zsh, nvim, symlinks)"
 if command -v home-manager >/dev/null 2>&1; then
   home-manager switch --flake "$DOTFILES#$FLAKE_TARGET" -b backup
 else
-  nix run github:nix-community/home-manager/release-25.11 -- \
+  nix run "github:nix-community/home-manager/${HOME_MANAGER_REV}" -- \
     switch --flake "$DOTFILES#$FLAKE_TARGET" -b backup
 fi
 
@@ -85,46 +101,20 @@ elif [ -x "$ZSH_PATH" ]; then
   fi
 fi
 
-step "4/6 herdr (session layer)"
-if command -v herdr >/dev/null 2>&1; then
-  echo "  ✓ herdr is already installed."
-else
-  echo "  -> Installing herdr..."
-  curl -fsSL https://herdr.dev/install.sh | sh
-fi
-command -v herdr >/dev/null 2>&1 && herdr --version || true
+step "4/6 herdr (session layer, exact install-if-absent pin)"
+"$PINNED_INSTALLER" --only herdr
 
 step "5/6 agent harnesses (fast-moving CLIs)"
-install_if_missing claude bash -c "curl -fsSL https://claude.ai/install.sh | bash"
-install_if_missing codex npm install -g @openai/codex
-install_if_missing opencode bash -c "curl -fsSL https://opencode.ai/install | bash"
-[ -x "$HOME/.opencode/bin/opencode" ] && ln -sf "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode"
-install_if_missing pi npm install -g @mariozechner/pi-coding-agent
-install_if_missing agy bash -c "curl -fsSL https://antigravity.google/cli/install.sh | bash"
-install_if_missing cursor-agent bash -c "curl https://cursor.com/install -fsS | bash"
+for tool in claude codex opencode pi agy; do
+  "$PINNED_INSTALLER" --only "$tool"
+done
+echo "  - Skipping cursor-agent: upstream has no supported exact-version install."
+echo "    The read-only checker reports its moving beta snapshot and drift."
 
 step "6/6 agent toolchain (Kun Chen stack)"
-install_if_missing treehouse bash -c "curl -fsSL https://kunchenguid.github.io/treehouse/install.sh | sh"
-install_if_missing no-mistakes bash -c "curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh"
-install_if_missing gnhf npm install -g gnhf
-install_if_missing gh-axi npm install -g gh-axi
-install_if_missing tasks-axi npm install -g tasks-axi
-install_if_missing quota-axi npm install -g quota-axi
-install_if_missing chrome-devtools-axi npm install -g chrome-devtools-axi
-
-if [ -d "$HOME/firstmate" ]; then
-  echo "  ✓ firstmate repository is already cloned."
-else
-  echo "  -> Cloning firstmate repository..."
-  git clone https://github.com/kunchenguid/firstmate.git "$HOME/firstmate"
-fi
-
-if [ -d "$HOME/baby-menu" ]; then
-  echo "  ✓ baby-menu repository is already cloned."
-else
-  echo "  -> Cloning baby-menu repository..."
-  git clone https://github.com/kunchenguid/baby-menu.git "$HOME/baby-menu"
-fi
+for tool in treehouse no-mistakes gnhf gh-axi tasks-axi quota-axi chrome-devtools-axi lavish-axi firstmate baby-menu; do
+  "$PINNED_INSTALLER" --only "$tool"
+done
 
 echo
 echo "Done. Open a NEW login shell (or 'exec zsh'), then log in once to each"

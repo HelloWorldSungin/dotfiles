@@ -24,7 +24,7 @@ Two components:
 
 The entry point. It declares:
 
-- **inputs**: where packages come from - `nixpkgs` pinned to the `nixos-25.11`
+- **inputs**: where packages come from - `nixpkgs` pinned to the `nixos-26.05`
   release branch, and `home-manager` matching it. Pinning means a rebuild
   next month installs the same versions as today. Updating is an explicit
   act: `nix flake update` (which rewrites `flake.lock` - commit that file).
@@ -59,7 +59,9 @@ home-manager generations # list previous environments...
 
 ## Why harness CLIs are NOT in Nix
 
-Fast-moving agent harness CLIs self-update and release frequently; nixpkgs
-versions lag. They're installed by `bootstrap.sh` via their official
-installers into user-writable prefixes (`~/.local/bin`, `~/.npm-global/bin`).
-The *decision* is still recorded in the repo - the script is the manifest.
+Fast-moving agent harness CLIs release frequently and nixpkgs versions lag.
+`bootstrap.sh` delegates their install-if-absent path to
+`bin/dev-tools-install-pinned`, which installs exact npm versions with registry
+integrity verification or exact publisher assets with recorded checksums into
+user-writable prefixes (`~/.local/bin`, `~/.npm-global/bin`). The central record
+and known upstream limitations are documented in `docs/dev-tool-versions.md`.

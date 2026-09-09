@@ -14,19 +14,22 @@ This file is the project's committed home for project-intrinsic agent knowledge:
      first executes the stale pre-merge copy, silently - this has already cost a
      debugging cycle.
   2. A `home-manager switch` never installs or refreshes the agent CLIs
-     (`claude`, `codex`, `opencode`, `pi`, ...). They are curl/npm installers in
-     `bootstrap.sh` step 5/6, deliberately outside Nix (`docs/nix.md` records why).
+     (`claude`, `codex`, `opencode`, `pi`, ...). `bootstrap.sh` delegates their
+     exact install-if-absent path to `bin/dev-tools-install-pinned`, deliberately
+     outside Nix (`docs/dev-tool-versions.md` owns the complete inventory).
      `bootstrap.sh` is the superset - it runs the switch itself as step 2/6 - but
      it is install-if-missing, so it never upgrades a CLI that is already present.
   3. A running herdr does not automatically re-read `config/herdr/config.toml`
      even though the file is a live symlink; use `herdr server reload-config`.
      Never restart the captain's herdr to apply a config - it hosts the live fleet.
-- The personal tool update checker lives in `bin/dev-tools-check-updates`, its
+- `config/dev-tools-versions.sh` owns external tool pins and source metadata.
+  The read-only checker lives in `bin/dev-tools-check-updates`, its
   deterministic self-test is in `tests/`, and `home/sungin-ct110.nix` owns its
   package, timer, and zsh startup wiring.
 - `bin/dev-tools-apply-updates` is the guarded, opt-in companion that applies only
-  the two safe tiers the checker tracks (firstmate fast-forward + the allowlisted
-  npm-global axi tools); it delegates detection to the checker, refuses when any
+  the two safe tiers the checker tracks (Firstmate exact fast-forward plus six
+  allowlisted npm-global tools); it delegates detection to the checker, independently
+  re-verifies exact artifacts, refuses when any
   Firstmate worker lane is in flight (a `state/*.meta` file, mirroring
   `firstmate/bin/fm-supervision-lib.sh`), and is packaged on PATH with no timer.
   Its `--help` is authoritative; the self-test sits beside the checker's in `tests/`.
@@ -34,7 +37,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   TUI state) and must never be replaced or symlinked to a repo file. Home Manager
   owns exactly one key in it, `model_context_window`, through the atomic
   idempotent merge in `bin/codex-set-context-window`; `docs/agents.md` records the
-  GPT long-context values (Sol, Terra, Astra), why pi (1,050,000) and Codex
+  GPT long-context values (Sol and Terra), why pi (1,050,000) and Codex
   (872,000) differ, and the command that re-verifies Codex's advertised ceilings
   against an upgraded binary.
 - Nix flakes only read git-tracked files: `git add` any new `bin/`/`home/` file

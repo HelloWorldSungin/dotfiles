@@ -55,14 +55,14 @@ re-copy the file when you want a newer version. It expects each vault repo to
 carry its own `vault/_meta/` OKF tooling (they already do); the skill is pure
 instructions.
 
-## GPT long context (Sol, Terra and Astra)
+## GPT long context (Sol and Terra)
 
 Both harnesses default these models to a 272,000-token window; each is opted in
 separately, and the two ceilings are **not** the same.
 
 | Harness | Mechanism | Effective window |
 |---------|-----------|------------------|
-| pi | `pi/models.json` → `~/.pi/agent/models.json`, `providers.openai-codex.modelOverrides` | **1,050,000** for `gpt-5.6-sol`, `gpt-5.6-terra` and `gpt-6-astra` |
+| pi | `pi/models.json` → `~/.pi/agent/models.json`, `providers.openai-codex.modelOverrides` | **1,050,000** for exactly `gpt-5.6-sol` and `gpt-5.6-terra` |
 | codex | global `model_context_window` in `~/.codex/config.toml` | **872,000** for `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` and `gpt-6-astra`; models with a lower `max_context_window` keep their own ceiling |
 
 Pi's 1,050,000 is a *local* override: it governs pi's own context accounting and
@@ -82,7 +82,7 @@ reaches the full 872,000 on `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`,
 advertising less keep their own lower ceiling (`gpt-daybreak-red-latest`
 372,000; `gpt-5.5`, `gpt-5.4-mini` and `gpt-5.2` 272,000), and `gpt-5.4`, which
 advertises 1,000,000, is held to the configured 872,000. Pi's overrides are
-per-model, so Luna stays at 272,000 there.
+per-model, so Luna and Astra stay at 272,000 there.
 
 To re-verify against an upgraded Codex, read the catalog the installed binary
 embeds rather than trusting this list (npm installs exactly one platform

@@ -39,8 +39,12 @@ git clone https://github.com/HelloWorldSungin/dotfiles.git ~/dotfiles
 cd ~/dotfiles && ./bootstrap.sh
 ```
 
-That installs Nix, applies the home-manager config, sets zsh, installs herdr
-and the agent harnesses. Then log in to each harness once (`claude`, etc.).
+That installs the exact recorded Nix installer, applies the locked Home Manager
+configuration, sets zsh, and installs the exact external tool pins. Existing
+tools are reported rather than upgraded. See
+[docs/dev-tool-versions.md](docs/dev-tool-versions.md) for pin ownership and the
+attended runtime upgrade sequence. Then log in to each harness once (`claude`,
+etc.).
 
 ## Daily operations
 
@@ -48,7 +52,8 @@ and the agent harnesses. Then log in to each harness once (`claude`, etc.).
 |------------------------------------|---------|
 | Add/remove a package               | edit `home/sungin-ct110.nix`, then `rebuild` (alias) |
 | Change nvim/herdr config           | just edit it - symlinks make it live; commit when happy |
-| Update all pinned packages         | `nix flake update && ./rebuild.sh` |
+| Audit installed, pinned, and latest stable tools | `dev-tools-check-updates --force` |
+| Refresh declared pins | update `config/dev-tools-versions.sh` and lock files from authoritative stable feeds, test, then rebuild |
 | Preview/apply guarded CT110 tool updates | `dev-tools-apply-updates --dry-run`, then `dev-tools-apply-updates` (`--help` documents its scope) |
 | See what a rebuild would change    | `git diff` before running `rebuild` |
 | Start / reattach sessions          | `ssh ct110` then `herdr` -> [docs/herdr.md](docs/herdr.md) |
@@ -98,8 +103,8 @@ text only and CT110 is headless. Two bridges:
   Optional clipboard-image mode: `brew install pngpaste`.
 - **`herdr --remote ct110`** (slicker, verify first): thin-client mode bridges
   the Mac clipboard incl. image paste into the remote session. Requires
-  `brew install herdr` on the Mac; test that a pasted image actually reaches
-  the agent before relying on it.
+  the exact Herdr pin installed by this repository's bootstrap; test that a
+  pasted image actually reaches the agent before relying on it.
 
 ## Docs
 
@@ -108,6 +113,7 @@ text only and CT110 is headless. Two bridges:
 - [docs/nvim.md](docs/nvim.md) - every plugin and why it's there
 - [docs/herdr.md](docs/herdr.md) - sessions explained for non-tmux people
 - [docs/agents.md](docs/agents.md) - the shared memory file and harness logins
+- [docs/dev-tool-versions.md](docs/dev-tool-versions.md) - complete tool pins, authorities, update boundaries, and limitations
 - [docs/cheatsheet.md](docs/cheatsheet.md) - every keybind (nvim, zsh, herdr) on one page
 
 ## Layout
