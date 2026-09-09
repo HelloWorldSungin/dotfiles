@@ -3,10 +3,14 @@
 # home/*.nix (config/ changes need no rebuild - they're live symlinks).
 set -euo pipefail
 cd "$HOME/dotfiles"
+# shellcheck source=config/dev-tools-versions.sh
+# shellcheck disable=SC1091
+source config/dev-tools-versions.sh
 
 # Ensure nix is in PATH if installed on the system
 if ! command -v nix >/dev/null 2>&1; then
   if [ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
+    # shellcheck disable=SC1091
     . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
   fi
 fi
@@ -23,6 +27,7 @@ fi
 if command -v home-manager >/dev/null 2>&1; then
   home-manager switch --flake ".#$TARGET" -b backup
 else
-  nix run github:nix-community/home-manager/release-25.11 -- \
+  # Keep the fallback exact too. The central tool record matches flake.lock.
+  nix run "github:nix-community/home-manager/$HOME_MANAGER_REV" -- \
     switch --flake ".#$TARGET" -b backup
 fi

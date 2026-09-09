@@ -3,6 +3,7 @@ return {
   {
     -- Neogit: full git UI (status, diffs, staging, commits).
     "NeogitOrg/neogit",
+    version = "v2.0.0",
     dependencies = {
       "nvim-lua/plenary.nvim",
       "sindrets/diffview.nvim",
@@ -41,6 +42,7 @@ return {
   {
     -- Gitsigns: change markers in the gutter + inline blame + change navigation.
     "lewis6991/gitsigns.nvim",
+    version = "v2.1.0",
     event = { "BufReadPre", "BufNewFile" },
     opts = {
       current_line_blame = true,

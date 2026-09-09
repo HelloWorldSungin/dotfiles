@@ -1,556 +1,450 @@
 #!/usr/bin/env bash
-# Self-contained behavior tests for bin/dev-tools-apply-updates.
-#
-# The firstmate fast-forward runs against a real local file:// repository so the
-# ff merge actually happens and is observable. Detection is served by an injected
-# fake dev-tools-check-updates, and npm is an injected recorder. The worker guard
-# reads an injected state directory. No test contacts the network.
-set -u
+# Hermetic behavior tests for exact guarded convergence. No live tool is touched.
+set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 APPLY="$ROOT/bin/dev-tools-apply-updates"
-TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/dev-tools-apply-updates-tests.XXXXXX")
+TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/dev-tools-apply-tests.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
-fail() {
-  printf 'not ok - %s\n' "$1" >&2
-  exit 1
-}
+fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
+pass() { printf 'ok - %s\n' "$1"; }
 
-pass() {
-  printf 'ok - %s\n' "$1"
-}
+SEED="$TMP_ROOT/seed"
+REMOTE="$TMP_ROOT/origin.git"
+CHECKOUT="$TMP_ROOT/firstmate"
+mkdir -p "$SEED"
+git -C "$SEED" init -q -b main
+printf 'one\n' >"$SEED/version"
+git -C "$SEED" add version
+git -C "$SEED" commit -qm one
+git clone -q --bare "$SEED" "$REMOTE"
+git clone -q "file://$REMOTE" "$CHECKOUT"
+printf 'two\n' >>"$SEED/version"
+git -C "$SEED" commit -qam two
+PINNED_HEAD=$(git -C "$SEED" rev-parse HEAD)
+git -C "$SEED" push -q "file://$REMOTE" main
 
-assert_contains() {
-  case "$1" in
-    *"$2"*) ;;
-    *) fail "$3" ;;
-  esac
-}
-
-assert_not_contains() {
-  case "$1" in
-    *"$2"*) fail "$3" ;;
-    *) ;;
-  esac
-}
-
-# Build a checkout on branch trunk sitting one commit behind origin/trunk, so a
-# fast-forward is available and observable.
-make_git_world() {
-  local name=$1 base seed remote checkout
-  base="$TMP_ROOT/$name"
-  seed="$base/seed"
-  remote="$base/origin.git"
-  checkout="$base/checkout"
-  mkdir -p "$seed"
-  git -C "$seed" init -q -b trunk
-  printf 'one\n' > "$seed/version.txt"
-  git -C "$seed" add version.txt
-  git -C "$seed" commit -qm one
-  git clone -q --bare "$seed" "$remote"
-  git clone -q "file://$remote" "$checkout"
-  printf 'two\n' >> "$seed/version.txt"
-  git -C "$seed" commit -qam two
-  git -C "$seed" push -q "file://$remote" trunk
-  printf '%s\n' "$checkout"
-}
-
-make_fixture_tools() {
-  local base=$1 fakebin="$1/fakebin"
-  mkdir -p "$fakebin"
-  cat > "$fakebin/npm-fixture" <<'SH'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >> "$TEST_NPM_LOG"
-if [ "${3:-}" = view ]; then
-  name=${4%@latest}
-  latest=$(jq -r --arg name "$name" '.[$name] // empty' "$TEST_NPM_LATEST_JSON")
-  [ -n "$latest" ] || exit 1
-  jq -cn --arg latest "$latest" '$latest'
-  exit 0
-fi
-if [ -n "${TEST_CREATE_LANE_AFTER_NPM_INSTALL:-}" ] && [ ! -e "$TEST_CREATE_LANE_AFTER_NPM_INSTALL" ]; then
-  printf 'worktree=/somewhere\n' > "$TEST_CREATE_LANE_AFTER_NPM_INSTALL"
-fi
-exit "${TEST_NPM_RC:-0}"
-SH
-  cat > "$fakebin/checker-fixture" <<'SH'
-#!/usr/bin/env bash
-# Ignores --json/--force; emits the prepared detection object.
-if [ -n "${TEST_CREATE_LANE_DURING_DETECTION:-}" ]; then
-  printf 'worktree=/somewhere\n' > "$TEST_CREATE_LANE_DURING_DETECTION"
-fi
-cat "$FAKE_CHECKER_JSON"
-SH
-  cat > "$fakebin/herdr-fixture" <<'SH'
-#!/usr/bin/env bash
-# herdr is report-only: apply-updates MUST NEVER invoke it. If this fixture
-# ever runs, the test gate has been breached and we fail loud.
-printf 'herdr invoked: %s\n' "$*" >> "$TEST_HERDR_INVOCATION_LOG"
-exit 127
-SH
-  cat > "$fakebin/git-fixture" <<'SH'
-#!/usr/bin/env bash
-is_fetch=0
-repo=
-previous=
-for arg in "$@"; do
-  if [ "$previous" = -C ]; then
-    repo=$arg
-  fi
-  [ "$arg" = fetch ] && is_fetch=1
-  previous=$arg
+PINS="$TMP_ROOT/pins.sh"
+cp "$ROOT/config/dev-tools-versions.sh" "$PINS"
+printf '\nFIRSTMATE_REV=%s\n' "$PINNED_HEAD" >>"$PINS"
+# shellcheck source=../config/dev-tools-versions.sh
+# shellcheck disable=SC1091
+source "$PINS"
+for row in "${NPM_TOOL_PINS[@]}"; do
+  IFS='|' read -r name command_name _package version _integrity _guarded _channel <<<"$row"
+  [ "$name" = quota-axi ] && QUOTA_AXI_VERSION=$version && QUOTA_COMMAND=$command_name
 done
-"$TEST_REAL_GIT" "$@"
-rc=$?
-if [ "$rc" -eq 0 ] && [ "$is_fetch" -eq 1 ] &&
-   [ -n "${TEST_SWITCH_BRANCH_AFTER_FETCH:-}" ] &&
-   [ ! -e "$TEST_SWITCH_BRANCH_MARKER" ]; then
-  : > "$TEST_SWITCH_BRANCH_MARKER"
-  "$TEST_REAL_GIT" -C "$repo" checkout -q -b "$TEST_SWITCH_BRANCH_AFTER_FETCH"
-fi
-exit "$rc"
-SH
-  chmod +x "$fakebin"/*
-  printf '%s\n' "$fakebin"
-}
+: "${QUOTA_AXI_VERSION:?quota-axi pin missing}"
+: "${QUOTA_COMMAND:?quota-axi command missing}"
+QUOTA_PRIOR=0.0.1
 
-# Emit a checker detection JSON. Args:
-#   $1 firstmate status (update_available|up_to_date|unknown)
-#   $2 firstmate default branch
-#   $3 firstmate behind
-#   $4 npm status (update_available|up_to_date|unknown)
-#   $5 npm packages JSON array
-#   $6 (optional) herdr status (update_available|up_to_date|unknown) - default
-#       update_available so a hostile or stale detection cannot accidentally
-#       look like an honored herdr update.
-write_detection() {
-  local herdr_status=${6:-update_available} herdr_current herdr_latest
-  case "$herdr_status" in
-    update_available) herdr_current=0.7.4; herdr_latest=v0.7.5 ;;
-    up_to_date)       herdr_current=0.7.5; herdr_latest=v0.7.5 ;;
-    *)                herdr_current=unknown; herdr_latest=unknown ;;
-  esac
-  jq -cn \
-    --arg fm_status "$1" --arg branch "$2" --argjson behind "$3" \
-    --arg npm_status "$4" --argjson packages "$5" \
-    --arg herdr_status "$herdr_status" --arg herdr_current "$herdr_current" --arg herdr_latest "$herdr_latest" '
-    {schema_version:1,
-     sources:{
-       firstmate:{status:$fm_status,default_branch:$branch,behind:$behind},
-       npm_global:{status:$npm_status,packages:$packages},
-       treehouse:{status:"up_to_date"},
-       no_mistakes:{status:"up_to_date"},
-       herdr:{status:$herdr_status,current:$herdr_current,latest:$herdr_latest},
-       nix_pinned:{status:"excluded"}}}' > "$FAKE_CHECKER_JSON"
-  jq '.sources.npm_global.packages | map({key:.name,value:.latest}) | from_entries' \
-    "$FAKE_CHECKER_JSON" > "$TEST_NPM_LATEST_JSON"
+FAKEBIN="$TMP_ROOT/fakebin"
+PREFIX="$TMP_ROOT/npm-prefix"
+STATE="$TMP_ROOT/state"
+mkdir -p "$FAKEBIN" "$PREFIX/bin" "$STATE"
+RECEIPTS="$TMP_ROOT/receipts"
+mkdir -p "$RECEIPTS"
+NPM_LOG="$TMP_ROOT/npm.log"
+CHECKER_LOG="$TMP_ROOT/checker.log"
+LIFECYCLE_LOG="$TMP_ROOT/lifecycle.log"
+: >"$NPM_LOG"; : >"$CHECKER_LOG"; : >"$LIFECYCLE_LOG"
+
+cat >"$FAKEBIN/checker" <<'SH'
+#!/usr/bin/env bash
+set -eu
+printf '%s\n' "$*" >>"$TEST_CHECKER_LOG"
+[ "${TEST_INVALID_CHECKER:-0}" = 1 ] && { printf '{}\n'; exit 0; }
+# shellcheck source=/dev/null
+source "$TEST_PINS"
+tools=$(jq -cn --arg current "$(git -C "$TEST_FIRSTMATE" rev-parse HEAD)" --arg pin "$FIRSTMATE_REV" \
+  '[{name:"firstmate",current:$current,pinned:$pin,latest_stable:$pin,status:(if $current==$pin then "up_to_date" else "drifted" end)}]')
+for row in "${NPM_TOOL_PINS[@]}"; do
+  IFS='|' read -r name command_name _package pinned _integrity guarded _channel <<<"$row"
+  [ "$guarded" = yes ] || continue
+  # The installed version comes from the npm prefix, which is where the apply
+  # tier writes and where a reversal would read it back from.
+  current=unknown
+  if [ -x "$TEST_PREFIX/bin/$command_name" ]; then
+    current=$(timeout "${TEST_NETWORK_TIMEOUT:-15}" env NO_UPDATE_NOTIFIER=1 "$TEST_PREFIX/bin/$command_name" --version 2>&1 \
+      | grep -Eo '[0-9]+(\.[0-9]+){1,3}(-[0-9A-Za-z]+)?' | head -1)
+  fi
+  [ -n "$current" ] || current=unknown
+  [ "$name" = quota-axi ] && [ -n "${TEST_QUOTA_CURRENT:-}" ] && current=$TEST_QUOTA_CURRENT
+  latest=$pinned
+  [ "$name" = quota-axi ] && [ -n "${TEST_STALE_CHECKER_LATEST:-}" ] && latest=$TEST_STALE_CHECKER_LATEST
+  item=$(jq -cn --arg name "$name" --arg current "$current" --arg pinned "$pinned" --arg latest "$latest" \
+    '{name:$name,current:$current,pinned:$pinned,latest_stable:$latest,status:(if $current==$pinned then "up_to_date" else "drifted" end)}')
+  tools=$(jq -cn --argjson tools "$tools" --argjson item "$item" '$tools+[$item]')
+done
+# Hostile report-only entries prove that checker output cannot widen apply scope.
+tools=$(jq -cn --argjson tools "$tools" '$tools + [
+  {name:"codex",current:"0.1.0",pinned:"9.9.9",latest_stable:"9.9.9",status:"drifted"},
+  {name:"herdr",current:"0.8.2",pinned:"0.9.0",latest_stable:"0.9.0",status:"drifted"},
+  {name:"no-mistakes",current:"1.60.2",pinned:"1.70.1",latest_stable:"1.70.1",status:"drifted"}
+]')
+jq -cn --argjson tools "$tools" '{schema_version:4,tools:$tools}'
+SH
+
+cat >"$FAKEBIN/npm" <<'SH'
+#!/usr/bin/env bash
+set -eu
+printf '%s\n' "$*" >>"$TEST_NPM_LOG"
+# shellcheck source=/dev/null
+source "$TEST_PINS"
+# Simulates a worker lane starting inside the bounded re-verification window.
+[ -n "${TEST_WORKER_APPEARS:-}" ] && printf 'lane\n' >"$TEST_WORKER_APPEARS"
+if [ "$1" = view ]; then
+  spec=$2
+  package=${spec%@*}
+  version=${spec##*@}
+  for row in "${NPM_TOOL_PINS[@]}"; do
+    IFS='|' read -r name _command_name candidate pinned integrity guarded _channel <<<"$row"
+    [ "$guarded" = yes ] || continue
+    [ "$candidate" = "$package" ] || continue
+    if [ "$version" != "$pinned" ]; then
+      # The installed prior version, published with its own integrity.
+      jq -cn --arg v "$version" --arg i "sha512-prior-$version" '{version:$v,"dist.integrity":$i}'
+      exit 0
+    fi
+    [ "$name" = "${TEST_BAD_PACKAGE:-}" ] && integrity=sha512-wrong
+    jq -cn --arg v "$version" --arg i "$integrity" '{version:$v,"dist.integrity":$i}'
+    exit 0
+  done
+  exit 1
+fi
+if [ "$1" = install ]; then
+  spec=$3
+  for row in "${NPM_TOOL_PINS[@]}"; do
+    IFS='|' read -r _name command_name package pinned _integrity guarded _channel <<<"$row"
+    [ "$guarded" = yes ] || continue
+    [ "$spec" = "$package@$pinned" ] || continue
+    mkdir -p "$NPM_CONFIG_PREFIX/bin"
+    printf '#!/usr/bin/env bash\nprintf "%s %s\\n"\n' "$command_name" "$pinned" >"$NPM_CONFIG_PREFIX/bin/$command_name"
+    chmod +x "$NPM_CONFIG_PREFIX/bin/$command_name"
+    exit 0
+  done
+fi
+exit 1
+SH
+
+cat >"$FAKEBIN/herdr" <<'SH'
+#!/usr/bin/env bash
+printf 'herdr %s\n' "$*" >>"$TEST_LIFECYCLE_LOG"
+exit 99
+SH
+cat >"$FAKEBIN/no-mistakes" <<'SH'
+#!/usr/bin/env bash
+printf 'no-mistakes %s\n' "$*" >>"$TEST_LIFECYCLE_LOG"
+exit 99
+SH
+chmod +x "$FAKEBIN"/*
+
+# Five packages begin current. quota-axi begins at an earlier installed version,
+# so it is the single drifted package and its prior state is really in the prefix.
+seed_prefix() { # command version
+  printf '#!/usr/bin/env bash\nprintf "%s %s\\n"\n' "$1" "$2" >"$PREFIX/bin/$1"
+  chmod +x "$PREFIX/bin/$1"
 }
+seed_quota_prior() { seed_prefix "$QUOTA_COMMAND" "$QUOTA_PRIOR"; }
+quota_version() {
+  [ -x "$PREFIX/bin/$QUOTA_COMMAND" ] || return 0
+  env NO_UPDATE_NOTIFIER=1 "$PREFIX/bin/$QUOTA_COMMAND" --version 2>/dev/null | grep -Eo '[0-9]+(\.[0-9]+){1,3}' | head -1
+}
+for row in "${NPM_TOOL_PINS[@]}"; do
+  IFS='|' read -r name command_name _package pinned _integrity guarded _channel <<<"$row"
+  [ "$guarded" = yes ] || continue
+  [ "$name" = quota-axi ] && continue
+  seed_prefix "$command_name" "$pinned"
+done
+seed_quota_prior
 
 run_apply() {
-  env \
-    HOME="$TEST_HOME" \
-    DEV_TOOLS_FIRSTMATE_PATH="$TEST_REPO" \
-    DEV_TOOLS_FIRSTMATE_STATE_DIR="$TEST_STATE_DIR" \
-    DEV_TOOLS_APPLY_CHECKER_BIN="$TEST_FAKEBIN/checker-fixture" \
-    DEV_TOOLS_UPDATE_GIT_BIN="$TEST_GIT_BIN" \
-    DEV_TOOLS_UPDATE_NPM_BIN="$TEST_FAKEBIN/npm-fixture" \
-    DEV_TOOLS_UPDATE_NPM_PREFIX="$TEST_NPM_PREFIX" \
-    DEV_TOOLS_UPDATE_HERDR_BIN="$TEST_FAKEBIN/herdr-fixture" \
+  env HOME="$TMP_ROOT/home" PATH="$FAKEBIN:/usr/bin:/bin" DEV_TOOLS_PINS_FILE="$PINS" \
+    DEV_TOOLS_APPLY_CHECKER_BIN="$FAKEBIN/checker" DEV_TOOLS_FIRSTMATE_PATH="$CHECKOUT" DEV_TOOLS_FIRSTMATE_STATE_DIR="$STATE" \
+    DEV_TOOLS_FIRSTMATE_REPO="file://$REMOTE" \
+    DEV_TOOLS_UPDATE_NPM_BIN="$FAKEBIN/npm" DEV_TOOLS_UPDATE_NPM_PREFIX="$PREFIX" DEV_TOOLS_UPDATE_GIT_BIN="$(command -v git)" \
+    TEST_PINS="$PINS" TEST_PREFIX="$PREFIX" TEST_FIRSTMATE="$CHECKOUT" TEST_NPM_LOG="$NPM_LOG" TEST_CHECKER_LOG="$CHECKER_LOG" \
+    TEST_LIFECYCLE_LOG="$LIFECYCLE_LOG" TEST_BAD_PACKAGE="${TEST_BAD_PACKAGE:-}" TEST_INVALID_CHECKER="${TEST_INVALID_CHECKER:-0}" \
+    TEST_STALE_CHECKER_LATEST="${TEST_STALE_CHECKER_LATEST:-}" TEST_WORKER_APPEARS="${TEST_WORKER_APPEARS:-}" \
+    TEST_QUOTA_CURRENT="${TEST_QUOTA_CURRENT:-}" TEST_NETWORK_TIMEOUT="${TEST_NETWORK_TIMEOUT:-15}" \
+    DEV_TOOLS_UPDATE_NETWORK_TIMEOUT_SECONDS="${TEST_NETWORK_TIMEOUT:-15}" \
+    DEV_TOOLS_APPLY_RECEIPT_DIR="$RECEIPTS" \
     "$APPLY" "$@"
 }
 
-configure_fixture() {
-  local base=$1
-  TEST_HOME="$base/home"
-  TEST_STATE_DIR="$base/state"
-  TEST_NPM_PREFIX="$base/npm-prefix"
-  TEST_FAKEBIN=$(make_fixture_tools "$base")
-  mkdir -p "$TEST_HOME" "$TEST_STATE_DIR" "$TEST_NPM_PREFIX"
-  FAKE_CHECKER_JSON="$base/detection.json"
-  TEST_NPM_LOG="$base/npm.log"
-  TEST_NPM_LATEST_JSON="$base/npm-latest.json"
-  TEST_HERDR_INVOCATION_LOG="$base/herdr.log"
-  TEST_REAL_GIT=$(command -v git)
-  TEST_GIT_BIN=$TEST_REAL_GIT
-  TEST_SWITCH_BRANCH_AFTER_FETCH=
-  TEST_SWITCH_BRANCH_MARKER="$base/switched-branch"
-  : > "$TEST_NPM_LOG"
-  : > "$TEST_HERDR_INVOCATION_LOG"
-  printf '{}\n' > "$TEST_NPM_LATEST_JSON"
-  TEST_NPM_RC=0
-  TEST_CREATE_LANE_DURING_DETECTION=
-  TEST_CREATE_LANE_AFTER_NPM_INSTALL=
-  export FAKE_CHECKER_JSON TEST_NPM_LOG TEST_NPM_LATEST_JSON TEST_HERDR_INVOCATION_LOG TEST_NPM_RC
-  export TEST_CREATE_LANE_DURING_DETECTION TEST_CREATE_LANE_AFTER_NPM_INSTALL
-  export TEST_REAL_GIT TEST_GIT_BIN TEST_SWITCH_BRANCH_AFTER_FETCH TEST_SWITCH_BRANCH_MARKER
-}
+TEST_STALE_CHECKER_LATEST=9.9.9
+json=$(run_apply --json)
+unset TEST_STALE_CHECKER_LATEST
+[ "$(git -C "$CHECKOUT" rev-parse HEAD)" = "$PINNED_HEAD" ] || fail 'Firstmate did not fast-forward to the exact recorded commit'
+[ "$(printf '%s' "$json" | jq -r '.tiers.firstmate.status')" = applied ] || fail 'Firstmate exact update was not reported applied'
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')" = applied ] || fail 'quota-axi exact pin was not applied'
+grep -Fq "view quota-axi@$QUOTA_AXI_VERSION version dist.integrity --json" "$NPM_LOG" || fail 'exact npm version and integrity were not re-verified'
+grep -Fq "install -g quota-axi@$QUOTA_AXI_VERSION" "$NPM_LOG" || fail 'stale checker latest changed the exact install target'
+! grep -Fq '@openai/codex' "$NPM_LOG" || fail 'checker widened the hard allowlist to Codex'
+[ ! -s "$LIFECYCLE_LOG" ] || fail 'apply invoked Herdr or no-mistakes'
+pass 'guarded apply independently verifies and converges only exact allowlisted pins'
 
-git_head() {
-  git -C "$TEST_REPO" rev-parse HEAD
-}
+: >"$NPM_LOG"
+json=$(run_apply --json)
+[ "$(printf '%s' "$json" | jq -r '.tiers.firstmate.status')" = up_to_date ] || fail 'Firstmate rerun was not idempotent'
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.status')" = up_to_date ] || fail 'npm rerun was not idempotent'
+[ ! -s "$NPM_LOG" ] || fail 'idempotent rerun contacted npm'
+pass 'converged rerun is idempotent'
 
-test_safe_tier_apply() {
-  local base json human before after
-  base="$TMP_ROOT/apply"
-  TEST_REPO=$(make_git_world apply-git)
-  configure_fixture "$base"
-  write_detection update_available trunk 1 update_available \
-    '[{"name":"quota-axi","current":"0.1.6","latest":"0.1.9"}]'
-  before=$(git_head)
+PACKAGED_BIN="$TMP_ROOT/packaged/bin"
+mkdir -p "$PACKAGED_BIN"
+cp "$APPLY" "$PACKAGED_BIN/dev-tools-apply-updates"
+ln -s checker "$FAKEBIN/dev-tools-check-updates"
+: >"$CHECKER_LOG"
+json=$(env HOME="$TMP_ROOT/home" PATH="$FAKEBIN:/usr/bin:/bin" DEV_TOOLS_PINS_FILE="$PINS" \
+  DEV_TOOLS_FIRSTMATE_PATH="$CHECKOUT" DEV_TOOLS_FIRSTMATE_STATE_DIR="$STATE" DEV_TOOLS_FIRSTMATE_REPO="file://$REMOTE" \
+  DEV_TOOLS_UPDATE_NPM_BIN="$FAKEBIN/npm" DEV_TOOLS_UPDATE_NPM_PREFIX="$PREFIX" DEV_TOOLS_UPDATE_GIT_BIN="$(command -v git)" \
+  TEST_PINS="$PINS" TEST_PREFIX="$PREFIX" TEST_FIRSTMATE="$CHECKOUT" TEST_NPM_LOG="$NPM_LOG" TEST_CHECKER_LOG="$CHECKER_LOG" \
+  TEST_LIFECYCLE_LOG="$LIFECYCLE_LOG" "$PACKAGED_BIN/dev-tools-apply-updates" --dry-run --json)
+[ "$(printf '%s' "$json" | jq -r '.schema_version')" = 3 ] || fail 'packaged apply could not resolve the checker from PATH'
+grep -Fq -- '--json --force --no-cache' "$CHECKER_LOG" || fail 'packaged apply did not invoke the PATH checker'
+pass 'Nix-packaged apply resolves its checker runtime dependency'
 
-  json=$(run_apply --json) || fail "apply returned non-zero on a clean safe update"
-  [ "$(printf '%s' "$json" | jq -r '.worker_guard.status')" = clear ] \
-    || fail "worker guard was not clear with no lanes present"
-  [ "$(printf '%s' "$json" | jq -r '.tiers.firstmate.status')" = applied ] \
-    || fail "firstmate fast-forward was not applied"
-  [ "$(printf '%s' "$json" | jq -r '.tiers.firstmate.behind')" = 1 ] \
-    || fail "firstmate behind count was not reported"
-  [ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.status')" = applied ] \
-    || fail "npm tier was not applied"
-  after=$(git_head)
-  [ "$before" != "$after" ] || fail "firstmate HEAD did not advance after apply"
-  [ "$(git -C "$TEST_REPO" rev-list --count HEAD..refs/remotes/origin/trunk)" -eq 0 ] \
-    || fail "firstmate HEAD is not at origin/trunk after fast-forward"
-  assert_contains "$(cat "$TEST_NPM_LOG")" "install -g quota-axi@0.1.9" "npm install command was not the pinned latest"
+seed_quota_prior
+: >"$NPM_LOG"
+json=$(run_apply --dry-run --json)
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')" = would_apply ] || fail 'dry-run did not preview exact convergence'
+grep -Fq "view quota-axi@$QUOTA_AXI_VERSION version dist.integrity --json" "$NPM_LOG" || fail 'dry-run did not re-verify the exact artifact'
+! grep -Fq 'install -g' "$NPM_LOG" || fail 'dry-run installed a package'
+[ "$(quota_version)" = "$QUOTA_PRIOR" ] || fail 'dry-run changed the installed tool version'
+pass 'dry-run re-verifies but performs no mutation'
 
-  human=$(run_apply)
-  assert_contains "$human" "firstmate: up_to_date" "second human run was not idempotent for firstmate"
-  pass "safe tiers apply the firstmate fast-forward and allowlisted npm install"
-}
+# ---- the recorded prior comes from the npm prefix a reversal would write into
 
-test_allowlist_is_never_widened() {
-  local base json
-  base="$TMP_ROOT/allowlist"
-  TEST_REPO=$(make_git_world allowlist-git)
-  configure_fixture "$base"
-  # Checker output naming a non-allowlisted package must never be installed.
-  write_detection up_to_date trunk 0 update_available \
-    '[{"name":"quota-axi","current":"0.1.6","latest":"0.1.9"},{"name":"@openai/codex","current":"1.0.0","latest":"2.0.0"}]'
+# Detection resolves through PATH, the reversal writes into $NPM_PREFIX. When the
+# prefix carries nothing there is no prior state to reverse to, so the mutation is
+# refused rather than recorded against a version reinstalling could not restore.
+: >"$NPM_LOG"
+rm -f "$PREFIX/bin/$QUOTA_COMMAND"
+TEST_QUOTA_CURRENT=$QUOTA_PRIOR
+set +e
+json=$(run_apply --json)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail 'a package absent from the npm prefix exited successfully'
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')" = refused ] \
+  || fail 'a package absent from the npm prefix was not refused'
+printf '%s' "$json" | jq -e '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .detail | test("carries no installed")' >/dev/null \
+  || fail 'the refusal did not name the npm prefix as the missing prior state'
+if grep -Fq 'install -g' "$NPM_LOG"; then fail 'a package with no reversible prior state was installed anyway'; fi
+set +e
+dry=$(run_apply --dry-run --json)
+set -e
+[ "$(printf '%s' "$dry" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')" = refused ] \
+  || fail 'the preview promised a mutation the apply path refuses'
+unset TEST_QUOTA_CURRENT
+seed_quota_prior
+pass 'a package the npm prefix does not carry is refused in both preview and apply'
 
-  json=$(run_apply --json) || fail "apply returned non-zero"
-  [ "$(printf '%s' "$json" | jq '.tiers.npm_global.packages | length')" -eq 1 ] \
-    || fail "a non-allowlisted package leaked into the applied set"
-  [ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[0].name')" = quota-axi ] \
-    || fail "the allowlisted package was not the one applied"
-  assert_not_contains "$(cat "$TEST_NPM_LOG")" "codex" "a non-allowlisted package was installed"
-  pass "npm apply is confined to the allowlist and never widens it"
-}
+# Detection and the prefix disagreeing means the receipt would record a prior the
+# reversal would never restore, so that mutation is refused too.
+: >"$NPM_LOG"
+TEST_QUOTA_CURRENT=0.2.0
+set +e
+json=$(run_apply --json)
+rc=$?
+set -e
+unset TEST_QUOTA_CURRENT
+[ "$rc" -ne 0 ] || fail 'a detection and prefix disagreement exited successfully'
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')" = refused ] \
+  || fail 'a detection and prefix disagreement was not refused'
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .observed')" = "$QUOTA_PRIOR" ] \
+  || fail 'the refusal did not report the version the npm prefix actually carries'
+if grep -Fq 'install -g' "$NPM_LOG"; then fail 'a mutation ran while the prior state was ambiguous'; fi
+[ "$(quota_version)" = "$QUOTA_PRIOR" ] || fail 'the refused package was changed anyway'
+pass 'detection disagreeing with the npm prefix refuses the mutation'
 
-test_npm_latest_is_reverified_before_install() {
-  local base json npm_log
-  base="$TMP_ROOT/npm-reverify"
-  TEST_REPO=$(make_git_world npm-reverify-git)
-  configure_fixture "$base"
-  write_detection up_to_date trunk 0 update_available \
-    '[{"name":"quota-axi","current":"1.0.0","latest":"1.1.0"}]'
-  printf '{"quota-axi":"1.2.0"}\n' > "$TEST_NPM_LATEST_JSON"
+# ---- one bounded version-observation contract, and labels that match the cause
 
-  json=$(run_apply --json) || fail "npm source re-verification returned non-zero"
-  npm_log=$(cat "$TEST_NPM_LOG")
-  assert_contains "$npm_log" "view quota-axi@latest version --json" \
-    "npm latest was not re-verified against the registry"
-  assert_contains "$npm_log" "install -g quota-axi@1.2.0" \
-    "npm did not install the re-verified latest version"
-  assert_not_contains "$npm_log" "install -g quota-axi@1.1.0" \
-    "npm installed the stale checker-reported version"
-  [ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[0].latest')" = 1.2.0 ] \
-    || fail "npm result did not report the re-verified latest version"
-  pass "npm latest is re-verified against the registry before install"
-}
+# A tool that prints its banner on stderr is read the same way by detection and by
+# the prefix observer, so it converges instead of being refused for a prior state
+# that is plainly there.
+: >"$NPM_LOG"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'printf "%s %s\\n" >&2\n' "$QUOTA_COMMAND" "$QUOTA_PRIOR"
+} >"$PREFIX/bin/$QUOTA_COMMAND"
+chmod +x "$PREFIX/bin/$QUOTA_COMMAND"
+rm -f "$RECEIPTS"/*.json
+set +e
+json=$(run_apply --json)
+rc=$?
+set -e
+[ "$rc" -eq 0 ] || fail "a stderr version banner blocked the apply: $(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .detail')"
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')" = applied ] \
+  || fail "a stderr version banner was not observed: $(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .detail')"
+set -- "$RECEIPTS"/*.json
+[ -f "$1" ] || fail 'the converged apply wrote no receipt'
+[ "$(jq -r '.tools[] | select(.name=="quota-axi") | .prior' "$1")" = "$QUOTA_PRIOR" ] \
+  || fail 'the receipt did not record the version the prefix reported on stderr'
+seed_quota_prior
+pass 'the prefix observer reads a version the same way detection does'
 
-test_unsafe_npm_versions_are_skipped() {
-  local base json npm_log
-  base="$TMP_ROOT/unsafe-versions"
-  TEST_REPO=$(make_git_world unsafe-versions-git)
-  configure_fixture "$base"
-  write_detection up_to_date trunk 0 update_available \
-    '[{"name":"chrome-devtools-axi","current":"1.0.0"},{"name":"gh-axi","current":"1.0.0","latest":"latest"},{"name":"gnhf","current":"1.0.0","latest":"1.2.3@npm:other"},{"name":"lavish-axi","current":"1.0.0","latest":"scope/pkg"},{"name":"quota-axi","current":"1.0.0","latest":"v1.2.3-beta.1"}]'
+# Present but unreadable is a different cause from absent, and the refusal says
+# which one it was rather than claiming the prefix carries nothing.
+: >"$NPM_LOG"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'printf "%s (unversioned build)\\n"\n' "$QUOTA_COMMAND"
+} >"$PREFIX/bin/$QUOTA_COMMAND"
+chmod +x "$PREFIX/bin/$QUOTA_COMMAND"
+TEST_QUOTA_CURRENT=$QUOTA_PRIOR
+set +e
+json=$(run_apply --json)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail 'an unreadable installed version exited successfully'
+detail=$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .detail')
+case "$detail" in
+  *'reported no recognisable version'*) : ;;
+  *) fail "an unreadable installed version was refused for the wrong reason: $detail" ;;
+esac
+if grep -Fq 'install -g' "$NPM_LOG"; then fail 'a package with an unreadable prior version was installed anyway'; fi
 
-  json=$(run_apply --json) || fail "unsafe npm version specs returned non-zero"
-  [ "$(printf '%s' "$json" | jq '[.tiers.npm_global.packages[] | select(.status == "skipped" and .detail == "unsafe version spec")] | length')" -eq 4 ] \
-    || fail "unsafe npm version specs were not all recorded as skipped"
-  [ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name == "quota-axi") | .status')" = applied ] \
-    || fail "a valid concrete npm version was not applied"
-  npm_log=$(cat "$TEST_NPM_LOG")
-  assert_contains "$npm_log" "install -g quota-axi@v1.2.3-beta.1" \
-    "the valid concrete npm version was not pinned"
-  assert_not_contains "$npm_log" "chrome-devtools-axi" "a missing npm version was installed"
-  assert_not_contains "$npm_log" "gh-axi" "the npm latest tag was installed"
-  assert_not_contains "$npm_log" "gnhf" "an npm alias version spec was installed"
-  assert_not_contains "$npm_log" "lavish-axi" "an npm path version spec was installed"
-  pass "npm apply skips every unsafe version spec and continues safely"
-}
+# A command that fails fast is not a hang, and the refusal reports the status it
+# actually exited with instead of a bound that was never reached.
+: >"$NPM_LOG"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'exit 126\n'
+} >"$PREFIX/bin/$QUOTA_COMMAND"
+chmod +x "$PREFIX/bin/$QUOTA_COMMAND"
+set +e
+json=$(run_apply --json)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail 'a failing installed command exited successfully'
+detail=$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .detail')
+case "$detail" in
+  *'exited 126 without reporting a version'*) : ;;
+  *) fail "a failing installed command was refused for the wrong reason: $detail" ;;
+esac
+if grep -Fq 'install -g' "$NPM_LOG"; then fail 'a package whose prior version could not be read was installed anyway'; fi
 
-test_worker_active_defers() {
-  local base json human before after
-  base="$TMP_ROOT/deferred"
-  TEST_REPO=$(make_git_world deferred-git)
-  configure_fixture "$base"
-  write_detection update_available trunk 1 update_available \
-    '[{"name":"quota-axi","current":"0.1.6","latest":"0.1.9"}]'
-  # An in-flight worker lane: one state/<id>.meta file.
-  printf 'worktree=/somewhere\n' > "$TEST_STATE_DIR/some-lane.meta"
-  before=$(git_head)
+# The observation is bounded, so a command that never answers cannot hang a run.
+: >"$NPM_LOG"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'sleep 30\n'
+  printf 'printf "%s %s\\n"\n' "$QUOTA_COMMAND" "$QUOTA_PRIOR"
+} >"$PREFIX/bin/$QUOTA_COMMAND"
+chmod +x "$PREFIX/bin/$QUOTA_COMMAND"
+TEST_NETWORK_TIMEOUT=1
+started=$SECONDS
+set +e
+json=$(run_apply --json)
+rc=$?
+set -e
+elapsed=$((SECONDS - started))
+unset TEST_NETWORK_TIMEOUT
+unset TEST_QUOTA_CURRENT
+[ "$rc" -ne 0 ] || fail 'an unresponsive installed command exited successfully'
+detail=$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .detail')
+case "$detail" in
+  *'did not answer within 1s'*) : ;;
+  *) fail "an unresponsive installed command was refused for the wrong reason: $detail" ;;
+esac
+[ "$elapsed" -lt 20 ] || fail "the observation was not bounded: the run took ${elapsed}s"
+if grep -Fq 'install -g' "$NPM_LOG"; then fail 'a package whose prior version could not be read was installed anyway'; fi
+seed_quota_prior
+pass 'an unreadable, failing, or unresponsive prefix command each gets its own reason, under a bound'
 
-  json=$(run_apply --json) || fail "deferral returned non-zero (should be a clean non-destructive exit)"
-  [ "$(printf '%s' "$json" | jq -r '.worker_guard.status')" = active ] \
-    || fail "worker guard did not detect the in-flight lane"
-  [ "$(printf '%s' "$json" | jq -r '.worker_guard.in_flight')" = 1 ] \
-    || fail "in-flight lane count was not reported"
-  [ "$(printf '%s' "$json" | jq -r '.tiers.firstmate.status')" = deferred ] \
-    || fail "firstmate tier was not deferred while a worker was active"
-  [ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.status')" = deferred ] \
-    || fail "npm tier was not deferred while a worker was active"
-  after=$(git_head)
-  [ "$before" = "$after" ] || fail "deferral still moved firstmate HEAD"
-  [ ! -s "$TEST_NPM_LOG" ] || fail "deferral still ran an npm install"
-  human=$(run_apply)
-  assert_contains "$human" "worker guard: active" "human deferral did not report active workers"
-  assert_contains "$human" "firstmate: deferred" "human deferral did not defer firstmate"
-  pass "an active worker defers every tier without mutating anything"
-}
+: >"$NPM_LOG"
+TEST_BAD_PACKAGE=quota-axi
+set +e
+json=$(run_apply --json)
+rc=$?
+set -e
+unset TEST_BAD_PACKAGE
+[ "$rc" -ne 0 ] || fail 'registry integrity mismatch exited successfully'
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.status')" = refused ] || fail 'registry integrity mismatch was not refused'
+! grep -Fq 'install -g' "$NPM_LOG" || fail 'refused artifact was installed'
+pass 'independent exact-artifact mismatch fails closed'
 
-test_late_worker_defers_pending_mutations() {
-  local base json before after
-  base="$TMP_ROOT/late-before-merge"
-  TEST_REPO=$(make_git_world late-before-merge-git)
-  configure_fixture "$base"
-  write_detection update_available trunk 1 up_to_date '[]'
-  TEST_CREATE_LANE_DURING_DETECTION="$TEST_STATE_DIR/late.meta"
-  export TEST_CREATE_LANE_DURING_DETECTION
-  before=$(git_head)
+: >"$NPM_LOG"
+SAFE_PINS=$PINS
+PINS="$TMP_ROOT/unsafe-pins.sh"
+sed "s/|$QUOTA_AXI_VERSION|/|latest|/" "$SAFE_PINS" >"$PINS"
+set +e
+json=$(run_apply --json)
+rc=$?
+set -e
+PINS=$SAFE_PINS
+[ "$rc" -ne 0 ] || fail 'unsafe moving version string exited successfully'
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')" = refused ] || fail 'unsafe moving version string was not refused'
+! grep -Fq 'view quota-axi@latest' "$NPM_LOG" || fail 'unsafe version reached the registry'
+pass 'unsafe and moving version strings are refused before source access'
 
-  json=$(run_apply --json) || fail "late worker before merge returned non-zero"
-  [ "$(printf '%s' "$json" | jq -r '.worker_guard.status')" = clear ] \
-    || fail "the up-front worker guard did not run before detection"
-  [ "$(printf '%s' "$json" | jq -r '.tiers.firstmate.status')" = deferred ] \
-    || fail "a worker appearing before merge did not defer firstmate"
-  assert_contains "$(printf '%s' "$json" | jq -r '.tiers.firstmate.detail')" "workers active" \
-    "late firstmate deferral did not explain the active worker"
-  after=$(git_head)
-  [ "$before" = "$after" ] || fail "firstmate merged after a late worker appeared"
+: >"$NPM_LOG"; : >"$CHECKER_LOG"
+printf 'lane\n' >"$STATE/active.meta"
+json=$(run_apply --json)
+[ "$(printf '%s' "$json" | jq -r '.worker_guard.status')" = active ] || fail 'worker guard missed an active lane'
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.status')" = deferred ] || fail 'active worker did not defer npm'
+[ ! -s "$NPM_LOG" ] && [ ! -s "$CHECKER_LOG" ] || fail 'worker deferral still queried or mutated sources'
+rm -f "$STATE/active.meta"
+pass 'active Firstmate lanes defer every mutation before detection'
 
-  base="$TMP_ROOT/late-between-installs"
-  TEST_REPO=$(make_git_world late-between-installs-git)
-  configure_fixture "$base"
-  write_detection up_to_date trunk 0 update_available \
-    '[{"name":"chrome-devtools-axi","current":"1.0.0","latest":"1.1.0"},{"name":"gh-axi","current":"1.0.0","latest":"1.1.0"},{"name":"tasks-axi","current":"1.0.0","latest":"1.1.0"}]'
-  TEST_CREATE_LANE_AFTER_NPM_INSTALL="$TEST_STATE_DIR/late.meta"
-  export TEST_CREATE_LANE_AFTER_NPM_INSTALL
+# A lane that only appears inside the re-verification window must be visible in
+# the emitted guard, not just in the tier that deferred because of it.
+: >"$NPM_LOG"; : >"$CHECKER_LOG"
+seed_quota_prior
+TEST_WORKER_APPEARS="$STATE/appeared.meta"
+set +e
+json=$(run_apply --json)
+set -e
+unset TEST_WORKER_APPEARS
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .detail')" = 'workers appeared during re-verification' ] \
+  || fail 'a lane appearing during re-verification did not defer the mutation'
+[ "$(quota_version)" = "$QUOTA_PRIOR" ] || fail 'a lane appearing during re-verification still installed the package'
+[ "$(printf '%s' "$json" | jq -r '.worker_guard.status')" = active ] \
+  || fail 'the result reported a clear worker guard while a tier deferred on an active lane'
+[ "$(printf '%s' "$json" | jq -r '.worker_guard.in_flight')" = 1 ] || fail 'the result did not count the lane that deferred the mutation'
+rm -f "$STATE/appeared.meta"
+pass 'the emitted worker guard reflects lanes found by pre-mutation re-verification'
 
-  json=$(run_apply --json) || fail "late worker between npm installs returned non-zero"
-  [ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.status')" = deferred ] \
-    || fail "late worker did not defer the npm tier"
-  [ "$(printf '%s' "$json" | jq '[.tiers.npm_global.packages[] | select(.status == "applied")] | length')" -eq 1 ] \
-    || fail "npm did not preserve the one install completed before the worker appeared"
-  [ "$(printf '%s' "$json" | jq '[.tiers.npm_global.packages[] | select(.status == "deferred" and .detail == "workers active")] | length')" -eq 2 ] \
-    || fail "npm did not defer every install pending after the worker appeared"
-  [ "$(grep -c ' install -g ' "$TEST_NPM_LOG")" -eq 1 ] \
-    || fail "npm continued installing after the worker appeared"
-  pass "workers appearing after detection defer every pending mutation"
-}
+TEST_INVALID_CHECKER=1
+set +e
+json=$(run_apply --json)
+rc=$?
+set -e
+unset TEST_INVALID_CHECKER
+[ "$rc" -ne 0 ] || fail 'unknown checker source exited successfully'
+[ "$(printf '%s' "$json" | jq -r '.tiers.firstmate.status')" = refused ] || fail 'unknown checker source was not refused'
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.status')" = refused ] || fail 'unknown checker source did not refuse npm'
+pass 'unknown detection source refuses every mutation'
 
-test_dry_run_applies_nothing() {
-  local base json before after before_ref after_ref seed
-  base="$TMP_ROOT/dryrun"
-  TEST_REPO=$(make_git_world dryrun-git)
-  configure_fixture "$base"
-  git -C "$TEST_REPO" fetch -q origin trunk
-  before_ref=$(git -C "$TEST_REPO" rev-parse refs/remotes/origin/trunk)
-  seed="$TMP_ROOT/dryrun-git/seed"
-  printf 'three\n' >> "$seed/version.txt"
-  git -C "$seed" commit -qam three
-  git -C "$seed" push -q "file://$TMP_ROOT/dryrun-git/origin.git" trunk
-  write_detection update_available trunk 1 update_available \
-    '[{"name":"gh-axi","current":"1.0.0","latest":"1.1.0"}]'
-  before=$(git_head)
+[ ! -s "$LIFECYCLE_LOG" ] || fail 'Herdr or no-mistakes lifecycle command was ever invoked'
+help=$($APPLY --help)
+case "$help" in *'MUST NEVER install, update, invoke, reload, stop, or restart'*) : ;; *) fail 'operator contract omits the runtime-hosting safety boundary' ;; esac
+pass 'Herdr and the shared no-mistakes daemon are absent from apply behavior'
 
-  json=$(run_apply --dry-run --json) || fail "dry-run returned non-zero"
-  [ "$(printf '%s' "$json" | jq -r '.dry_run')" = true ] \
-    || fail "dry-run flag was not reflected in output"
-  [ "$(printf '%s' "$json" | jq -r '.tiers.firstmate.status')" = would_apply ] \
-    || fail "dry-run did not preview the firstmate fast-forward"
-  [ "$(printf '%s' "$json" | jq -r '.tiers.firstmate.behind')" = 1 ] \
-    || fail "dry-run did not report the firstmate behind count"
-  [ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[0].status')" = would_apply ] \
-    || fail "dry-run did not preview the npm install"
-  after=$(git_head)
-  after_ref=$(git -C "$TEST_REPO" rev-parse refs/remotes/origin/trunk)
-  [ "$before" = "$after" ] || fail "dry-run moved firstmate HEAD"
-  [ "$before_ref" = "$after_ref" ] || fail "dry-run fetched and moved the origin tracking ref"
-  [ ! -s "$TEST_NPM_LOG" ] || fail "dry-run ran an npm install"
-  assert_contains "$(run_apply --dry-run)" "[dry-run]" "human dry-run lost its prefix"
-  pass "dry-run previews both tiers without apply-side writes"
-}
+PACKAGED_APPLY="$TMP_ROOT/packaged-dev-tools-apply-updates"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'export DEV_TOOLS_PINS_FILE=/nix/store/aaaaaaaa-dev-tools-versions.sh\n'
+  cat "$APPLY"
+} >"$PACKAGED_APPLY"
+chmod +x "$PACKAGED_APPLY"
+packaged_help=$("$PACKAGED_APPLY" --help)
+[ "$(printf '%s\n' "$packaged_help" | head -1)" = "$(printf '%s\n' "$help" | head -1)" ] || fail 'the packaged --help does not start with the usage header'
+if printf '%s\n' "$packaged_help" | grep -Eq '/nix/store/|env bash'; then
+  fail 'the packaged --help leaks wrapper exports or the interpreter line'
+fi
+case "$packaged_help" in *'MUST NEVER install, update, invoke, reload, stop, or restart'*) : ;; *) fail 'the packaged --help omits the runtime-hosting safety boundary' ;; esac
+pass 'the packaged --help prints only the operator contract'
 
-test_idempotent_rerun() {
-  local base first second
-  base="$TMP_ROOT/idempotent"
-  TEST_REPO=$(make_git_world idempotent-git)
-  configure_fixture "$base"
-  write_detection update_available trunk 1 update_available \
-    '[{"name":"tasks-axi","current":"0.2.0","latest":"0.3.0"}]'
+# `tests/*.test.sh` is this repository's only test-discovery convention - there is
+# no runner script - so every match has to be directly invocable. A suite that
+# lost its executable bit is skipped or dies with exit 126 while the rest pass.
+for suite in "$ROOT"/tests/*.test.sh; do
+  [ -x "$suite" ] || fail "$(basename "$suite") is not directly executable, so tests/*.test.sh discovery cannot run it"
+done
+pass 'every test suite in tests/ can be invoked directly'
 
-  first=$(run_apply --json) || fail "first apply returned non-zero"
-  [ "$(printf '%s' "$first" | jq -r '.tiers.firstmate.status')" = applied ] \
-    || fail "first apply did not fast-forward"
-  # Now current: firstmate is at origin (its own git check proves this regardless
-  # of detection), and the checker reports npm up to date.
-  write_detection up_to_date trunk 0 up_to_date '[]'
-  : > "$TEST_NPM_LOG"
-
-  second=$(run_apply --json) || fail "idempotent re-run returned non-zero"
-  [ "$(printf '%s' "$second" | jq -r '.tiers.firstmate.status')" = up_to_date ] \
-    || fail "re-run did not report firstmate up to date"
-  [ "$(printf '%s' "$second" | jq -r '.tiers.npm_global.status')" = up_to_date ] \
-    || fail "re-run did not report npm up to date"
-  [ ! -s "$TEST_NPM_LOG" ] || fail "idempotent re-run still ran an npm install"
-  pass "re-running when already current is a clean no-op"
-}
-
-test_firstmate_skips_when_not_ff() {
-  local base json off_default
-  base="$TMP_ROOT/notff"
-  TEST_REPO=$(make_git_world notff-git)
-  configure_fixture "$base"
-  # Diverge HEAD so origin/trunk is no longer a clean fast-forward.
-  git -C "$TEST_REPO" checkout -q -b trunk 2>/dev/null || git -C "$TEST_REPO" checkout -q trunk
-  printf 'local-divergence\n' >> "$TEST_REPO/version.txt"
-  git -C "$TEST_REPO" commit -qam divergent
-  write_detection update_available trunk 1 up_to_date '[]'
-
-  json=$(run_apply --json) || fail "non-ff case returned non-zero (should skip cleanly)"
-  [ "$(printf '%s' "$json" | jq -r '.tiers.firstmate.status')" = skipped ] \
-    || fail "a non-fast-forward firstmate update was not skipped"
-  assert_contains "$(printf '%s' "$json" | jq -r '.tiers.firstmate.detail')" "not a clean fast-forward" \
-    "skip reason for non-ff was not explained"
-
-  # And a detached HEAD is also skipped, never forced.
-  git -C "$TEST_REPO" checkout -q --detach
-  off_default=$(run_apply --json)
-  [ "$(printf '%s' "$off_default" | jq -r '.tiers.firstmate.status')" = skipped ] \
-    || fail "detached HEAD was not skipped"
-  pass "firstmate refuses anything that is not a clean fast-forward on the default branch"
-}
-
-test_firstmate_reverifies_remote_default_branch() {
-  local base json before after seed remote
-  base="$TMP_ROOT/default-branch-changed"
-  TEST_REPO=$(make_git_world default-branch-changed-git)
-  configure_fixture "$base"
-  write_detection update_available trunk 1 up_to_date '[]'
-  seed="$TMP_ROOT/default-branch-changed-git/seed"
-  remote="$TMP_ROOT/default-branch-changed-git/origin.git"
-  git -C "$seed" branch main
-  git -C "$seed" push -q "file://$remote" main
-  git --git-dir="$remote" symbolic-ref HEAD refs/heads/main
-  before=$(git_head)
-
-  json=$(run_apply --json) || fail "changed remote default returned non-zero"
-  [ "$(printf '%s' "$json" | jq -r '.tiers.firstmate.status')" = skipped ] \
-    || fail "firstmate applied the checker-reported branch after the remote default changed"
-  assert_contains "$(printf '%s' "$json" | jq -r '.tiers.firstmate.detail')" "origin default branch" \
-    "changed remote default skip reason was not explained"
-  after=$(git_head)
-  [ "$before" = "$after" ] || fail "firstmate moved HEAD on a branch that is no longer the remote default"
-  pass "firstmate re-verifies the remote default branch before applying"
-}
-
-test_firstmate_rechecks_current_branch_before_merge() {
-  local base json trunk_before trunk_after other_after
-  base="$TMP_ROOT/current-branch-changed"
-  TEST_REPO=$(make_git_world current-branch-changed-git)
-  configure_fixture "$base"
-  write_detection update_available trunk 1 up_to_date '[]'
-  TEST_GIT_BIN="$TEST_FAKEBIN/git-fixture"
-  TEST_SWITCH_BRANCH_AFTER_FETCH=other
-  export TEST_GIT_BIN TEST_SWITCH_BRANCH_AFTER_FETCH
-  trunk_before=$(git -C "$TEST_REPO" rev-parse refs/heads/trunk)
-
-  json=$(run_apply --json) || fail "changed current branch returned non-zero"
-  [ "$(printf '%s' "$json" | jq -r '.tiers.firstmate.status')" = skipped ] \
-    || fail "firstmate applied after HEAD changed away from the default branch"
-  assert_contains "$(printf '%s' "$json" | jq -r '.tiers.firstmate.detail')" "not the default branch" \
-    "changed current branch skip reason was not explained"
-  trunk_after=$(git -C "$TEST_REPO" rev-parse refs/heads/trunk)
-  other_after=$(git -C "$TEST_REPO" rev-parse refs/heads/other)
-  [ "$trunk_before" = "$trunk_after" ] || fail "the default branch moved after HEAD changed away from it"
-  [ "$trunk_before" = "$other_after" ] || fail "the replacement branch was fast-forwarded to origin/trunk"
-  pass "firstmate rechecks the current branch immediately before merge"
-}
-
-test_packaged_help_starts_with_description() {
-  local base packaged first
-  base="$TMP_ROOT/packaged-help"
-  packaged="$base/dev-tools-apply-updates"
-  mkdir -p "$base"
-  {
-    printf '#!/usr/bin/env bash\n'
-    cat "$APPLY"
-  } > "$packaged"
-  chmod +x "$packaged"
-
-  first=$("$packaged" --help | sed -n '1p')
-  [ "$first" = "dev-tools-apply-updates - guarded, opt-in auto-apply for the safe update tiers." ] \
-    || fail "packaged help started with '$first'"
-  pass "packaged help starts with the command description"
-}
-
-test_herdr_is_never_applied() {
-  # Belt-and-braces: even when the checker reports herdr as update_available,
-  # this tool MUST NOT touch herdr - it is a report-only tier. The herdr
-  # fixture binary fails loudly if invoked (exit 127 + a log line), so any
-  # accidental invocation during apply-updates would surface here.
-  local base json contract
-  base="$TMP_ROOT/herdr-never"
-  TEST_REPO=$(make_git_world herdr-never-git)
-  configure_fixture "$base"
-  write_detection update_available trunk 1 up_to_date '[]'
-
-  json=$(run_apply --json) || fail "apply returned non-zero on a clean non-herdr update"
-  [ -s "$TEST_HERDR_INVOCATION_LOG" ] && fail "herdr binary was invoked: $(cat "$TEST_HERDR_INVOCATION_LOG")"
-  if printf '%s' "$json" | jq -e '.tiers.herdr' >/dev/null 2>&1; then
-    fail "apply output should not contain a herdr tier"
-  fi
-  if printf '%s' "$json" | jq -e '.. | objects | select(has("herdr"))' >/dev/null 2>&1; then
-    fail "apply output should not reference herdr anywhere"
-  fi
-
-  # And dry-run should still not invoke herdr.
-  write_detection update_available trunk 1 update_available \
-    '[{"name":"quota-axi","current":"0.1.6","latest":"0.1.9"}]'
-  : > "$TEST_HERDR_INVOCATION_LOG"
-  json=$(run_apply --dry-run --json) || fail "dry-run returned non-zero"
-  [ -s "$TEST_HERDR_INVOCATION_LOG" ] && fail "herdr binary was invoked during dry-run: $(cat "$TEST_HERDR_INVOCATION_LOG")"
-  if printf '%s' "$json" | jq -e '.tiers.herdr' >/dev/null 2>&1; then
-    fail "dry-run output should not contain a herdr tier"
-  fi
-
-  # The contract itself must call out the report-only nature so an operator
-  # reading --help cannot miss it.
-  contract=$(sed -n '2,/^set -u$/s/^# \{0,1\}//p' "$APPLY")
-  assert_contains "$contract" "REPORT ONLY" "apply --help did not call out herdr as report-only"
-  assert_contains "$contract" "MUST NEVER restart" "apply --help did not forbid restarting herdr"
-  assert_contains "$contract" "herdr update" "apply --help did not direct operators to herdr's own installer"
-
-  pass "herdr is never invoked, applied, or surfaced as a tier by apply-updates"
-}
-
-export GIT_AUTHOR_NAME=dev-tools-test
-export GIT_AUTHOR_EMAIL=dev-tools-test@example.invalid
-export GIT_COMMITTER_NAME=dev-tools-test
-export GIT_COMMITTER_EMAIL=dev-tools-test@example.invalid
-test_safe_tier_apply
-test_allowlist_is_never_widened
-test_npm_latest_is_reverified_before_install
-test_unsafe_npm_versions_are_skipped
-test_worker_active_defers
-test_late_worker_defers_pending_mutations
-test_dry_run_applies_nothing
-test_idempotent_rerun
-test_firstmate_skips_when_not_ff
-test_firstmate_reverifies_remote_default_branch
-test_firstmate_rechecks_current_branch_before_merge
-test_packaged_help_starts_with_description
-test_herdr_is_never_applied
+printf '\nall dev-tools-apply-updates tests passed\n'

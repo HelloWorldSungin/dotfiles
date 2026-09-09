@@ -1,108 +1,95 @@
 #!/usr/bin/env bash
-# dev-tools-apply-updates - guarded, opt-in auto-apply for the safe update tiers.
+# dev-tools-apply-updates - guarded convergence to repository-owned exact pins.
 #
-# Companion to dev-tools-check-updates. The checker only reports; this tool
-# applies, but only the two tiers whose update is a mechanically safe, reversible
-# advance, and only when no Firstmate worker is active. It never applies the
-# GitHub-release binaries (treehouse, no-mistakes, herdr) and never touches
-# nix-pinned packages: those stay reported-only in the checker.
+# The only mutable tiers are Firstmate's pinned commit and six explicitly
+# allowlisted npm tools. The checker finds drift, but this command rereads the
+# repository pin and independently verifies the exact remote artifact before
+# applying it. It never follows a moving latest value. Firstmate advances by
+# fast-forward ONLY - never a merge commit, rebase, or force.
 #
-# Safe tiers (the only things this tool will ever apply):
-#   firstmate   Fast-forward the configured Firstmate repository's default branch
-#               to origin. Fast-forward ONLY - never a merge commit, rebase, or
-#               force. Skipped unless HEAD is on the default branch and origin is
-#               a strict descendant (a clean fast-forward). git merge --ff-only is
-#               the hard guard; a non-fast-forward is refused, never forced.
-#   npm-global  Reinstall the exact allowlisted axi tools the checker tracks
-#               (chrome-devtools-axi, gh-axi, gnhf, lavish-axi, quota-axi,
-#               tasks-axi) at their published latest, under the configured global
-#               prefix. Never a blanket `npm update -g`; the allowlist is never
-#               widened, even if the checker's output somehow names another package.
+# Herdr and no-mistakes are attended-only runtime-hosting tools. This command
+# MUST NEVER install, update, invoke, reload, stop, or restart either one. Nix,
+# GBrain, harness CLIs, Baby Menu, and other report-only tools are also excluded.
 #
-# Deliberate exclusions (reported by the checker, never applied here):
-#   treehouse, no-mistakes   GitHub-release binaries. Left reported-only.
-#   herdr                    GitHub-release binary AND a live session provider for
-#                            the firstmate fleet. herdr version bumps have
-#                            historically shipped breaking keybinding/protocol
-#                            changes (e.g. composer interaction was broken by
-#                            0.7.4), which can disrupt in-flight workers. herdr
-#                            is therefore REPORT ONLY: the checker surfaces it,
-#                            the captain decides when to apply it manually with
-#                            `herdr update` (herdr's own installer handles the
-#                            stop/restart dance). This tool MUST NEVER restart
-#                            herdr, install a new herdr release, or touch the
-#                            herdr binary on disk.
-#   nix-pinned               tea, ghdl, git, and friends are controlled by this
-#                            dotfiles repo's flake lock. Never touched.
+# Every real mutation is preceded by a mode-0600 receipt, written atomically
+# under $DEV_TOOLS_APPLY_RECEIPT_DIR. It records each affected tool, its exact
+# prior commit or version, its exact target, the independently verified remote
+# or registry evidence for both, and per-tool and per-tier completion status.
+# A receipt directory this run has to create is created and secured privately;
+# an existing operator-supplied one keeps its own mode, and one that cannot be
+# created or written refuses the mutation instead of being repaired. A
+# receipt that cannot be written refuses the mutation it would have covered, and
+# one that could not record every outcome is reported as incomplete and exits
+# non-zero even when the tools themselves converged.
+# An npm tool's reversal path is proven before anything is decided, in the
+# preview and in the apply alike: the installed version must be re-verifiable
+# against the registry, or - when it is not published there, which is how a
+# locally built or unpublished global install presents - the operator must place
+# that exact artifact in $DEV_TOOLS_APPLY_PRIOR_ARTIFACT_DIR as
+# <package>-<version>.tgz. Its own package manifest must name that package at
+# that version - a file is never trusted on its name alone, because
+# `npm install -g <tarball>` takes its target from the contents - and its
+# checksum is then the recorded evidence, pinning the bytes whose identity was
+# verified. That file is what a reversal reinstalls. Without one of the two the
+# tool is refused rather than installed: a recorded mutation that cannot be
+# undone is worse than a refused one, and there is deliberately no override that
+# skips the requirement. The installed version must also have a shape a reversal
+# could restore - the same shape the rollback preflight accepts and the installed
+# version is read back with - so a prerelease or truncated version is refused
+# rather than recorded as reversible. The packages around it are unaffected.
+# Partial apply is expected and recorded: each tool carries its own completion
+# status, so a run that converges one package and refuses another leaves an
+# accurate per-tool record while the tier reports the worst case. Dry-run names
+# the receipt it would write and writes nothing, and answers the Firstmate tier
+# from the same authoritative remote the real run uses - fetched into a private
+# throwaway repository, never into the checkout. Both directions then run one
+# shared comparison, so the preview's status and exit code are the apply's:
+# equality is up to date, a proven local ancestor of the fetched pin is
+# applyable, and a local branch that is ahead of or diverged from the pin is
+# refused with a non-zero exit rather than silently skipped. The apply repeats
+# its own fetch and comparison and never trusts the preview. Anything the
+# preview cannot prove is `unknown` and also exits non-zero, and a receipt
+# location the apply could not write is refused by the preview too, so a preview
+# that exits 0 is one the apply can act on.
 #
-# Worker guard:
-#   A Firstmate fast-forward while a crewmate holds an in-flight worktree can
-#   disrupt live work, so this tool refuses to apply ANY tier while a Firstmate
-#   worker is active. "Active" mirrors Firstmate's own in-flight definition
-#   (bin/fm-supervision-lib.sh): one live worker lane == one state/<id>.meta file
-#   (created at spawn, removed only at teardown). The signal:
-#     - state directory absent            -> no Firstmate orchestration -> clear.
-#     - one or more state/*.meta present  -> workers active -> defer every tier.
-#     - state directory present but not    -> liveness cannot be determined ->
-#       readable                             conservatively treated as active.
-#   DEV_TOOLS_FIRSTMATE_STATE_DIR overrides the directory (default
-#   $DEV_TOOLS_FIRSTMATE_PATH/state). The guard is presence-based and clock-free:
-#   a spawned lane blocks whether or not its harness is mid-turn, because the
-#   worktree it holds is what a fast-forward could disrupt. It is checked before
-#   detection and re-evaluated immediately before every merge or install. When in
-#   doubt it defers - deferral is always non-destructive.
+# Rollback is attended, never automatic, and never restarts a service:
+#   dev-tools-apply-updates --rollback <receipt>              # check only
+#   dev-tools-apply-updates --rollback <receipt> --attended   # perform
+# Without --attended nothing is written at all - not a tool, and not one byte of
+# the receipt. The full preflight still runs and reports the reconciliation an
+# attended run would record, so an archived receipt can be inspected safely.
+# It never trusts the recorded status alone. Every status that can follow a real
+# mutation - applied, pending, failed, and rollback_failed - is observed and
+# reconciled; only a terminal reconciled or rolled_back entry is left alone. One
+# preflight does all of it before anything is touched: state equal to the
+# recorded prior needs no mutation and is settled as reconciled; state equal to
+# the recorded target is eligible; anything else - a third version, a moved
+# commit, an absent or unreadable tool - is unreconcilable. The same preflight
+# also proves the whole tier is reversible: no in-flight worker lane, a clean
+# `main` at the recorded applied commit with the recorded prior commit verified
+# as its ancestor, and every eligible npm prior artifact re-verified against the
+# registry for exact identity and integrity. A single unreconcilable or
+# unverifiable entry refuses its whole tier, so no tool in it is changed and the
+# tier never ends up half reverted.
+# Reversal is then `git reset --hard <prior commit>` - never a force, and never
+# a discard of local changes - and an npm reinstall of only the exact recorded
+# prior version, each re-confirming state and evidence immediately beforehand.
+# An attended reversal that changes nothing - every tool refused, or nothing left
+# to reverse - reports the receipt as `unchanged`, exactly like the check-only
+# form, because not one byte of it was written. One that does settle appends the
+# observed state and outcome and re-derives each tier's completion from its own
+# tool entries, so no apply-era tier status outlives the tools it described; recorded prior, target, and
+# evidence are never rewritten to match the machine. A reversal whose receipt
+# append fails is reported as a stale receipt and exits non-zero, so stale
+# evidence is never mistaken for completion.
 #
-# Safety properties:
-#   - Each tier applies independently; a skip or failure in one never blocks the
-#     other.
-#   - Re-running when already current is a clean no-op (idempotent): detection
-#     reports up-to-date and nothing is applied, and even a redundant npm install
-#     pins the already-installed version.
-#   - Detection performs a bounded, non-destructive origin fetch and cache refresh.
-#   - Deferral and skip perform no apply-side writes. Dry-run applies nothing and
-#     performs no apply-side writes after detection.
-#   - Every network/command step is bounded (see the timeout knobs below).
-#
-# Detection is delegated to dev-tools-check-updates (--json --force) so the
-# allowlist and source-detection are defined in exactly one place. Forced
-# detection refreshes the git/npm source-of-truth before apply. The apply steps
-# then validate current git refs and exact npm versions before mutating them.
-#
-# Output modes:
-#   default     Worker-guard line plus one applied/skipped/deferred/failed line
-#               per safe tier.
-#   --json      One JSON object with schema_version=1.
-#   --dry-run   Show exactly what would be applied. Detection still performs its
-#               bounded origin fetch and cache refresh; no apply-side writes occur.
-#     -n        Alias for --dry-run.
-#   --help, -h  Print this contract.
-#
-# Exit status:
-#   0  every tier resolved cleanly (applied, up-to-date, skipped, or deferred).
-#   1  at least one tier failed while applying.
-#   2  usage error, or a hard prerequisite (jq) is missing.
-#
-# Timeouts:
-#   DEV_TOOLS_UPDATE_NETWORK_TIMEOUT_SECONDS  bounds detection + the git fetch
-#                                             (default 15, shared with checker).
-#   DEV_TOOLS_APPLY_TIMEOUT_SECONDS           bounds each apply command, e.g. the
-#                                             npm install and the ff merge
-#                                             (default 120).
-#
-# Test seams:
-#   DEV_TOOLS_APPLY_CHECKER_BIN replaces the detection checker.
-#   DEV_TOOLS_FIRSTMATE_STATE_DIR replaces the worker-state directory.
-#   DEV_TOOLS_UPDATE_GIT_BIN, DEV_TOOLS_UPDATE_NPM_BIN, DEV_TOOLS_UPDATE_NPM_PREFIX,
-#   and DEV_TOOLS_FIRSTMATE_PATH replace command paths and locations (shared with
-#   the checker's own seams).
+# Usage: dev-tools-apply-updates [--dry-run] [--json]
+#        dev-tools-apply-updates --rollback <receipt> [--attended] [--json]
 set -u
 
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
-FIRSTMATE_PATH=${DEV_TOOLS_FIRSTMATE_PATH:-${HOME:-.}/firstmate}
-STATE_DIR=${DEV_TOOLS_FIRSTMATE_STATE_DIR:-$FIRSTMATE_PATH/state}
-# Detection checker: explicit override wins; else the sibling in this bin/ (the
-# standalone dotfiles layout); else resolve dev-tools-check-updates from PATH (the
-# Nix-packaged layout, where each tool is its own store path).
+ROOT=$(cd "$SELF_DIR/.." && pwd)
+PINS_FILE=${DEV_TOOLS_PINS_FILE:-$ROOT/config/dev-tools-versions.sh}
 if [ -n "${DEV_TOOLS_APPLY_CHECKER_BIN:-}" ]; then
   CHECKER_BIN=$DEV_TOOLS_APPLY_CHECKER_BIN
 elif [ -x "$SELF_DIR/dev-tools-check-updates" ]; then
@@ -110,381 +97,886 @@ elif [ -x "$SELF_DIR/dev-tools-check-updates" ]; then
 else
   CHECKER_BIN=dev-tools-check-updates
 fi
+FIRSTMATE_PATH=${DEV_TOOLS_FIRSTMATE_PATH:-${HOME:-.}/firstmate}
+FIRSTMATE_REPO=${DEV_TOOLS_FIRSTMATE_REPO:-https://github.com/kunchenguid/firstmate.git}
+STATE_DIR=${DEV_TOOLS_FIRSTMATE_STATE_DIR:-$FIRSTMATE_PATH/state}
 GIT_BIN=${DEV_TOOLS_UPDATE_GIT_BIN:-git}
 NPM_BIN=${DEV_TOOLS_UPDATE_NPM_BIN:-npm}
 NPM_PREFIX=${DEV_TOOLS_UPDATE_NPM_PREFIX:-${HOME:-.}/.npm-global}
+PRIOR_ARTIFACT_DIR=${DEV_TOOLS_APPLY_PRIOR_ARTIFACT_DIR:-}
+TAR_BIN=${DEV_TOOLS_APPLY_TAR_BIN:-tar}
+SHA256_BIN=${DEV_TOOLS_APPLY_SHA256_BIN:-$(command -v sha256sum >/dev/null 2>&1 && printf sha256sum || printf 'shasum -a 256')}
+RECEIPT_DIR=${DEV_TOOLS_APPLY_RECEIPT_DIR:-${XDG_STATE_HOME:-${HOME:-.}/.local/state}/dev-tools-apply-updates}
+TIMEOUT_SECONDS=${DEV_TOOLS_APPLY_TIMEOUT_SECONDS:-120}
 NETWORK_TIMEOUT=${DEV_TOOLS_UPDATE_NETWORK_TIMEOUT_SECONDS:-15}
-APPLY_TIMEOUT=${DEV_TOOLS_APPLY_TIMEOUT_SECONDS:-120}
-# The apply allowlist. Identical to the checker's TRACKED_NPM set; hardcoded here
-# as defense-in-depth so a drifted or hostile checker response can never widen
-# what this tool installs.
-ALLOWLIST_NPM_JSON='["chrome-devtools-axi","gh-axi","gnhf","lavish-axi","quota-axi","tasks-axi"]'
-
-usage() {
-  sed -n '/^# dev-tools-apply-updates - /,/^set -u$/ {
-    /^set -u$/d
-    s/^# \{0,1\}//
-    p
-  }' "$0"
-}
-
 MODE=human
 DRY_RUN=0
+ATTENDED=0
+ROLLBACK_MODE=0
+ROLLBACK_RECEIPT=
+
+usage() { sed -n '/^# dev-tools-apply-updates - /,/^set -u$/s/^# \{0,1\}//p' "$0"; }
+die() { printf 'dev-tools-apply-updates: %s\n' "$1" >&2; exit "${2:-2}"; }
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --json) MODE=json ;;
     --dry-run|-n) DRY_RUN=1 ;;
+    --attended) ATTENDED=1 ;;
+    --rollback) shift; ROLLBACK_MODE=1; ROLLBACK_RECEIPT=${1:-} ;;
     --help|-h) usage; exit 0 ;;
-    *) printf 'dev-tools-apply-updates: unknown argument: %s\n' "$1" >&2; exit 2 ;;
+    *) die "unknown argument: $1" ;;
   esac
   shift
 done
-
-case "$NETWORK_TIMEOUT" in ''|*[!0-9]*|0) NETWORK_TIMEOUT=15 ;; esac
-case "$APPLY_TIMEOUT" in ''|*[!0-9]*|0) APPLY_TIMEOUT=120 ;; esac
-
-if ! command -v jq >/dev/null 2>&1; then
-  printf 'dev-tools-apply-updates: jq is required\n' >&2
-  exit 2
+if [ "$ROLLBACK_MODE" -eq 1 ]; then
+  [ -n "$ROLLBACK_RECEIPT" ] || die '--rollback needs a receipt path'
+  [ "$DRY_RUN" -eq 0 ] || die '--dry-run does not apply to --rollback; omit --attended to check without performing'
+elif [ "$ATTENDED" -eq 1 ]; then
+  die '--attended only applies to --rollback'
 fi
+
+[ -f "$PINS_FILE" ] || die "pins unavailable: $PINS_FILE"
+# shellcheck source=../config/dev-tools-versions.sh
+# shellcheck disable=SC1091
+source "$PINS_FILE"
+FIRSTMATE_PIN=${FIRSTMATE_REV:?Firstmate pin missing}
+ALLOWLIST_NPM_JSON='["chrome-devtools-axi","gh-axi","gnhf","lavish-axi","quota-axi","tasks-axi"]'
+# The one npm version shape this tool can reason about, used by the pin check,
+# the reversal-path gate, the rollback preflight, and the installed-version
+# observer alike. A prior version the observer could never read back, or the
+# preflight could never accept, is not a reversal path.
+NPM_VERSION_RE='[0-9]+(\.[0-9]+){2,3}'
+# The version token shape the checker's own detection reads, so both sides of a
+# comparison parse one banner the same way before the strict shape is required.
+NPM_OBSERVED_TOKEN_RE='[0-9]+(\.[0-9]+){1,3}(-[0-9A-Za-z]+)?'
+NPM_OBSERVED=
+NPM_OBSERVE_REASON=
+npm_reversible_version() { printf '%s\n' "$1" | grep -Eq "^$NPM_VERSION_RE\$"; }
 
 run_timed() {
   local seconds=$1
   shift
-  if command -v timeout >/dev/null 2>&1; then
-    timeout "$seconds" "$@"
-  elif command -v gtimeout >/dev/null 2>&1; then
-    gtimeout "$seconds" "$@"
-  elif command -v perl >/dev/null 2>&1; then
-    perl -e 'my $t = shift; my $pid = fork; die "fork failed" unless defined $pid; if (!$pid) { setpgrp(0, 0); exec @ARGV } local $SIG{ALRM} = sub { kill "TERM", -$pid; select undef, undef, undef, 0.2; kill "KILL", -$pid; waitpid $pid, 0; exit 124 }; alarm $t; waitpid $pid, 0; exit($? >> 8)' "$seconds" "$@"
-  else
-    return 127
+  if command -v timeout >/dev/null 2>&1; then timeout "$seconds" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$seconds" "$@"
+  else "$@"
   fi
 }
 
 tier_json() {
-  # tier_json <status> <detail> [extra-json-object]
   local status=$1 detail=$2 extra=${3:-'{}'}
-  jq -cn --arg status "$status" --arg detail "$detail" --argjson extra "$extra" \
-    '{status:$status,detail:$detail} + $extra'
+  jq -cn --arg status "$status" --arg detail "$detail" --argjson extra "$extra" '{status:$status,detail:$detail} + $extra'
 }
 
-# Worker guard --------------------------------------------------------------
-# Sets WG_STATUS (clear|active), WG_IN_FLIGHT (count), WG_DETAIL.
+# Tier results travel through TIER rather than stdout so the tier functions run
+# in this shell. Their pre-mutation worker re-check therefore updates the same
+# WG_* guard state the emitted result serializes, instead of a discarded
+# subshell copy.
+TIER=
+set_tier() { TIER=$(tier_json "$@"); }
+RECEIPT_TOUCHED=0
+PLAN='[]'
+UNRECONCILABLE_TIERS=' '
+
 detect_workers() {
   local meta count=0
-  if [ ! -e "$STATE_DIR" ]; then
-    WG_STATUS=clear
-    WG_IN_FLIGHT=0
-    WG_DETAIL="no Firstmate state directory ($STATE_DIR)"
-    return
-  fi
+  if [ ! -e "$STATE_DIR" ]; then WG_STATUS=clear; WG_COUNT=0; WG_DETAIL='no Firstmate state directory'; return; fi
   if [ ! -d "$STATE_DIR" ] || [ ! -r "$STATE_DIR" ] || [ ! -x "$STATE_DIR" ]; then
-    # Present but not enumerable: liveness cannot be determined -> conservative.
-    WG_STATUS=active
-    WG_IN_FLIGHT=-1
-    WG_DETAIL="state directory not readable; assuming workers may be active"
-    return
+    WG_STATUS=active; WG_COUNT=-1; WG_DETAIL='state directory unreadable; assuming workers are active'; return
   fi
-  for meta in "$STATE_DIR"/*.meta; do
-    [ -e "$meta" ] || continue
-    count=$((count + 1))
+  for meta in "$STATE_DIR"/*.meta; do [ -e "$meta" ] && count=$((count + 1)); done
+  WG_COUNT=$count
+  if [ "$count" -gt 0 ]; then WG_STATUS=active; WG_DETAIL="$count in-flight worker lane(s)"
+  else WG_STATUS=clear; WG_DETAIL='no in-flight worker lanes'
+  fi
+}
+
+# ------------------------------------------------------------------ receipt
+
+RECEIPT_PATH="$RECEIPT_DIR/apply-$(date -u +%Y%m%dT%H%M%SZ)-$$.json"
+RECEIPT_WRITTEN=0
+RECEIPT_STALE=0
+RECEIPT_DOC=$(jq -cn --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg path "$RECEIPT_PATH" '{
+  schema_version: 1,
+  tool: "dev-tools-apply-updates",
+  created_at: $created,
+  path: $path,
+  rollback: {
+    automatic: false,
+    attended_only: true,
+    restarts_services: false,
+    command: "dev-tools-apply-updates --rollback \($path) --attended",
+    preflight: [
+      "every status that can follow a real mutation - applied, pending, failed, rollback_failed - is observed and reconciled",
+      "state equal to the recorded prior needs no mutation and is settled as reconciled",
+      "state equal to the recorded target is eligible for reversal",
+      "the whole tier is proven reversible - worker lane, cleanliness, ancestry, and exact prior artifact evidence - before any tool in it is changed",
+      "any unreconcilable or unverifiable entry refuses its whole tier"
+    ],
+    firstmate: [
+      "no Firstmate worker lane may be in flight",
+      "the checkout must be on main and clean",
+      "the recorded prior commit must verify as an ancestor of the applied commit",
+      "the reversal is `git reset --hard <prior commit>`; never a force, never a discard of local changes"
+    ],
+    npm_global: [
+      "no Firstmate worker lane may be in flight",
+      "only the exact prior version recorded here is reinstalled",
+      "its recorded evidence is independently re-verified first - the registry identity and integrity of that version, or the checksum of the operator-supplied artifact whose own manifest was verified when it was recorded",
+      "evidence that is unavailable, unreadable, or changed is refused"
+    ]
+  },
+  tiers: { firstmate: { status: "not_started" }, npm_global: { status: "not_started" } },
+  tools: []
+}')
+
+# Atomic and mode-0600: the document is written to a fresh private temp file
+# beside the receipt and renamed over it, so a reader never sees a partial
+# record and a crash mid-mutation still leaves the prior state on disk. Only the
+# receipt file is touched - the parent directory's own mode is left alone,
+# because in the rollback direction that directory is the operator's, not ours.
+receipt_replace() {
+  local dir tmp
+  dir=$(dirname "$RECEIPT_PATH")
+  tmp=$(mktemp "$dir/.apply-receipt.XXXXXX" 2>/dev/null) || return 1
+  chmod 600 "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  printf '%s\n' "$RECEIPT_DOC" | jq . >"$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$RECEIPT_PATH" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+# The apply direction provisions its own receipt directory privately, but an
+# operator-supplied one already exists and its metadata is theirs: only a
+# directory this run creates is secured, and an unusable one refuses the write
+# rather than being repaired in place.
+receipt_write() {
+  if [ ! -d "$RECEIPT_DIR" ]; then
+    mkdir -p "$RECEIPT_DIR" 2>/dev/null || return 1
+    chmod 700 "$RECEIPT_DIR" 2>/dev/null || true
+  fi
+  [ -w "$RECEIPT_DIR" ] && [ -x "$RECEIPT_DIR" ] || return 1
+  receipt_replace || return 1
+  RECEIPT_WRITTEN=1
+  return 0
+}
+
+receipt_put() {
+  local next
+  next=$(printf '%s' "$RECEIPT_DOC" | jq -c --argjson e "$1" \
+    '.tools = ((.tools | map(select(.tier != $e.tier or .name != $e.name))) + [$e])' 2>/dev/null) || return 1
+  RECEIPT_DOC=$next
+  if [ "$ROLLBACK_MODE" -eq 1 ]; then receipt_replace; else receipt_write; fi
+}
+
+receipt_settle() {
+  local entry=$1 status=$2
+  receipt_put "$(printf '%s' "$entry" | jq -c --arg s "$status" '.status = $s')" || RECEIPT_STALE=1
+}
+
+# Whether `mkdir -p` followed by a private temp file could succeed, decided
+# without creating anything: the receipt directory itself when it exists, else
+# the nearest existing ancestor `mkdir -p` would build from.
+receipt_location_usable() {
+  local dir=$RECEIPT_DIR
+  while [ ! -e "$dir" ]; do
+    case "$dir" in
+      */?*) dir=${dir%/*}; [ -n "$dir" ] || dir=/ ;;
+      *) dir=. ;;
+    esac
   done
-  WG_IN_FLIGHT=$count
-  if [ "$count" -gt 0 ]; then
-    WG_STATUS=active
-    WG_DETAIL="$count in-flight worker lane(s)"
-  else
-    WG_STATUS=clear
-    WG_DETAIL="no in-flight worker lanes"
+  [ -d "$dir" ] && [ -w "$dir" ] && [ -x "$dir" ]
+}
+
+receipt_status() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    if receipt_location_usable; then printf planned; else printf unusable; fi
+  elif [ "$RECEIPT_STALE" -eq 1 ]; then printf incomplete
+  elif [ "$RECEIPT_WRITTEN" -eq 1 ]; then printf written
+  else printf none
   fi
 }
 
-# Detection -----------------------------------------------------------------
-run_detection() {
-  # Echoes the checker's JSON on success; empty on failure.
-  local out rc
-  out=$("$CHECKER_BIN" --json --force 2>/dev/null)
-  rc=$?
-  [ "$rc" -eq 0 ] || return 1
-  printf '%s' "$out" | jq -e 'type == "object" and (.sources | type == "object")' >/dev/null 2>&1 || return 1
-  printf '%s' "$out"
+pin_for_npm() {
+  local wanted=$1 row name command_name package version integrity guarded _channel
+  for row in "${NPM_TOOL_PINS[@]}"; do
+    IFS='|' read -r name command_name package version integrity guarded _channel <<<"$row"
+    [ "$name" = "$wanted" ] || continue
+    [ "$guarded" = yes ] || return 1
+    printf '%s|%s|%s|%s\n' "$command_name" "$package" "$version" "$integrity"
+    return 0
+  done
+  return 1
 }
 
-# Firstmate fast-forward tier ----------------------------------------------
+# Dry-run answers the same question the real run answers, from the same remote,
+# without touching the checkout. Everything happens in a private throwaway bare
+# repository: the observed local default branch is read into one temporary ref,
+# the authoritative remote default branch is fetched into another with the exact
+# URL and ref selection the apply path uses, and the comparison runs there. No
+# ref, object, index, FETCH_HEAD, or configuration of the real repository is
+# written. Anything that cannot be proven - an unreachable or moving remote, a
+# missing object, a failed import, state that cannot be cleaned up - is reported
+# as `unknown` and exits non-zero rather than predicting success.
+DRY_TMP=
+DRY_STATUS=
+DRY_DETAIL=
+firstmate_dry_run_cleanup() {
+  [ -n "$DRY_TMP" ] || return 0
+  rm -rf "$DRY_TMP" 2>/dev/null
+  if [ -e "$DRY_TMP" ]; then
+    DRY_STATUS=unknown
+    DRY_DETAIL="private temporary dry-run state could not be removed: $DRY_TMP"
+  fi
+  DRY_TMP=
+}
+trap firstmate_dry_run_cleanup EXIT
+
+# The single decision ladder both directions run, each against its own
+# repository: the dry-run against its private throwaway one, the apply against
+# the real checkout after its own fresh fetch. Keeping one implementation is
+# what makes the preview's status and exit code match the apply's.
+CMP_STATUS=
+CMP_DETAIL=
+firstmate_compare() {
+  local pinned=$1 local_commit=$2 remote_commit=$3
+  shift 3
+  $GIT_BIN "$@" cat-file -e "$pinned^{commit}" 2>/dev/null ||
+    { CMP_STATUS=refused; CMP_DETAIL='the exact pin is absent from the authoritative Firstmate main branch'; return; }
+  $GIT_BIN "$@" merge-base --is-ancestor "$pinned" "$remote_commit" 2>/dev/null ||
+    { CMP_STATUS=refused; CMP_DETAIL='the exact pin is not contained in the authoritative Firstmate main branch'; return; }
+  if [ "$local_commit" = "$pinned" ]; then
+    CMP_STATUS=up_to_date; CMP_DETAIL="already at pinned commit $pinned"; return
+  fi
+  if $GIT_BIN "$@" merge-base --is-ancestor "$local_commit" "$pinned" 2>/dev/null; then
+    CMP_STATUS=would_apply; CMP_DETAIL="would fast-forward main to exact pin $pinned"; return
+  fi
+  if $GIT_BIN "$@" merge-base --is-ancestor "$pinned" "$local_commit" 2>/dev/null; then
+    CMP_STATUS=refused; CMP_DETAIL='the local default branch is ahead of the exact pin'; return
+  fi
+  CMP_STATUS=refused; CMP_DETAIL='the local default branch has diverged from the exact pin'
+}
+
+firstmate_dry_run_probe() {
+  local pinned=$1 local_head=$2 gd remote_head fetched_local fetched_remote
+  DRY_TMP=$(mktemp -d "${TMPDIR:-/tmp}/dev-tools-apply-dry-run.XXXXXX" 2>/dev/null) ||
+    { DRY_STATUS=unknown; DRY_DETAIL='could not create private temporary state for the dry-run check'; return; }
+  gd="$DRY_TMP/verify.git"
+  $GIT_BIN init --quiet --bare "$gd" 2>/dev/null ||
+    { DRY_STATUS=unknown; DRY_DETAIL='could not initialise private temporary state for the dry-run check'; return; }
+  run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" --git-dir="$gd" fetch --quiet --no-tags "$FIRSTMATE_PATH" \
+    '+refs/heads/main:refs/dev-tools/local' 2>/dev/null ||
+    { DRY_STATUS=unknown; DRY_DETAIL='could not read the local default branch into private temporary state'; return; }
+  fetched_local=$($GIT_BIN --git-dir="$gd" rev-parse refs/dev-tools/local 2>/dev/null || true)
+  [ "$fetched_local" = "$local_head" ] ||
+    { DRY_STATUS=unknown; DRY_DETAIL='the local default branch moved while it was being read'; return; }
+  remote_head=$(run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" ls-remote "$FIRSTMATE_REPO" refs/heads/main 2>/dev/null | awk '$2 == "refs/heads/main" {print $1; exit}')
+  [ -n "$remote_head" ] ||
+    { DRY_STATUS=unknown; DRY_DETAIL='could not reach the authoritative Firstmate main branch'; return; }
+  run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" --git-dir="$gd" fetch --quiet --no-tags "$FIRSTMATE_REPO" \
+    '+refs/heads/main:refs/dev-tools/remote' 2>/dev/null ||
+    { DRY_STATUS=unknown; DRY_DETAIL='could not fetch the authoritative Firstmate main branch into private temporary state'; return; }
+  fetched_remote=$($GIT_BIN --git-dir="$gd" rev-parse refs/dev-tools/remote 2>/dev/null || true)
+  [ -n "$fetched_remote" ] ||
+    { DRY_STATUS=unknown; DRY_DETAIL='the authoritative Firstmate main branch produced no commit'; return; }
+  [ "$fetched_remote" = "$remote_head" ] ||
+    { DRY_STATUS=unknown; DRY_DETAIL='the authoritative Firstmate main branch moved during verification'; return; }
+  firstmate_compare "$pinned" "$fetched_local" "$fetched_remote" --git-dir="$gd"
+  DRY_STATUS=$CMP_STATUS
+  DRY_DETAIL=$CMP_DETAIL
+}
+
+# The reversal path for an npm tool: the registry entry for the installed
+# version, or - when that version is not published, which is how a locally built
+# or unpublished global install presents - an operator-supplied artifact for
+# exactly that version. Prints the evidence object, or nothing when neither
+# exists. There is deliberately no override that records a mutation without one.
+npm_prior_evidence() {
+  local package=$1 version=$2 registry_json registry_version registry_integrity artifact checksum
+  registry_json=$(run_timed "$NETWORK_TIMEOUT" "$NPM_BIN" view "$package@$version" version dist.integrity --json 2>/dev/null || true)
+  registry_version=$(printf '%s' "$registry_json" | jq -r '.version // ""' 2>/dev/null || true)
+  registry_integrity=$(printf '%s' "$registry_json" | jq -r '."dist.integrity" // .dist.integrity // ""' 2>/dev/null || true)
+  if [ "$registry_version" = "$version" ] && [ -n "$registry_integrity" ]; then
+    jq -cn --arg pkg "$package" --arg v "$version" --arg i "$registry_integrity" \
+      '{kind:"npm-registry",package:$pkg,version:$v,integrity:$i,available:true}'
+    return
+  fi
+  artifact=$(npm_prior_artifact "$package" "$version")
+  [ -n "$artifact" ] || return 0
+  [ "$(npm_artifact_identity "$artifact")" = "$package $version" ] || return 0
+  checksum=$(file_checksum "$artifact") || return 0
+  [ -n "$checksum" ] || return 0
+  jq -cn --arg pkg "$package" --arg v "$version" --arg p "$artifact" --arg c "$checksum" \
+    '{kind:"operator-artifact",package:$pkg,version:$v,path:$p,checksum:$c,integrity:"",available:true}'
+}
+
+# What the tarball says it is, read from its own package manifest. Recording a
+# checksum alone would only pin the bytes, not which package a reversal installs,
+# and `npm install -g <tarball>` takes its target from the contents.
+npm_artifact_identity() {
+  local manifest
+  manifest=$(run_timed "$TIMEOUT_SECONDS" "$TAR_BIN" -xzOf "$1" package/package.json 2>/dev/null) || return 0
+  printf '%s' "$manifest" |
+    jq -r 'if (.name|type) == "string" and (.version|type) == "string" then .name + " " + .version else empty end' 2>/dev/null || true
+}
+
+npm_prior_artifact() {
+  local package=$1 version=$2 candidate
+  [ -n "$PRIOR_ARTIFACT_DIR" ] && [ -d "$PRIOR_ARTIFACT_DIR" ] || return 0
+  for candidate in "$PRIOR_ARTIFACT_DIR/$package-$version.tgz" "$PRIOR_ARTIFACT_DIR/$package@$version.tgz"; do
+    [ -f "$candidate" ] && [ -r "$candidate" ] || continue
+    printf '%s' "$candidate"
+    return 0
+  done
+}
+
+file_checksum() {
+  local out
+  out=$($SHA256_BIN "$1" 2>/dev/null) || return 1
+  printf 'sha256-%s' "${out%% *}"
+}
+
 apply_firstmate() {
-  local detection=$1 status branch current behind ref_behind remote_head_out remote_default fetch_out merge_out extra
-  status=$(printf '%s' "$detection" | jq -r '.sources.firstmate.status // "unknown"')
-  branch=$(printf '%s' "$detection" | jq -r '.sources.firstmate.default_branch // ""')
-
-  if [ "$status" = unknown ]; then
-    tier_json skipped "detection unknown: $(printf '%s' "$detection" | jq -r '.sources.firstmate.detail // "unavailable"')"
-    return
+  local detection=$1 row current pinned latest branch remote_head fetched_remote fetch_out prior entry
+  row=$(printf '%s' "$detection" | jq -ce '.tools[] | select(.name == "firstmate")' 2>/dev/null || true)
+  if [ -z "$row" ]; then set_tier refused 'checker did not return the allowlisted Firstmate source'; return; fi
+  current=$(printf '%s' "$row" | jq -r '.current // "unknown"')
+  pinned=$(printf '%s' "$row" | jq -r '.pinned // ""')
+  latest=$(printf '%s' "$row" | jq -r '.latest_stable // "unknown"')
+  [ "$pinned" = "$FIRSTMATE_PIN" ] || { set_tier refused 'checker pin disagrees with repository pin'; return; }
+  printf '%s\n' "$pinned" | grep -Eq '^[0-9a-f]{40}$' || { set_tier refused 'unsafe Firstmate commit pin'; return; }
+  [ -d "$FIRSTMATE_PATH/.git" ] || { set_tier skipped 'Firstmate checkout unavailable'; return; }
+  current=$($GIT_BIN -C "$FIRSTMATE_PATH" rev-parse HEAD 2>/dev/null || printf unknown)
+  if [ "$current" = "$pinned" ]; then set_tier up_to_date "already at pinned commit $pinned" "$(jq -cn --arg p "$pinned" --arg l "$latest" '{pinned:$p,latest:$l}')"; return; fi
+  branch=$($GIT_BIN -C "$FIRSTMATE_PATH" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+  [ "$branch" = main ] || { set_tier skipped "Firstmate must be on main, found '${branch:-detached}'"; return; }
+  if ! $GIT_BIN -C "$FIRSTMATE_PATH" diff --quiet --ignore-submodules -- 2>/dev/null ||
+     ! $GIT_BIN -C "$FIRSTMATE_PATH" diff --cached --quiet --ignore-submodules -- 2>/dev/null; then
+      set_tier skipped 'Firstmate worktree has local changes; refusing to fast-forward it'
+      return
   fi
-  if ! command -v "$GIT_BIN" >/dev/null 2>&1; then
-    tier_json skipped "git unavailable"
-    return
-  fi
-  if [ -z "$branch" ]; then
-    tier_json skipped "default branch could not be resolved"
-    return
-  fi
-
-  current=$($GIT_BIN -C "$FIRSTMATE_PATH" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
-  if [ -z "$current" ]; then
-    tier_json skipped "HEAD is detached; only the default branch is fast-forwarded" \
-      "$(jq -cn --arg b "$branch" '{default_branch:$b}')"
-    return
-  fi
-  if [ "$current" != "$branch" ]; then
-    tier_json skipped "on '$current', not the default branch '$branch'" \
-      "$(jq -cn --arg b "$branch" --arg c "$current" '{default_branch:$b,current_branch:$c}')"
-    return
-  fi
-
+  if [ "$WG_STATUS" = active ]; then set_tier deferred 'workers active'; return; fi
   if [ "$DRY_RUN" -eq 1 ]; then
-    behind=$(printf '%s' "$detection" | jq -r '.sources.firstmate.behind // ""')
-    ref_behind=$($GIT_BIN -C "$FIRSTMATE_PATH" rev-list --count "HEAD..refs/remotes/origin/$branch" 2>/dev/null || true)
-    case "$behind" in ''|*[!0-9]*) tier_json skipped "detected behind count is unavailable"; return ;; esac
-    case "$ref_behind" in ''|*[!0-9]*) tier_json skipped "origin/$branch could not be compared"; return ;; esac
-    if [ "$behind" -ne "$ref_behind" ]; then
-      tier_json skipped "detection and current origin/$branch ref disagree" \
-        "$(jq -cn --arg b "$branch" --argjson behind "$behind" --argjson ref_behind "$ref_behind" \
-          '{default_branch:$b,behind:$behind,ref_behind:$ref_behind}')"
-      return
+    firstmate_dry_run_probe "$pinned" "$current"
+    firstmate_dry_run_cleanup
+    if [ "$DRY_STATUS" = would_apply ] && ! receipt_location_usable; then
+      DRY_STATUS=refused; DRY_DETAIL='could not write the mutation receipt; refusing to mutate'
     fi
-  else
-    if ! remote_head_out=$(run_timed "$NETWORK_TIMEOUT" env GIT_TERMINAL_PROMPT=0 \
-      "$GIT_BIN" -C "$FIRSTMATE_PATH" ls-remote --symref origin HEAD 2>&1); then
-      tier_json skipped "origin default branch re-verification failed or timed out${remote_head_out:+: $remote_head_out}" \
-        "$(jq -cn --arg b "$branch" '{default_branch:$b}')"
-      return
-    fi
-    remote_default=$(printf '%s\n' "$remote_head_out" |
-      sed -n 's|^ref: refs/heads/\([^[:space:]]*\)[[:space:]]*HEAD$|\1|p' |
-      sed -n '1p')
-    if [ -z "$remote_default" ]; then
-      tier_json skipped "origin default branch could not be resolved during re-verification" \
-        "$(jq -cn --arg b "$branch" '{default_branch:$b}')"
-      return
-    fi
-    if [ "$remote_default" != "$branch" ]; then
-      tier_json skipped "detected default branch '$branch' no longer matches origin default branch '$remote_default'" \
-        "$(jq -cn --arg b "$branch" --arg r "$remote_default" \
-          '{default_branch:$b,remote_default_branch:$r}')"
-      return
-    fi
-    if ! fetch_out=$(run_timed "$NETWORK_TIMEOUT" env GIT_TERMINAL_PROMPT=0 "$GIT_BIN" -C "$FIRSTMATE_PATH" fetch --quiet origin "$branch" 2>&1); then
-      tier_json skipped "git fetch failed or timed out${fetch_out:+: $fetch_out}" \
-        "$(jq -cn --arg b "$branch" '{default_branch:$b}')"
-      return
-    fi
-    behind=$($GIT_BIN -C "$FIRSTMATE_PATH" rev-list --count "HEAD..refs/remotes/origin/$branch" 2>/dev/null || true)
-    case "$behind" in ''|*[!0-9]*) tier_json skipped "origin/$branch could not be compared"; return ;; esac
-  fi
-
-  extra=$(jq -cn --arg b "$branch" --argjson behind "$behind" '{default_branch:$b,behind:$behind}')
-
-  if [ "$behind" -eq 0 ]; then
-    tier_json up_to_date "already at origin/$branch" "$extra"
+    set_tier "$DRY_STATUS" "$DRY_DETAIL" "$(jq -cn --arg p "$pinned" '{pinned:$p}')"
     return
   fi
-  if ! $GIT_BIN -C "$FIRSTMATE_PATH" merge-base --is-ancestor HEAD "refs/remotes/origin/$branch" 2>/dev/null; then
-    tier_json skipped "origin/$branch is not a clean fast-forward from HEAD" "$extra"
-    return
+  remote_head=$(run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" ls-remote "$FIRSTMATE_REPO" refs/heads/main 2>/dev/null | awk '$2 == "refs/heads/main" {print $1; exit}')
+  [ -n "$remote_head" ] || { set_tier refused 'could not reach the authoritative Firstmate main branch'; return; }
+  if ! fetch_out=$(run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" -C "$FIRSTMATE_PATH" fetch --quiet "$FIRSTMATE_REPO" main 2>&1); then
+    set_tier refused "could not fetch the authoritative Firstmate main branch: $fetch_out"; return
   fi
-  if [ "$DRY_RUN" -eq 1 ]; then
-    tier_json would_apply "would fast-forward '$branch' by $behind commit(s) to origin/$branch" "$extra"
-    return
-  fi
+  fetched_remote=$($GIT_BIN -C "$FIRSTMATE_PATH" rev-parse FETCH_HEAD 2>/dev/null || true)
+  [ "$fetched_remote" = "$remote_head" ] ||
+    { set_tier refused 'the authoritative Firstmate main branch moved during verification'; return; }
+  current=$($GIT_BIN -C "$FIRSTMATE_PATH" rev-parse HEAD 2>/dev/null || printf unknown)
+  firstmate_compare "$pinned" "$current" "$remote_head" -C "$FIRSTMATE_PATH"
+  [ "$CMP_STATUS" = would_apply ] || { set_tier "$CMP_STATUS" "$CMP_DETAIL"; return; }
   detect_workers
-  if [ "$WG_STATUS" = active ]; then
-    tier_json deferred "workers active" "$extra"
-    return
-  fi
-  current=$($GIT_BIN -C "$FIRSTMATE_PATH" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
-  if [ -z "$current" ]; then
-    tier_json skipped "HEAD is detached; only the default branch is fast-forwarded" "$extra"
-    return
-  fi
-  if [ "$current" != "$branch" ]; then
-    tier_json skipped "on '$current', not the default branch '$branch'" \
-      "$(printf '%s' "$extra" | jq -c --arg c "$current" '. + {current_branch:$c}')"
-    return
-  fi
-  if merge_out=$(run_timed "$APPLY_TIMEOUT" env GIT_TERMINAL_PROMPT=0 "$GIT_BIN" -C "$FIRSTMATE_PATH" merge --ff-only "refs/remotes/origin/$branch" 2>&1); then
-    tier_json applied "fast-forwarded '$branch' by $behind commit(s) to origin/$branch" "$extra"
+  [ "$WG_STATUS" = clear ] || { set_tier deferred 'workers appeared during re-verification'; return; }
+  [ "$($GIT_BIN -C "$FIRSTMATE_PATH" symbolic-ref --quiet --short HEAD 2>/dev/null || true)" = main ] || { set_tier skipped 'Firstmate branch changed during re-verification'; return; }
+  prior=$($GIT_BIN -C "$FIRSTMATE_PATH" rev-parse HEAD 2>/dev/null || printf unknown)
+  entry=$(jq -cn --arg prior "$prior" --arg target "$pinned" --arg repo "$FIRSTMATE_REPO" --arg head "$remote_head" \
+    '{tier:"firstmate",name:"firstmate",prior:$prior,target:$target,
+      prior_evidence:{kind:"git-commit",commit:$prior,ancestor_of_target:true},
+      target_evidence:{kind:"git-commit",repository:$repo,remote_head:$head,contained_in_remote_main:true},
+      status:"pending"}')
+  receipt_put "$entry" || { set_tier refused 'could not write the mutation receipt; refusing to mutate'; return; }
+  if run_timed "$TIMEOUT_SECONDS" "$GIT_BIN" -C "$FIRSTMATE_PATH" merge --ff-only "$pinned" >/dev/null 2>&1; then
+    receipt_settle "$entry" applied
+    set_tier applied "fast-forwarded main to exact pin $pinned" "$(jq -cn --arg p "$pinned" '{pinned:$p}')"
   else
-    tier_json failed "git merge --ff-only refused or failed${merge_out:+: $merge_out}" "$extra"
+    receipt_settle "$entry" failed
+    set_tier failed 'git merge --ff-only refused the exact pin'
   fi
 }
 
-# npm-global tier -----------------------------------------------------------
 apply_npm() {
-  local detection=$1 status allowed count results pkg name latest latest_out current rc extra
-  status=$(printf '%s' "$detection" | jq -r '.sources.npm_global.status // "unknown"')
-
-  if [ "$status" = unknown ]; then
-    tier_json skipped "detection unknown: $(printf '%s' "$detection" | jq -r '.sources.npm_global.detail // "unavailable"')"
-    return
-  fi
-  if ! command -v "$NPM_BIN" >/dev/null 2>&1; then
-    tier_json skipped "npm unavailable"
-    return
-  fi
-  if [ -z "$NPM_PREFIX" ] || [ ! -d "$NPM_PREFIX" ]; then
-    tier_json skipped "npm prefix unavailable"
-    return
-  fi
-
-  # Intersect the checker's reported packages with our own allowlist. This is the
-  # widening guard: anything outside ALLOWLIST_NPM_JSON is dropped, never installed.
-  allowed=$(printf '%s' "$detection" | jq -c --argjson allow "$ALLOWLIST_NPM_JSON" '
-    (.sources.npm_global.packages // [])
-    | map(select(.name as $n | $allow | index($n)))
-    | sort_by(.name)
-  ')
-  count=$(printf '%s' "$allowed" | jq 'length')
-  if [ "$count" -eq 0 ]; then
-    tier_json up_to_date "no allowlisted packages need updating" \
-      "$(jq -cn --argjson allow "$ALLOWLIST_NPM_JSON" '{allowlist:$allow,packages:[]}')"
-    return
-  fi
-
-  results='[]'
-  local i=0
-  while [ "$i" -lt "$count" ]; do
-    pkg=$(printf '%s' "$allowed" | jq -c ".[$i]")
-    name=$(printf '%s' "$pkg" | jq -r '.name')
-    latest=$(printf '%s' "$pkg" | jq -r 'if (.latest | type) == "string" then .latest else "" end')
-    current=$(printf '%s' "$pkg" | jq -r '.current // "unknown"')
-    if [[ ! "$latest" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
-      results=$(printf '%s' "$results" | jq -c --arg n "$name" --arg c "$current" --arg l "$latest" \
-        '. + [{name:$n,current:$c,latest:$l,status:"skipped",detail:"unsafe version spec"}]')
-      i=$((i + 1))
-      continue
+  local detection=$1 results='[]' name spec command_name package pinned integrity registry_json verified_version verified_integrity
+  local current observed installed item any=0 failed=0 refused=0 deferred=0 prior_evidence entry
+  for name in $(printf '%s' "$ALLOWLIST_NPM_JSON" | jq -r '.[]'); do
+    spec=$(pin_for_npm "$name" || true)
+    if [ -z "$spec" ]; then
+      item=$(tier_json refused 'allowlisted name has no guarded repository pin' "$(jq -cn --arg n "$name" '{name:$n}')")
+      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
+    fi
+    IFS='|' read -r command_name package pinned integrity <<<"$spec"
+    current=$(printf '%s' "$detection" | jq -r --arg n "$name" '.tools[] | select(.name == $n) | .current' 2>/dev/null || true)
+    if [ -z "$current" ] || [ "$current" = unknown ]; then
+      item=$(tier_json refused 'checker source is unknown; refusing to infer drift' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')")
+      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
+    fi
+    if [ "$current" = "$pinned" ]; then
+      item=$(tier_json up_to_date "installed version matches exact pin $pinned" "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')")
+      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); continue
+    fi
+    any=1
+    if ! npm_reversible_version "$pinned" ||
+       ! printf '%s\n' "$integrity" | grep -Eq '^sha512-[A-Za-z0-9+/]+={0,2}$'; then
+      item=$(tier_json refused 'unsafe exact version or integrity pin' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')")
+      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
+    fi
+    if [ "$WG_STATUS" = active ]; then
+      item=$(tier_json deferred 'workers active' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')"); deferred=1
+      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); continue
+    fi
+    registry_json=$(run_timed "$NETWORK_TIMEOUT" "$NPM_BIN" view "$package@$pinned" version dist.integrity --json 2>/dev/null || true)
+    verified_version=$(printf '%s' "$registry_json" | jq -r '.version // ""' 2>/dev/null || true)
+    verified_integrity=$(printf '%s' "$registry_json" | jq -r '."dist.integrity" // .dist.integrity // ""' 2>/dev/null || true)
+    if [ "$verified_version" != "$pinned" ] || [ "$verified_integrity" != "$integrity" ]; then
+      item=$(tier_json refused 'exact registry version or integrity could not be re-verified' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')")
+      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
+    fi
+    # The reversal path is proven before the preview reports and before the
+    # install runs, so both directions answer the same question: without evidence
+    # for the installed version the mutation would be irreversible, and it is
+    # refused rather than recorded with an empty way back.
+    if ! npm_reversible_version "$current"; then
+      item=$(tier_json refused "the installed version $current has no shape a reversal could restore; refusing a mutation it could not reverse" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg c "$current" '{name:$n,pinned:$p,prior:$c}')")
+      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
+    fi
+    # A reversal writes into $NPM_PREFIX and reads its result back from there, so
+    # the prior state the receipt records is read from the same place. Detection is
+    # delegated to the checker, which resolves through PATH; when the two disagree
+    # the receipt would name a version reinstalling could not restore.
+    observe_npm "$command_name"
+    observed=$NPM_OBSERVED
+    if [ -z "$observed" ]; then
+      item=$(tier_json refused "$NPM_OBSERVE_REASON, so there is no prior state to reverse to; refusing a mutation it could not reverse" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg c "$current" '{name:$n,pinned:$p,detected:$c}')")
+      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
+    fi
+    if [ "$observed" != "$current" ]; then
+      item=$(tier_json refused "detection read $current but the npm prefix carries $observed; refusing a mutation whose reversal target is unclear" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg c "$current" --arg o "$observed" '{name:$n,pinned:$p,detected:$c,observed:$o}')")
+      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
+    fi
+    prior_evidence=$(npm_prior_evidence "$package" "$observed")
+    if [ -z "$prior_evidence" ]; then
+      item=$(tier_json refused "could not verify the installed version $observed against the registry or an operator-supplied artifact; refusing a mutation it could not reverse" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg c "$observed" '{name:$n,pinned:$p,prior:$c}')")
+      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
     fi
     if [ "$DRY_RUN" -eq 1 ]; then
-      results=$(printf '%s' "$results" | jq -c --arg n "$name" --arg c "$current" --arg l "$latest" \
-        '. + [{name:$n,current:$c,latest:$l,status:"would_apply"}]')
-    else
-      if ! latest_out=$(run_timed "$NETWORK_TIMEOUT" env NPM_CONFIG_UPDATE_NOTIFIER=false \
-        "$NPM_BIN" --prefix "$NPM_PREFIX" view "$name@latest" version --json 2>/dev/null); then
-        results=$(printf '%s' "$results" | jq -c --arg n "$name" --arg c "$current" --arg l "$latest" \
-          '. + [{name:$n,current:$c,latest:$l,status:"skipped",detail:"npm latest re-verification failed"}]')
-        i=$((i + 1))
-        continue
-      fi
-      latest=$(printf '%s' "$latest_out" | jq -er 'select(type == "string")' 2>/dev/null || true)
-      if [[ ! "$latest" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
-        results=$(printf '%s' "$results" | jq -c --arg n "$name" --arg c "$current" --arg l "$latest" \
-          '. + [{name:$n,current:$c,latest:$l,status:"skipped",detail:"unsafe registry version"}]')
-        i=$((i + 1))
-        continue
-      fi
-      detect_workers
-      if [ "$WG_STATUS" = active ]; then
-        results=$(jq -cn \
-          --argjson results "$results" \
-          --argjson allowed "$allowed" \
-          --argjson start "$i" '
-          $results + ($allowed[$start:] | map({
-            name:.name,
-            current:(.current // "unknown"),
-            latest:(if (.latest | type) == "string" then .latest else "" end),
-            status:"deferred",
-            detail:"workers active"
-          }))
-        ')
-        break
-      fi
-      if run_timed "$APPLY_TIMEOUT" env NPM_CONFIG_UPDATE_NOTIFIER=false "$NPM_BIN" --prefix "$NPM_PREFIX" install -g "$name@$latest" >/dev/null 2>&1; then
-        results=$(printf '%s' "$results" | jq -c --arg n "$name" --arg c "$current" --arg l "$latest" \
-          '. + [{name:$n,current:$c,latest:$l,status:"applied"}]')
+      if receipt_location_usable; then
+        item=$(tier_json would_apply "would install $package@$pinned" "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')")
       else
-        rc=$?
-        results=$(printf '%s' "$results" | jq -c --arg n "$name" --arg c "$current" --arg l "$latest" \
-          --arg detail "install failed (rc=$rc)" \
-          '. + [{name:$n,current:$c,latest:$l,status:"failed",detail:$detail}]')
+        item=$(tier_json refused 'could not write the mutation receipt; refusing to mutate' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')"); refused=1
+      fi
+      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); continue
+    fi
+    detect_workers
+    if [ "$WG_STATUS" = active ]; then
+      item=$(tier_json deferred 'workers appeared during re-verification' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')"); deferred=1
+      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); continue
+    fi
+    entry=$(jq -cn --arg n "$name" --arg cmd "$command_name" --arg pkg "$package" --arg prior "$observed" \
+      --arg target "$pinned" --argjson pe "$prior_evidence" --arg ti "$verified_integrity" \
+      '{tier:"npm_global",name:$n,command:$cmd,package:$pkg,prior:$prior,target:$target,
+        prior_evidence:$pe,
+        target_evidence:{kind:"npm-registry",package:$pkg,version:$target,integrity:$ti},
+        status:"pending"}')
+    if ! receipt_put "$entry"; then
+      item=$(tier_json refused 'could not write the mutation receipt; refusing to mutate' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')"); refused=1
+    elif run_timed "$TIMEOUT_SECONDS" env NPM_CONFIG_PREFIX="$NPM_PREFIX" "$NPM_BIN" install -g "$package@$pinned" >/dev/null 2>&1; then
+      observe_npm "$command_name"
+      installed=$NPM_OBSERVED
+      if [ "$installed" = "$pinned" ]; then
+        receipt_settle "$entry" applied
+        item=$(tier_json applied "installed $package@$pinned" "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')")
+      else
+        receipt_settle "$entry" failed
+        item=$(tier_json failed "installed command did not report exact pin $pinned${NPM_OBSERVE_REASON:+; $NPM_OBSERVE_REASON}" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg got "${installed:-unknown}" '{name:$n,pinned:$p,installed:$got}')"); failed=1
+      fi
+    else
+      receipt_settle "$entry" failed
+      item=$(tier_json failed "npm install failed for $package@$pinned" "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')"); failed=1
+    fi
+    results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]')
+  done
+  local status detail
+  if [ "$failed" -eq 1 ]; then status=failed; detail='one or more exact npm pins failed'
+  elif [ "$refused" -eq 1 ]; then status=refused; detail='one or more exact npm pins were refused'
+  elif [ "$deferred" -eq 1 ]; then status=deferred; detail='workers deferred one or more exact npm pins'
+  elif [ "$any" -eq 0 ]; then status=up_to_date; detail='all allowlisted npm tools match their pins'
+  elif [ "$DRY_RUN" -eq 1 ]; then status=would_apply; detail='exact npm pin convergence previewed'
+  else status=applied; detail='exact npm pins converged'
+  fi
+  set_tier "$status" "$detail" "$(jq -cn --argjson allow "$ALLOWLIST_NPM_JSON" --argjson packages "$results" '{allowlist:$allow,packages:$packages}')"
+}
+
+# ----------------------------------------------------------------- rollback
+
+receipt_reconcile() {
+  local entry=$1 observed=$2 reconciliation=$3 status=$4
+  RECEIPT_TOUCHED=1
+  receipt_put "$(printf '%s' "$entry" | jq -c --arg o "$observed" --arg r "$reconciliation" --arg s "$status" \
+    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '. + {status:$s,observed:$o,reconciliation:$r,reconciled_at:$at}')" || RECEIPT_STALE=1
+}
+
+# Per-tier completion is derived from the receipt's own settled tool entries, so
+# a tier is only ever relabelled by what actually happened to the tools in it.
+# The worst outcome wins, which keeps a partly reversed tier honest.
+receipt_settle_tiers() {
+  RECEIPT_DOC=$(printf '%s' "$RECEIPT_DOC" | jq -c '
+    def rank: {"rollback_failed":0,"failed":1,"pending":2,"applied":3,"reconciled_at_prior":4,"rolled_back":5}[.] // 3;
+    reduce ["firstmate","npm_global"][] as $tier (.;
+      ((.tools // []) | map(select(.tier == $tier))) as $entries
+      | if ($entries | length) == 0 then .
+        else .tiers[$tier].status = ($entries | min_by(.status | rank) | .status)
+        end)') || { RECEIPT_STALE=1; return; }
+  receipt_replace || RECEIPT_STALE=1
+}
+
+observe_firstmate() {
+  [ -d "$FIRSTMATE_PATH/.git" ] || return 0
+  $GIT_BIN -C "$FIRSTMATE_PATH" rev-parse HEAD 2>/dev/null || true
+}
+
+# The one bounded read of installed npm state, used by the apply gate, the
+# post-install read-back, the rollback preflight, and every reconciliation. It
+# reads the exact executable the npm prefix owns - never PATH - takes stdout and
+# stderr together under the same timeout the checker's detection uses, and accepts
+# only an exact version a reversal could reinstall. NPM_OBSERVED carries that
+# version; when it is empty NPM_OBSERVE_REASON says which of those failed.
+observe_npm() {
+  local command_name=$1 path output token rc
+  NPM_OBSERVED=
+  NPM_OBSERVE_REASON=
+  case "$command_name" in
+    ''|.|..|*/*)
+      NPM_OBSERVE_REASON='the recorded command is not a plain executable name inside the npm prefix'
+      return 0
+      ;;
+  esac
+  path=$NPM_PREFIX/bin/$command_name
+  if [ ! -x "$path" ]; then
+    NPM_OBSERVE_REASON="the npm prefix $NPM_PREFIX carries no installed $command_name"
+    return 0
+  fi
+  output=$(run_timed "$NETWORK_TIMEOUT" env NO_UPDATE_NOTIFIER=1 "$path" --version 2>&1) || {
+    rc=$?
+    if [ "$rc" -eq 124 ]; then
+      NPM_OBSERVE_REASON="$command_name in the npm prefix did not answer within ${NETWORK_TIMEOUT}s"
+    else
+      NPM_OBSERVE_REASON="$command_name in the npm prefix exited $rc without reporting a version"
+    fi
+    return 0
+  }
+  token=$(printf '%s\n' "$output" | grep -Eo "$NPM_OBSERVED_TOKEN_RE" | head -1 || true)
+  if [ -z "$token" ]; then
+    NPM_OBSERVE_REASON="$command_name in the npm prefix reported no recognisable version"
+    return 0
+  fi
+  if ! npm_reversible_version "$token"; then
+    NPM_OBSERVE_REASON="$command_name in the npm prefix reports $token, which is not an exact version a reversal could reinstall"
+    return 0
+  fi
+  NPM_OBSERVED=$token
+}
+
+# Non-mutating tier preconditions, evaluated in the preflight. Each prints the
+# refusal detail for an entry that cannot be reversed, or nothing when it can.
+preflight_firstmate_refusal() {
+  local entry=$1 prior target branch
+  prior=$(printf '%s' "$entry" | jq -r '.prior')
+  target=$(printf '%s' "$entry" | jq -r '.target')
+  printf '%s\n' "$prior" | grep -Eq '^[0-9a-f]{40}$' || { printf 'the receipt does not record a usable prior commit'; return; }
+  branch=$($GIT_BIN -C "$FIRSTMATE_PATH" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+  [ "$branch" = main ] || { printf "Firstmate must be on main, found '%s'" "${branch:-detached}"; return; }
+  if ! $GIT_BIN -C "$FIRSTMATE_PATH" diff --quiet --ignore-submodules -- 2>/dev/null ||
+     ! $GIT_BIN -C "$FIRSTMATE_PATH" diff --cached --quiet --ignore-submodules -- 2>/dev/null; then
+      printf 'the checkout has local changes; refusing to discard them'
+      return
+  fi
+  $GIT_BIN -C "$FIRSTMATE_PATH" merge-base --is-ancestor "$prior" "$target" 2>/dev/null ||
+    printf 'the recorded prior commit is not an ancestor of the applied commit'
+}
+
+preflight_npm_refusal() {
+  local entry=$1 command_name package prior kind recorded artifact registry_json version integrity
+  command_name=$(printf '%s' "$entry" | jq -r '.command // ""')
+  package=$(printf '%s' "$entry" | jq -r '.package // ""')
+  prior=$(printf '%s' "$entry" | jq -r '.prior')
+  kind=$(printf '%s' "$entry" | jq -r '.prior_evidence.kind // ""')
+  [ -n "$command_name" ] && [ -n "$package" ] || { printf 'the receipt does not record the package to reinstall'; return; }
+  npm_reversible_version "$prior" || { printf 'the receipt does not record a usable prior version'; return; }
+  case "$kind" in
+    npm-registry)
+      recorded=$(printf '%s' "$entry" | jq -r '.prior_evidence.integrity // ""')
+      [ -n "$recorded" ] || { printf 'no registry evidence was captured for the prior version'; return; }
+      registry_json=$(run_timed "$NETWORK_TIMEOUT" "$NPM_BIN" view "$package@$prior" version dist.integrity --json 2>/dev/null || true)
+      version=$(printf '%s' "$registry_json" | jq -r '.version // ""' 2>/dev/null || true)
+      integrity=$(printf '%s' "$registry_json" | jq -r '."dist.integrity" // .dist.integrity // ""' 2>/dev/null || true)
+      [ "$version" = "$prior" ] || { printf 'the recorded prior version %s is no longer available' "$prior"; return; }
+      [ "$integrity" = "$recorded" ] || printf 'the registry integrity for %s changed since the receipt was written' "$prior"
+      ;;
+    operator-artifact)
+      recorded=$(printf '%s' "$entry" | jq -r '.prior_evidence.checksum // ""')
+      artifact=$(printf '%s' "$entry" | jq -r '.prior_evidence.path // ""')
+      [ -n "$recorded" ] && [ -n "$artifact" ] || { printf 'no artifact evidence was captured for the prior version'; return; }
+      [ -f "$artifact" ] && [ -r "$artifact" ] || { printf 'the recorded prior artifact %s is no longer readable' "$artifact"; return; }
+      [ "$(file_checksum "$artifact" || true)" = "$recorded" ] ||
+        printf 'the recorded prior artifact %s changed since the receipt was written' "$artifact"
+      ;;
+    *) printf 'no usable evidence was captured for the prior version' ;;
+  esac
+}
+
+rollback_firstmate() {
+  local entry=$1 prior target refusal
+  prior=$(printf '%s' "$entry" | jq -r '.prior')
+  target=$(printf '%s' "$entry" | jq -r '.target')
+  if [ "$ATTENDED" -eq 0 ]; then set_tier ready "an attended git reset --hard $prior would restore the recorded prior commit"; return; fi
+  detect_workers
+  [ "$WG_STATUS" = clear ] || { set_tier refused 'a Firstmate worker lane appeared during the preflight'; return; }
+  [ "$(observe_firstmate)" = "$target" ] || { set_tier refused 'the checkout left the recorded applied commit during the preflight'; return; }
+  refusal=$(preflight_firstmate_refusal "$entry")
+  [ -z "$refusal" ] || { set_tier refused "$refusal"; return; }
+  if run_timed "$TIMEOUT_SECONDS" "$GIT_BIN" -C "$FIRSTMATE_PATH" reset --hard "$prior" >/dev/null 2>&1 &&
+     [ "$(observe_firstmate)" = "$prior" ]; then
+    receipt_reconcile "$entry" "$prior" at_target rolled_back
+    set_tier rolled_back "main is back at the recorded prior commit $prior"
+  else
+    receipt_reconcile "$entry" "$(observe_firstmate)" at_target rollback_failed
+    set_tier failed 'git reset --hard did not restore the recorded prior commit'
+  fi
+}
+
+rollback_npm() {
+  local entry=$1 command_name package prior target source installed refusal
+  command_name=$(printf '%s' "$entry" | jq -r '.command // ""')
+  package=$(printf '%s' "$entry" | jq -r '.package // ""')
+  prior=$(printf '%s' "$entry" | jq -r '.prior')
+  target=$(printf '%s' "$entry" | jq -r '.target')
+  if [ "$(printf '%s' "$entry" | jq -r '.prior_evidence.kind // ""')" = operator-artifact ]; then
+    source=$(printf '%s' "$entry" | jq -r '.prior_evidence.path // ""')
+  else
+    source="$package@$prior"
+  fi
+  if [ "$ATTENDED" -eq 0 ]; then set_tier ready "attended reinstall of $package@$prior from $source would restore the recorded prior version"; return; fi
+  detect_workers
+  [ "$WG_STATUS" = clear ] || { set_tier refused 'a Firstmate worker lane appeared during the preflight'; return; }
+  observe_npm "$command_name"
+  if [ -z "$NPM_OBSERVED" ]; then
+    set_tier refused "$NPM_OBSERVE_REASON, so the recorded applied version cannot be confirmed"
+    return
+  fi
+  [ "$NPM_OBSERVED" = "$target" ] || { set_tier refused 'the installed version left the recorded applied version during the preflight'; return; }
+  refusal=$(preflight_npm_refusal "$entry")
+  [ -z "$refusal" ] || { set_tier refused "$refusal"; return; }
+  if run_timed "$TIMEOUT_SECONDS" env NPM_CONFIG_PREFIX="$NPM_PREFIX" "$NPM_BIN" install -g "$source" >/dev/null 2>&1; then
+    observe_npm "$command_name"
+    installed=$NPM_OBSERVED
+    if [ "$installed" = "$prior" ]; then
+      receipt_reconcile "$entry" "$prior" at_target rolled_back
+      set_tier rolled_back "reinstalled $package@$prior from $source"
+    else
+      receipt_reconcile "$entry" "$installed" at_target rollback_failed
+      set_tier failed "reinstalled command did not report the recorded prior version $prior${NPM_OBSERVE_REASON:+; $NPM_OBSERVE_REASON}"
+    fi
+  else
+    observe_npm "$command_name"
+    receipt_reconcile "$entry" "$NPM_OBSERVED" at_target rollback_failed
+    set_tier failed "npm install failed for $source"
+  fi
+}
+
+# One preflight for the whole receipt: observe every affected tool, reconcile it
+# against the record, and prove its tier reversible - worker lane, checkout
+# cleanliness and ancestry, and exact registry evidence for every eligible prior
+# artifact - before any tool is touched. A single unreconcilable or unverifiable
+# entry stops its whole tier instead of being discovered halfway through it.
+rollback_preflight() {
+  local doc=$1 entry tier name status observed prior target phase refusal unreadable
+  PLAN='[]'
+  UNRECONCILABLE_TIERS=' '
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    tier=$(printf '%s' "$entry" | jq -r '.tier')
+    name=$(printf '%s' "$entry" | jq -r '.name')
+    status=$(printf '%s' "$entry" | jq -r '.status')
+    observed=
+    refusal=
+    phase=
+    case "$tier" in
+      firstmate|npm_global) ;;
+      *) phase=foreign ;;
+    esac
+    if [ -z "$phase" ]; then
+      case "$status" in
+        applied|pending|failed|rollback_failed) ;;
+        *) phase=settled ;;
+      esac
+    fi
+    if [ -z "$phase" ]; then
+      unreadable='the current state of this tool is absent or unreadable'
+      case "$tier" in
+        firstmate) observed=$(observe_firstmate) ;;
+        npm_global)
+          observe_npm "$(printf '%s' "$entry" | jq -r '.command // ""')"
+          observed=$NPM_OBSERVED
+          [ -n "$observed" ] || unreadable=${NPM_OBSERVE_REASON:-$unreadable}
+          ;;
+      esac
+      prior=$(printf '%s' "$entry" | jq -r '.prior')
+      target=$(printf '%s' "$entry" | jq -r '.target')
+      if [ -n "$observed" ] && [ "$observed" = "$prior" ]; then phase=at_prior
+      elif [ -n "$observed" ] && [ "$observed" = "$target" ]; then phase=at_target
+      elif [ -z "$observed" ]; then phase=unreconcilable; refusal=$unreadable
+      else phase=unreconcilable; refusal="the current state $observed matches neither the recorded prior nor the recorded target"
       fi
     fi
-    i=$((i + 1))
-  done
-
-  local applied deferred failed would n_detail overall
-  applied=$(printf '%s' "$results" | jq '[.[] | select(.status=="applied")] | length')
-  deferred=$(printf '%s' "$results" | jq '[.[] | select(.status=="deferred")] | length')
-  failed=$(printf '%s' "$results" | jq '[.[] | select(.status=="failed")] | length')
-  would=$(printf '%s' "$results" | jq '[.[] | select(.status=="would_apply")] | length')
-  n_detail=$(printf '%s' "$results" | jq -r '
-    [.[] | .name + " " + .current + " -> " + .latest
-      + (if .detail then " (" + .detail + ")" else "" end)]
-    | join(", ")
-  ')
-  if [ "$failed" -gt 0 ]; then
-    overall=failed
-  elif [ "$deferred" -gt 0 ]; then
-    overall=deferred
-  elif [ "$would" -gt 0 ]; then
-    overall=would_apply
-  elif [ "$applied" -gt 0 ]; then
-    overall=applied
-  else
-    overall=skipped
-  fi
-  extra=$(jq -cn --argjson allow "$ALLOWLIST_NPM_JSON" --argjson packages "$results" \
-    '{allowlist:$allow,packages:$packages}')
-  tier_json "$overall" "$n_detail" "$extra"
+    if [ "$phase" = at_target ]; then
+      if [ "$WG_STATUS" != clear ]; then
+        refusal='a Firstmate worker lane is in flight'
+      else
+        case "$tier" in
+          firstmate) refusal=$(preflight_firstmate_refusal "$entry") ;;
+          npm_global) refusal=$(preflight_npm_refusal "$entry") ;;
+        esac
+      fi
+    fi
+    if [ "$phase" = unreconcilable ] || { [ -n "$refusal" ] && [ "$refusal" != 'a Firstmate worker lane is in flight' ]; }; then
+      case "$UNRECONCILABLE_TIERS" in *" $tier "*) : ;; *) UNRECONCILABLE_TIERS="$UNRECONCILABLE_TIERS$tier " ;; esac
+    fi
+    PLAN=$(jq -cn --argjson plan "$PLAN" --argjson entry "$entry" --arg tier "$tier" --arg name "$name" \
+      --arg phase "$phase" --arg observed "$observed" --arg refusal "$refusal" \
+      '$plan + [{tier:$tier,name:$name,phase:$phase,observed:$observed,refusal:$refusal,entry:$entry}]')
+  done <<<"$(printf '%s' "$doc" | jq -c '.tools[]')"
 }
 
-# Assemble & render ---------------------------------------------------------
+rollback_main() {
+  local doc plan_row entry tier name phase observed refusal results='[]' item receipt_state bad=0
+  [ -f "$ROLLBACK_RECEIPT" ] || die "receipt unavailable: $ROLLBACK_RECEIPT"
+  doc=$(jq -ce '.' "$ROLLBACK_RECEIPT" 2>/dev/null) || die "receipt is not readable JSON: $ROLLBACK_RECEIPT"
+  printf '%s' "$doc" | jq -e '.schema_version == 1 and .tool == "dev-tools-apply-updates" and (.tools|type=="array")' >/dev/null 2>&1 ||
+    die "receipt is not a dev-tools-apply-updates receipt: $ROLLBACK_RECEIPT"
+  RECEIPT_PATH=$ROLLBACK_RECEIPT
+  RECEIPT_DOC=$doc
+  detect_workers
+  rollback_preflight "$doc"
+  while IFS= read -r plan_row; do
+    [ -n "$plan_row" ] || continue
+    tier=$(printf '%s' "$plan_row" | jq -r '.tier')
+    name=$(printf '%s' "$plan_row" | jq -r '.name')
+    phase=$(printf '%s' "$plan_row" | jq -r '.phase')
+    observed=$(printf '%s' "$plan_row" | jq -r '.observed')
+    refusal=$(printf '%s' "$plan_row" | jq -r '.refusal')
+    entry=$(printf '%s' "$plan_row" | jq -c '.entry')
+    if [ "$phase" = settled ]; then set_tier skipped 'the receipt records no reversible mutation for this tool'
+    elif [ "$phase" = foreign ]; then set_tier refused 'the receipt names a tier this command never mutates'
+    elif [ -n "$refusal" ]; then set_tier refused "$refusal"
+    else
+      case "$UNRECONCILABLE_TIERS" in
+        *" $tier "*) set_tier refused 'another tool in this tier has an unreconcilable state; refusing the whole tier' ;;
+        *)
+          if [ "$phase" = at_prior ]; then
+            if [ "$ATTENDED" -eq 1 ]; then
+              receipt_reconcile "$entry" "$observed" at_prior reconciled_at_prior
+              set_tier reconciled "already at the recorded prior $observed; no rollback needed"
+            else
+              set_tier reconciled "already at the recorded prior $observed; an attended run would settle it as reconciled"
+            fi
+          else
+            case "$tier" in
+              firstmate) rollback_firstmate "$entry" ;;
+              npm_global) rollback_npm "$entry" ;;
+            esac
+          fi ;;
+      esac
+    fi
+    item=$(printf '%s' "$TIER" | jq -c --arg t "$tier" --arg n "$name" --arg o "$observed" \
+      --arg prior "$(printf '%s' "$entry" | jq -r '.prior // ""')" \
+      --arg target "$(printf '%s' "$entry" | jq -r '.target // ""')" \
+      '{tier:$t,name:$n,prior:$prior,target:$target,observed:$o} + .')
+    results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]')
+  done <<<"$(printf '%s' "$PLAN" | jq -c '.[]')"
+  if [ "$ATTENDED" -eq 0 ] || [ "$RECEIPT_TOUCHED" -eq 0 ]; then receipt_state=unchanged
+  else
+    receipt_settle_tiers
+    if [ "$RECEIPT_STALE" -eq 1 ]; then receipt_state=stale; bad=1; else receipt_state=settled; fi
+  fi
+  RESULT=$(jq -cn --argjson attended "$ATTENDED" --arg path "$ROLLBACK_RECEIPT" --arg status "$WG_STATUS" \
+    --argjson count "$WG_COUNT" --arg detail "$WG_DETAIL" --argjson tools "$results" \
+    --arg receipt_status "$receipt_state" \
+    --argjson preconditions "$(printf '%s' "$doc" | jq -c '.rollback')" \
+    '{schema_version:1,mode:"rollback",attended:($attended==1),
+      receipt:{path:$path,status:$receipt_status},
+      worker_guard:{status:$status,in_flight:$count,detail:$detail},
+      rollback:$preconditions,tools:$tools}')
+  if [ "$MODE" = json ]; then printf '%s\n' "$RESULT" | jq .
+  else
+    [ "$ATTENDED" -eq 1 ] || printf '[check-only] '
+    printf '%s' "$RESULT" | jq -r '"worker guard: " + .worker_guard.status,
+      (.tools[] | .tier + "/" + .name + ": " + .status + " - " + .detail),
+      "receipt: " + .receipt.path + " (" + .receipt.status + ")"'
+    [ "$receipt_state" = stale ] &&
+      printf 'receipt is stale: the reconciliation outcome could not be appended; rerun once %s is writable\n' "$ROLLBACK_RECEIPT" >&2
+  fi
+  printf '%s' "$RESULT" | jq -e '[.tools[] | select(.status == "failed" or .status == "refused")] | length == 0' >/dev/null || bad=1
+  return "$bad"
+}
+
+# --------------------------------------------------------------------- main
+
+if ! command -v jq >/dev/null 2>&1; then die 'jq is required'; fi
+if [ "$ROLLBACK_MODE" -eq 1 ]; then rollback_main; exit $?; fi
+
 detect_workers
-
 if [ "$WG_STATUS" = active ]; then
-  DEFER=$(tier_json deferred "workers active")
-  FIRSTMATE_RESULT=$DEFER
-  NPM_RESULT=$DEFER
+  FIRSTMATE=$(tier_json deferred 'workers active')
+  NPM=$(tier_json deferred 'workers active' "$(jq -cn --argjson allow "$ALLOWLIST_NPM_JSON" '{allowlist:$allow,packages:[]}')")
 else
-  DETECTION=$(run_detection || true)
-  if [ -z "$DETECTION" ]; then
-    FAIL=$(tier_json skipped "detection failed (dev-tools-check-updates unavailable)")
-    FIRSTMATE_RESULT=$FAIL
-    NPM_RESULT=$FAIL
+  DETECTION=$($CHECKER_BIN --json --force --no-cache 2>/dev/null || true)
+  if ! printf '%s' "$DETECTION" | jq -e '.schema_version == 4 and (.tools|type=="array")' >/dev/null 2>&1; then
+    FIRSTMATE=$(tier_json refused 'checker output unknown or invalid; refusing all mutations')
+    NPM=$(tier_json refused 'checker output unknown or invalid; refusing all mutations' "$(jq -cn --argjson allow "$ALLOWLIST_NPM_JSON" '{allowlist:$allow,packages:[]}')")
   else
-    FIRSTMATE_RESULT=$(apply_firstmate "$DETECTION")
-    NPM_RESULT=$(apply_npm "$DETECTION")
+    apply_firstmate "$DETECTION"; FIRSTMATE=$TIER
+    apply_npm "$DETECTION"; NPM=$TIER
   fi
 fi
 
-RESULT=$(jq -cn \
-  --argjson dry_run "$([ "$DRY_RUN" -eq 1 ] && echo true || echo false)" \
-  --arg wg_status "$WG_STATUS" \
-  --argjson wg_in_flight "$WG_IN_FLIGHT" \
-  --arg wg_detail "$WG_DETAIL" \
-  --argjson firstmate "$FIRSTMATE_RESULT" \
-  --argjson npm_global "$NPM_RESULT" \
-  '{schema_version:1,dry_run:$dry_run,
-    worker_guard:{status:$wg_status,in_flight:$wg_in_flight,detail:$wg_detail},
-    tiers:{firstmate:$firstmate,npm_global:$npm_global}}')
-
-render_human() {
-  printf '%s' "$RESULT" | jq -r '
-    def line($label; $t):
-      $label + ": " + $t.status + (if ($t.detail // "") != "" then " (" + $t.detail + ")" else "" end);
-    (if .dry_run then "[dry-run] " else "" end) as $p
-    | ($p + "worker guard: " + .worker_guard.status + " (" + .worker_guard.detail + ")"),
-      ($p + line("firstmate"; .tiers.firstmate)),
-      ($p + line("npm-global"; .tiers.npm_global))
-  '
-}
-
-case "$MODE" in
-  json) printf '%s\n' "$RESULT" | jq . ;;
-  *) render_human ;;
-esac
-
-# Exit 1 if any tier failed while applying; deferral/skip/up-to-date are clean.
-if printf '%s' "$RESULT" | jq -e '[.tiers[] | .status] | index("failed")' >/dev/null 2>&1; then
-  exit 1
+if [ "$RECEIPT_WRITTEN" -eq 1 ]; then
+  RECEIPT_DOC=$(printf '%s' "$RECEIPT_DOC" | jq -c \
+    --arg f "$(printf '%s' "$FIRSTMATE" | jq -r '.status')" --arg n "$(printf '%s' "$NPM" | jq -r '.status')" \
+    '.tiers.firstmate.status = $f | .tiers.npm_global.status = $n')
+  receipt_write || RECEIPT_STALE=1
 fi
-exit 0
+
+RESULT=$(jq -cn --argjson dry "$DRY_RUN" --arg status "$WG_STATUS" --argjson count "$WG_COUNT" --arg detail "$WG_DETAIL" \
+  --argjson firstmate "$FIRSTMATE" --argjson npm "$NPM" \
+  --arg receipt_path "$RECEIPT_PATH" --arg receipt_status "$(receipt_status)" \
+  --argjson rollback "$(printf '%s' "$RECEIPT_DOC" | jq -c '.rollback')" \
+  '{schema_version:3,dry_run:($dry==1),worker_guard:{status:$status,in_flight:$count,detail:$detail},
+    tiers:{firstmate:$firstmate,npm_global:$npm},
+    receipt:{path:$receipt_path,status:$receipt_status,rollback:$rollback}}')
+
+if [ "$MODE" = json ]; then printf '%s\n' "$RESULT" | jq .
+else
+  [ "$DRY_RUN" -eq 1 ] && printf '[dry-run] '
+  printf '%s' "$RESULT" | jq -r '"worker guard: " + .worker_guard.status, (.tiers | to_entries[] | .key + ": " + .value.status + " - " + .value.detail)'
+  case "$(receipt_status)" in
+    written|incomplete)
+      printf '%s' "$RESULT" | jq -r '"receipt: " + .receipt.path + " (" + .receipt.status + ")",
+        "rollback: attended only, never automatic, never restarts a service - " + .receipt.rollback.command,
+        (.receipt.rollback | to_entries[] | select(.key == "preflight" or .key == "firstmate" or .key == "npm_global") | .key as $scope | .value[] | "  " + $scope + ": " + .)'
+      ;;
+    planned) printf '%s' "$RESULT" | jq -r '"receipt: " + .receipt.path + " (planned; nothing written)"' ;;
+    unusable)
+      printf '%s' "$RESULT" | jq -r --arg cause 'could not write the mutation receipt; refusing to mutate' \
+        '"receipt: " + .receipt.path + " (unusable; the receipt could not be written there)",
+        (.tiers | to_entries[]
+          | select(.value.detail == $cause or ([.value.packages // [] | .[] | select(.detail == $cause)] | length > 0))
+          | "  " + .key + " is refused for that reason, not for its own state")'
+      ;;
+  esac
+  [ "$(receipt_status)" = incomplete ] &&
+    printf 'receipt is incomplete: %s could not record every outcome, so a converged tool above may be missing from it; the rollback preconditions above still apply, and rerunning once the receipt is writable re-records it\n' "$RECEIPT_PATH" >&2
+fi
+
+EXIT_CODE=0
+printf '%s' "$RESULT" | jq -e '[.tiers[] | select(.status == "failed" or .status == "refused" or .status == "unknown")] | length == 0' >/dev/null || EXIT_CODE=1
+[ "$(receipt_status)" = incomplete ] && EXIT_CODE=1
+exit "$EXIT_CODE"

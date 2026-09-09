@@ -24,12 +24,25 @@ Two components:
 
 The entry point. It declares:
 
-- **inputs**: where packages come from - `nixpkgs` pinned to the `nixos-25.11`
+- **inputs**: where packages come from - `nixpkgs` pinned to the `nixos-26.05`
   release branch, and `home-manager` matching it. Pinning means a rebuild
   next month installs the same versions as today. Updating is an explicit
-  act: `nix flake update` (which rewrites `flake.lock` - commit that file).
+  act: `nix flake update` rewrites `flake.lock` (commit that file), and the
+  audited revisions and package versions in `config/dev-tools-versions.sh` have
+  to be refreshed in the same change, or `dev-tools-check-updates` reports the
+  disagreement - see [dev-tool-versions.md](dev-tool-versions.md).
 - **outputs**: named machine configurations. `homeConfigurations."sungin@ct110"`
   is the only one now; a Mac target joins later in the same file.
+
+### home/dev-tools.nix
+
+Every developer-tool derivation the repository packages itself - the pin and
+closure-manifest artifacts, the read-only checker, the pinned installer, the
+`cspend` wrapper, the Codex context-window activation helper, and the guarded
+updater - is defined here once and exported through the `devTools` module
+argument. `home/common.nix` and `home/sungin-ct110.nix` consume those exports,
+so a change to a runtime closure or an exported path cannot ship two different
+binaries to the same host.
 
 ### home/sungin-ct110.nix
 
@@ -51,7 +64,7 @@ documentation of what's installed. Key ideas:
 
 ```sh
 rebuild                  # alias for ./rebuild.sh - apply config changes
-nix flake update         # bump pinned package versions (then rebuild)
+nix flake update         # bump pinned inputs (refresh the pin record, then rebuild)
 nix search nixpkgs foo   # find a package name
 home-manager generations # list previous environments...
 # ...and every generation is rollback-able if a rebuild goes wrong
@@ -59,7 +72,9 @@ home-manager generations # list previous environments...
 
 ## Why harness CLIs are NOT in Nix
 
-Fast-moving agent harness CLIs self-update and release frequently; nixpkgs
-versions lag. They're installed by `bootstrap.sh` via their official
-installers into user-writable prefixes (`~/.local/bin`, `~/.npm-global/bin`).
-The *decision* is still recorded in the repo - the script is the manifest.
+Fast-moving agent harness CLIs release frequently and nixpkgs versions lag.
+`bootstrap.sh` delegates their install-if-absent path to
+`bin/dev-tools-install-pinned`, which installs exact npm versions with registry
+integrity verification or exact publisher assets with recorded checksums into
+user-writable prefixes (`~/.local/bin`, `~/.npm-global/bin`). The central record
+and known upstream limitations are documented in `docs/dev-tool-versions.md`.

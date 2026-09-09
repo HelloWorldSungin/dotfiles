@@ -16,10 +16,14 @@ config/nvim/
 ```
 
 Plugins are managed by **lazy.nvim**: on first launch it clones everything
-from GitHub automatically, so a fresh machine just works. `:Lazy` opens its
-UI (update/clean plugins from there). `lazy-lock.json` is written by lazy.nvim
-and committed, so a fresh machine gets the same plugin commits this one runs -
-never hand-edit it; update plugins via `:Lazy` and commit the resulting diff.
+from GitHub automatically, so a fresh machine just works. `:Lazy` opens its UI
+for inspection. `lazy-lock.json` is written by lazy.nvim and committed, so a
+fresh machine gets the same plugin commits this one runs. Never hand-edit it.
+When intentionally updating, first audit stable releases and update the plugin
+records in `config/dev-tools-versions.sh`, and the release-pinned specs in
+`lua/plugins/` carry that tag in a `version` field too - lazy.nvim never moves
+such a plugin past it. Then regenerate the lock with lazy.nvim and commit all of
+it together. See `docs/dev-tool-versions.md`.
 
 ## How you discover keybinds
 

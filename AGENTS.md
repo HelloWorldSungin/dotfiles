@@ -14,22 +14,37 @@ This file is the project's committed home for project-intrinsic agent knowledge:
      first executes the stale pre-merge copy, silently - this has already cost a
      debugging cycle.
   2. A `home-manager switch` never installs or refreshes the agent CLIs
-     (`claude`, `codex`, `opencode`, `pi`, ...). They are curl/npm installers in
-     `bootstrap.sh` step 5/6, deliberately outside Nix (`docs/nix.md` records why).
+     (`claude`, `codex`, `opencode`, `pi`, ...). `bootstrap.sh` delegates their
+     exact install-if-absent path to `bin/dev-tools-install-pinned`, deliberately
+     outside Nix (`docs/dev-tool-versions.md` owns the complete inventory).
      `bootstrap.sh` is the superset - it runs the switch itself as step 2/6 - but
      it is install-if-missing, so it never upgrades a CLI that is already present.
   3. A running herdr does not automatically re-read `config/herdr/config.toml`
      even though the file is a live symlink; use `herdr server reload-config`.
      Never restart the captain's herdr to apply a config - it hosts the live fleet.
-- The personal tool update checker lives in `bin/dev-tools-check-updates`, its
-  deterministic self-test is in `tests/`, and `home/sungin-ct110.nix` owns its
-  package, timer, and zsh startup wiring.
+- `config/dev-tools-versions.sh` owns external tool pins and source metadata.
+  The read-only checker lives in `bin/dev-tools-check-updates` and its
+  deterministic self-test is in `tests/`. `home/dev-tools.nix` is the single
+  owner of every packaged dev-tool derivation (pin artifacts, checker, pinned
+  installer, cspend wrapper, codex context-window helper, guarded updater) and
+  of the one closure-input attrset they select from, which also generates the
+  store-path manifest the checker measures closure-only packages with;
+  `common.nix` and `sungin-ct110.nix` consume them through the `devTools` module
+  argument, so the host module owns only its timer and zsh startup wiring.
 - `bin/dev-tools-apply-updates` is the guarded, opt-in companion that applies only
-  the two safe tiers the checker tracks (firstmate fast-forward + the allowlisted
-  npm-global axi tools); it delegates detection to the checker, refuses when any
+  the two safe tiers the checker tracks (Firstmate exact fast-forward plus six
+  allowlisted npm-global tools); it delegates detection to the checker, independently
+  re-verifies exact artifacts, refuses when any
   Firstmate worker lane is in flight (a `state/*.meta` file, mirroring
   `firstmate/bin/fm-supervision-lib.sh`), and is packaged on PATH with no timer.
-  Its `--help` is authoritative; the self-test sits beside the checker's in `tests/`.
+  `--dry-run` verifies the Firstmate tier against the real remote in a private
+  throwaway repository - never the checkout - so a preview matches the apply.
+  Every real mutation is preceded by a mode-0600 receipt under
+  `$DEV_TOOLS_APPLY_RECEIPT_DIR`; reversal is `--rollback <receipt> --attended`,
+  is never automatic, and reconciles each tool's observed state against the
+  receipt - settling it in place - before touching anything, so an
+  unreconcilable state refuses that whole tier. Its `--help` is authoritative;
+  the self-tests sit beside the checker's in `tests/`.
 - `~/.codex/config.toml` is machine-maintained (project trust, hook approvals,
   TUI state) and must never be replaced or symlinked to a repo file. Home Manager
   owns exactly one key in it, `model_context_window`, through the atomic

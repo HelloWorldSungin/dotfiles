@@ -1,40 +1,10 @@
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, devTools, ... }:
 
 let
-  devToolsUpdateChecker = pkgs.writeShellApplication {
-    name = "dev-tools-check-updates";
-    text = builtins.readFile ../bin/dev-tools-check-updates;
-    bashOptions = [ ]; # The checker deliberately handles source failures itself.
-    runtimeInputs = with pkgs; [
-      coreutils
-      curl
-      gawk
-      git
-      gnugrep
-      gnused
-      jq
-      nodejs_22
-    ];
-  };
-  # Guarded, opt-in companion to the checker. Installed on PATH but deliberately
-  # NOT given a timer: it only ever runs when the captain invokes it. The checker
-  # is on its runtime PATH so the tool's own detection delegation resolves.
-  devToolsApplyUpdates = pkgs.writeShellApplication {
-    name = "dev-tools-apply-updates";
-    text = builtins.readFile ../bin/dev-tools-apply-updates;
-    bashOptions = [ ]; # Applies each tier independently and handles failures itself.
-    runtimeInputs = with pkgs; [
-      coreutils
-      git
-      jq
-      nodejs_22
-      devToolsUpdateChecker
-    ];
-  };
   devToolsUpdateCheckRun = pkgs.writeShellScript "dev-tools-update-checker-run" ''
     export CHROME_DEVTOOLS_AXI_CHROME_ARGS=${lib.escapeShellArg config.home.sessionVariables.CHROME_DEVTOOLS_AXI_CHROME_ARGS}
-    ${devToolsUpdateChecker}/bin/dev-tools-check-updates --force --json
-    ${devToolsUpdateChecker}/bin/dev-tools-check-updates --health --json
+    ${devTools.checker}/bin/dev-tools-check-updates --force --json
+    ${devTools.checker}/bin/dev-tools-check-updates --health --json
   '';
 in
 {
@@ -43,12 +13,13 @@ in
   home.username = "sungin";
   home.homeDirectory = "/home/sungin";
 
-  home.packages = with pkgs; [
+  home.packages = (with pkgs; [
     tea # Gitea CLI - BZ-SIM (and other CT101-hosted repos) track issues there
     chromium # headless browser for chrome-devtools-axi E2E testing
     ghdl     # open-source VHDL simulator
     gtkwave  # view GHDL-produced .ghw/.vcd waveforms
-    devToolsApplyUpdates # opt-in guarded auto-apply for the safe update tiers
+  ]) ++ [
+    devTools.applyUpdates # opt-in guarded auto-apply for the safe update tiers
   ];
 
   home.sessionVariables = {
@@ -63,7 +34,7 @@ in
     '';
     initContent = ''
       if [[ -o login ]]; then
-        ${devToolsUpdateChecker}/bin/dev-tools-check-updates --startup
+        ${devTools.checker}/bin/dev-tools-check-updates --startup
       fi
     '';
   };
@@ -91,16 +62,29 @@ in
   # ------------------------------------------------------------------ ssh
   programs.ssh = {
     enable = true;
-    matchBlocks."gitea.arknode" = {
-      hostname = "192.168.68.101";
-      port = 2222;
-      user = "git";
-      identityFile = "~/.ssh/id_ed25519";
+    enableDefaultConfig = false;
+    settings."*" = {
+      ForwardAgent = false;
+      AddKeysToAgent = "no";
+      Compression = false;
+      ServerAliveInterval = 0;
+      ServerAliveCountMax = 3;
+      HashKnownHosts = false;
+      UserKnownHostsFile = "~/.ssh/known_hosts";
+      ControlMaster = "no";
+      ControlPath = "~/.ssh/master-%r@%n:%p";
+      ControlPersist = "no";
     };
-    matchBlocks."loq" = {
-      hostname = "192.168.68.83";
-      user = "root";
-      identityFile = "~/.ssh/id_ed25519";
+    settings."gitea.arknode" = {
+      HostName = "192.168.68.101";
+      Port = 2222;
+      User = "git";
+      IdentityFile = "~/.ssh/id_ed25519";
+    };
+    settings."loq" = {
+      HostName = "192.168.68.83";
+      User = "root";
+      IdentityFile = "~/.ssh/id_ed25519";
     };
   };
 }

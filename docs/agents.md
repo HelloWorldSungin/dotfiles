@@ -36,8 +36,9 @@ be. A fresh machine needs each login once after `bootstrap.sh`.
 - **gh/tasks/quota-axi** - token-efficient CLIs agents use instead of MCPs
 - **firstmate** - the orchestrator; the one agent you actually talk to
 
-Each gets installed and learned one at a time - the bootstrap records the
-install commands as they're adopted.
+Each gets installed and learned one at a time. `bootstrap.sh` installs them
+through `bin/dev-tools-install-pinned` at the exact versions recorded in
+`config/dev-tools-versions.sh` - see [dev-tool-versions.md](dev-tool-versions.md).
 
 ## Vendored skills
 

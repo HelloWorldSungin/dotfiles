@@ -1,353 +1,604 @@
 #!/usr/bin/env bash
-# Self-contained behavior tests for bin/dev-tools-check-updates.
-#
-# Every publication source is deterministic. Firstmate fetches from a local
-# file:// bare repository, while npm, curl, treehouse, no-mistakes, and herdr
-# are injected executables. The health check receives a fake environment reader.
-# No test contacts the network or depends on the real login environment.
-set -u
+# Hermetic behavior tests for the complete read-only tool inventory.
+set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 CHECKER="$ROOT/bin/dev-tools-check-updates"
-TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/dev-tools-check-updates-tests.XXXXXX")
+TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/dev-tools-check-tests.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
-fail() {
-  printf 'not ok - %s\n' "$1" >&2
-  exit 1
-}
+fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
+pass() { printf 'ok - %s\n' "$1"; }
 
-pass() {
-  printf 'ok - %s\n' "$1"
-}
+FIXTURE="$TMP_ROOT/fixture"
+FAKEBIN="$FIXTURE/bin"
+mkdir -p "$FAKEBIN" "$FIXTURE/home/firstmate/.git" "$FIXTURE/home/baby-menu/.git" "$FIXTURE/nvim/lazy"
+PINS="$FIXTURE/pins.sh"
+cp "$ROOT/config/dev-tools-versions.sh" "$PINS"
+CURSOR_BODY="download=https://downloads.cursor.com/versions/2026.09.08-6caf4ff/cursor-agent/linux/x64/cursor-agent"
+CURSOR_HASH=$(printf '%s\n' "$CURSOR_BODY" | sha256sum | awk '{print $1}')
+printf '\nCURSOR_INSTALLER_SHA256=%s\n' "$CURSOR_HASH" >>"$PINS"
 
-assert_contains() {
-  case "$1" in
-    *"$2"*) ;;
-    *) fail "$3" ;;
-  esac
-}
+# shellcheck source=../config/dev-tools-versions.sh
+# shellcheck disable=SC1091
+source "$PINS"
+for row in "${NEOVIM_PLUGIN_PINS[@]}"; do
+  IFS='|' read -r name _repo _policy _ref _commit <<<"$row"
+  mkdir -p "$FIXTURE/nvim/lazy/$name/.git"
+done
 
-assert_not_contains() {
-  case "$1" in
-    *"$2"*) fail "$3" ;;
-    *) ;;
-  esac
-}
+CALL_LOG="$FIXTURE/calls.log"
+: >"$CALL_LOG"
 
-make_git_world() {
-  local name=$1 base seed remote checkout
-  base="$TMP_ROOT/$name"
-  seed="$base/seed"
-  remote="$base/origin.git"
-  checkout="$base/checkout"
-  mkdir -p "$seed"
-  git -C "$seed" init -q -b trunk
-  printf 'one\n' > "$seed/version.txt"
-  git -C "$seed" add version.txt
-  git -C "$seed" commit -qm one
-  git clone -q --bare "$seed" "$remote"
-  git clone -q "file://$remote" "$checkout"
-  printf 'two\n' >> "$seed/version.txt"
-  git -C "$seed" commit -qam two
-  git -C "$seed" push -q "file://$remote" trunk
-  printf '%s\n' "$checkout"
-}
-
-make_fixture_tools() {
-  local base=$1 fakebin="$1/fakebin"
-  mkdir -p "$fakebin" "$base/npm-prefix" "$base/home/npm-prefix"
-  cat > "$fakebin/npm-fixture" <<'SH'
+cat >"$FAKEBIN/npm" <<'SH'
 #!/usr/bin/env bash
-printf 'npm\n' >> "$TEST_FAKE_CALL_LOG"
-cat "$TEST_FAKE_NPM_JSON"
-exit "${TEST_FAKE_NPM_RC:-1}"
-SH
-  cat > "$fakebin/curl-fixture" <<'SH'
-#!/usr/bin/env bash
-printf 'curl\n' >> "$TEST_FAKE_CALL_LOG"
-[ "${TEST_FAKE_CURL_FAIL:-0}" = 0 ] || exit 22
-last=${!#}
-case "$last" in
-  *treehouse*) cat "$TEST_FAKE_TREEHOUSE_RELEASE_JSON" ;;
-  *no-mistakes*) cat "$TEST_FAKE_NO_MISTAKES_RELEASE_JSON" ;;
-  *herdr*) cat "$TEST_FAKE_HERDR_RELEASE_JSON" ;;
-  *) exit 22 ;;
+set -eu
+printf 'npm %s\n' "$*" >>"$TEST_CALL_LOG"
+[ "${TEST_FAIL_NPM:-0}" = 1 ] && exit 1
+package=$2
+field=$3
+# shellcheck source=/dev/null
+source "$TEST_PINS"
+version=
+for row in "${NPM_TOOL_PINS[@]}"; do
+  IFS='|' read -r _name _command candidate candidate_version _integrity _guarded _channel <<<"$row"
+  [ "$candidate" = "$package" ] && version=$candidate_version
+done
+case "$package" in
+  opencode-ai) version=$OPENCODE_ACP_VERSION ;;
+  omp-acp) version=$OMP_ACP_VERSION ;;
+  claude-spend) version=$CLAUDE_SPEND_VERSION ;;
 esac
+[ "$package" = "${TEST_NPM_PRERELEASE_PACKAGE:-}" ] && version=9.0.0-beta.1
+[ -n "$version" ] || exit 1
+# A retired dist-tag: the registry answers successfully with no value at all.
+if [ "$field" = dist-tags.stable ] && [ "$package" = "${TEST_NPM_NO_STABLE_TAG:-}" ]; then exit 0; fi
+if [ "$field" = dist-tags.stable ] || [ "$field" = version ]; then jq -cn --arg v "$version" '$v'; else exit 1; fi
 SH
-  cat > "$fakebin/treehouse-fixture" <<'SH'
+
+cat >"$FAKEBIN/curl" <<'SH'
 #!/usr/bin/env bash
-[ "${1:-}" = --version ] || exit 2
-printf '%s\n' "${TEST_FAKE_TREEHOUSE_VERSION:-v2.0.0}"
+set -eu
+printf 'curl %s\n' "$*" >>"$TEST_CALL_LOG"
+if [ "$#" -eq 1 ] && [ "$1" = --version ]; then printf 'curl 8.21.0\n'; exit 0; fi
+[ "${TEST_FAIL_CURL:-0}" = 1 ] && exit 1
+url= output=
+previous=
+for arg in "$@"; do
+  [ "$previous" = -o ] && output=$arg
+  case "$arg" in https://*) url=$arg ;; esac
+  previous=$arg
+done
+# shellcheck source=/dev/null
+source "$TEST_PINS"
+if [ "$url" = "$CURSOR_INSTALLER_URL" ]; then
+  printf '%s\n' 'download=https://downloads.cursor.com/versions/2026.09.08-6caf4ff/cursor-agent/linux/x64/cursor-agent' >"$output"
+  exit 0
+fi
+if [ "$url" = "$HERDR_LATEST_MANIFEST_URL" ]; then
+  for row in "${RELEASE_SHA256_PINS[@]}"; do IFS='|' read -r key _tree _nm sha <<<"$row"; [ "$key" = linux-amd64 ] && break; done
+  version=${TEST_HERDR_LATEST_VERSION:-$HERDR_VERSION}
+  asset="https://github.com/herdrdev/herdr/releases/download/v${version}/herdr-linux-x86_64"
+  [ "$version" = "$HERDR_VERSION" ] || sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  jq -cn --arg v "$version" --arg asset "$asset" --arg sha "$sha" '{version:$v,assets:{"linux-x86_64":$asset},sha256:{"linux-x86_64":$sha}}'
+  exit 0
+fi
+case "$url" in
+  *antigravity-cli-auto-updater*)
+    for row in "${ANTIGRAVITY_ASSET_PINS[@]}"; do IFS='|' read -r key asset sha <<<"$row"; [ "$key" = linux-amd64 ] && break; done
+    version=${TEST_ANTIGRAVITY_LATEST_VERSION:-$ANTIGRAVITY_VERSION}
+    asset=${asset/$ANTIGRAVITY_VERSION/$version}
+    [ "$version" = "$ANTIGRAVITY_VERSION" ] || sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    jq -cn --arg v "$version" --arg asset "$asset" --arg sha "$sha" '{version:$v,url:$asset,sha512:$sha}'
+    exit 0
+    ;;
+  *api.github.com/repos/*/releases/latest)
+    repo=${url#*api.github.com/repos/}; repo=${repo%/releases/latest}
+    tag=
+    for row in "${GITHUB_TOOL_PINS[@]}"; do
+      IFS='|' read -r name _command candidate version _install _apply <<<"$row"
+      [ "$candidate" = "$repo" ] && [ "$name" != herdr ] && tag="v$version"
+    done
+    for row in "${NEOVIM_PLUGIN_PINS[@]}"; do
+      IFS='|' read -r _name candidate policy ref _commit <<<"$row"
+      [ "$candidate" = "$repo" ] && [ "$policy" = release ] && tag=$ref
+    done
+    for row in "${CI_ACTION_PINS[@]}"; do
+      IFS='|' read -r _name candidate ref _commit <<<"$row"
+      [ "$candidate" = "$repo" ] && tag=$ref
+    done
+    [ "$repo" = DeterminateSystems/nix-installer ] && tag="v$NIX_INSTALLER_VERSION"
+    [ "$repo" = kunchenguid/baby-menu ] && tag="baby-menu-v$BABY_MENU_VERSION"
+    [ -n "$tag" ] || exit 1
+    if [ "$repo" = "${TEST_PRERELEASE_REPO:-}" ]; then
+      jq -cn --arg tag "${tag}-preview.1" '{draft:false,prerelease:true,tag_name:$tag}'
+    else
+      jq -cn --arg tag "$tag" '{draft:false,prerelease:false,tag_name:$tag}'
+    fi
+    exit 0
+    ;;
+esac
+exit 1
 SH
-  cat > "$fakebin/no-mistakes-fixture" <<'SH'
+
+cat >"$FAKEBIN/git" <<'SH'
 #!/usr/bin/env bash
-[ "${1:-}" = --version ] || exit 2
-printf '%s\n' "${TEST_FAKE_NO_MISTAKES_VERSION:-no-mistakes version v1.40.0 (fake)}"
+set -eu
+# shellcheck source=/dev/null
+source "$TEST_PINS"
+if [ "${1:-}" = --version ]; then printf 'git version 2.54.0\n'; exit 0; fi
+printf 'git %s\n' "$*" >>"$TEST_CALL_LOG"
+if [ "${1:-}" = -C ]; then
+  path=$2
+  [ "${3:-}" = rev-parse ] || exit 1
+  case "$path" in
+    *firstmate) printf '%s\n' "$FIRSTMATE_REV"; exit 0 ;;
+    *baby-menu) printf '%s\n' "$BABY_MENU_REV"; exit 0 ;;
+    */lazy/*)
+      name=${path##*/}
+      for row in "${NEOVIM_PLUGIN_PINS[@]}"; do
+        IFS='|' read -r candidate _repo _policy _ref commit <<<"$row"
+        [ "$candidate" = "$name" ] && { printf '%s\n' "$commit"; exit 0; }
+      done
+      ;;
+  esac
+  exit 1
+fi
+[ "${1:-}" = ls-remote ] || exit 1
+repo=$2
+ref=${3:-HEAD}
+case "$repo|$ref" in
+  *NixOS/nixpkgs.git*refs/heads/nixos-*) printf '%s\t%s\n' "$NIXPKGS_REV" "$ref"; exit 0 ;;
+  *nix-community/home-manager.git*refs/heads/release-*) printf '%s\t%s\n' "$HOME_MANAGER_REV" "$ref"; exit 0 ;;
+  *kunchenguid/firstmate.git*HEAD) printf '%s\tHEAD\n' "$FIRSTMATE_REV"; exit 0 ;;
+  *kunchenguid/baby-menu.git*HEAD) printf '%s\tHEAD\n' "$BABY_MENU_REV"; exit 0 ;;
+  *kunchenguid/baby-menu.git*refs/tags/baby-menu-v*) printf '%s\t%s^{}\n' "$BABY_MENU_REV" "$ref"; exit 0 ;;
+esac
+clean=${repo#https://github.com/}; clean=${clean%.git}
+for row in "${NEOVIM_PLUGIN_PINS[@]}"; do
+  IFS='|' read -r _name candidate _policy tag commit <<<"$row"
+  [ "$candidate" = "$clean" ] || continue
+  if [ "$ref" = HEAD ]; then printf '%s\tHEAD\n' "$commit"
+  else printf '%s\trefs/tags/%s^{}\n' "$commit" "$tag"
+  fi
+  exit 0
+done
+for row in "${CI_ACTION_PINS[@]}"; do
+  IFS='|' read -r _name candidate _tag commit <<<"$row"
+  [ "$candidate" = "$clean" ] || continue
+  printf '%s\t%s^{}\n' "$commit" "$ref"
+  exit 0
+done
+exit 1
 SH
-  cat > "$fakebin/herdr-fixture" <<'SH'
+
+cat >"$FAKEBIN/tool-version" <<'SH'
 #!/usr/bin/env bash
-[ "${1:-}" = --version ] || exit 2
-printf '%s\n' "${TEST_FAKE_HERDR_VERSION:-herdr 0.7.4 (fake)}"
+set -eu
+# shellcheck source=/dev/null
+source "$TEST_PINS"
+command_name=${0##*/}
+printf '%s %s\n' "$command_name" "$*" >>"$TEST_CALL_LOG"
+for row in "${NPM_TOOL_PINS[@]}"; do
+  IFS='|' read -r _name candidate _package version _integrity _guarded _channel <<<"$row"
+  [ "$candidate" = "$command_name" ] && { printf '%s %s\n' "$command_name" "$version"; exit 0; }
+done
+for row in "${GITHUB_TOOL_PINS[@]}"; do
+  IFS='|' read -r _name candidate _repo version _install _apply <<<"$row"
+  [ "$candidate" = "$command_name" ] && { printf '%s %s\n' "$command_name" "$version"; exit 0; }
+done
+for row in "${NIX_PACKAGE_PINS[@]}"; do
+  IFS='|' read -r _package candidate version _evidence <<<"$row"
+  if [ "$candidate" = "$command_name" ]; then
+    [ "$candidate" = unzip ] && version=6.00
+    printf '%s %s\n' "$command_name" "$version"
+    exit 0
+  fi
+done
+[ "$command_name" = agy ] && { printf 'agy %s\n' "$ANTIGRAVITY_VERSION"; exit 0; }
+[ "$command_name" = cursor-agent ] && { printf 'cursor-agent %s\n' "$CURSOR_AGENT_OBSERVED_VERSION"; exit 0; }
+[ "$command_name" = nix ] && { printf 'nix (Determinate Nix %s) 2.34.8\n' "$NIX_INSTALLER_VERSION"; exit 0; }
+exit 1
 SH
-  cat > "$fakebin/printenv-fixture" <<'SH'
+
+cat >"$FAKEBIN/printenv" <<'SH'
 #!/usr/bin/env bash
-[ "${1:-}" = CHROME_DEVTOOLS_AXI_CHROME_ARGS ] || exit 2
-rc=${TEST_FAKE_PRINTENV_RC:-0}
-[ "$rc" -eq 0 ] || exit "$rc"
-printf '%s\n' "${TEST_FAKE_CHROME_ARGS:-}"
+printf '%s\n' "${TEST_CHROME_ARGS:---no-sandbox --disable-dev-shm-usage --disable-gpu}"
 SH
-  chmod +x "$fakebin"/*
-  printf '%s\n' "$fakebin"
+chmod +x "$FAKEBIN"/*
+
+for row in "${NPM_TOOL_PINS[@]}"; do IFS='|' read -r _name command_name _rest <<<"$row"; ln -s tool-version "$FAKEBIN/$command_name"; done
+for row in "${GITHUB_TOOL_PINS[@]}"; do IFS='|' read -r _name command_name _rest <<<"$row"; ln -sf tool-version "$FAKEBIN/$command_name"; done
+for row in "${NIX_PACKAGE_PINS[@]}"; do
+  IFS='|' read -r _package command_name _version _evidence <<<"$row"
+  [ "$command_name" = git ] || [ "$command_name" = curl ] || ln -sf tool-version "$FAKEBIN/$command_name"
+done
+# The closure manifest home/dev-tools.nix generates: name -> exact store path.
+# Its stubs answer with the pinned version while the ambient stubs for the same
+# commands answer with a wrong one, so which source the checker measured is
+# observable in the result rather than assumed. The ambient stub replaces the
+# shared `tool-version` symlink instead of writing through it, and git and curl
+# keep the suite's own behavioural stubs, which the checker is pointed at.
+BASH_BIN=$(command -v bash) || fail 'missing test dependency: bash'
+CLOSURE_DIR="$FIXTURE/closure"
+CLOSURE_FILE="$FIXTURE/dev-tools-closure.json"
+closure_entries='[]'
+CLOSURE_ROWS=()
+for row in "${NIX_PACKAGE_PINS[@]}"; do
+  IFS='|' read -r package command_name version evidence <<<"$row"
+  [ "$evidence" = closure ] || continue
+  CLOSURE_ROWS+=("$package|$command_name|$version")
+  mkdir -p "$CLOSURE_DIR/$package/bin"
+  printf '#!%s\nprintf "%s (closure) %s\\n"\n' "$BASH_BIN" "$command_name" "$version" \
+    >"$CLOSURE_DIR/$package/bin/$command_name"
+  chmod +x "$CLOSURE_DIR/$package/bin/$command_name"
+  closure_entries=$(jq -cn --argjson a "$closure_entries" --arg n "$package" --arg v "$version" \
+    --arg p "$CLOSURE_DIR/$package" '$a + [{name:$n,version:$v,store_path:$p}]')
+  # A hostile ambient answer for the same command, so any PATH measurement shows.
+  case "$command_name" in
+    git|curl) ;;
+    *)
+      rm -f "$FAKEBIN/$command_name"
+      printf '#!%s\nprintf "%s 0.0.1\\n"\n' "$BASH_BIN" "$command_name" >"$FAKEBIN/$command_name"
+      chmod +x "$FAKEBIN/$command_name"
+      ;;
+  esac
+done
+[ "${#CLOSURE_ROWS[@]}" -gt 0 ] || fail 'the manifest declares no closure-classed Nix rows'
+printf '%s\n' "$closure_entries" >"$CLOSURE_FILE"
+
+ln -sf tool-version "$FAKEBIN/agy"
+ln -sf tool-version "$FAKEBIN/cursor-agent"
+ln -sf tool-version "$FAKEBIN/nix"
+
+# Machine-consumed declarative artifacts are read through a semantic model
+# rather than grepped: the workflow's action steps and the Baby Menu agents'
+# launch specs.
+python3 -c 'import yaml' >/dev/null 2>&1 || fail 'missing test dependency: python3 with PyYAML'
+workflow_action_refs() {
+  python3 - "$1" <<'PARSE_WORKFLOW'
+import sys, yaml
+with open(sys.argv[1]) as handle:
+    workflow = yaml.safe_load(handle)
+for job in (workflow.get("jobs") or {}).values():
+    for step in job.get("steps") or []:
+        if step.get("uses"):
+            print(step["uses"])
+PARSE_WORKFLOW
 }
 
-write_release() {
-  local path=$1 version=$2
-  printf '{"tag_name":"%s"}\n' "$version" > "$path"
+acp_launch_version() {
+  jq -r --arg agent "$2" --arg package "$3" '
+    .[] | select(.name == $agent) | .launchCommand | split(" ")
+    | map(select(startswith($package + "@"))) | first // ""
+    | ltrimstr($package + "@")
+  ' "$1"
 }
 
 run_checker() {
-  local now=$1
-  shift
-  env \
-    HOME="$TEST_HOME" \
-    DEV_TOOLS_FIRSTMATE_PATH="$TEST_REPO" \
-    DEV_TOOLS_UPDATE_CACHE_PATH="$TEST_HOME/cache.json" \
-    DEV_TOOLS_UPDATE_NOW_EPOCH="$now" \
-    DEV_TOOLS_UPDATE_CACHE_TTL_SECONDS="${TEST_TTL:-14400}" \
-    DEV_TOOLS_UPDATE_GIT_BIN="$(command -v git)" \
-    DEV_TOOLS_UPDATE_NPM_BIN="$TEST_FAKEBIN/npm-fixture" \
-    DEV_TOOLS_UPDATE_NPM_PREFIX="$TEST_HOME/npm-prefix" \
-    DEV_TOOLS_UPDATE_CURL_BIN="$TEST_FAKEBIN/curl-fixture" \
-    DEV_TOOLS_UPDATE_TREEHOUSE_BIN="$TEST_FAKEBIN/treehouse-fixture" \
-    DEV_TOOLS_UPDATE_NO_MISTAKES_BIN="$TEST_FAKEBIN/no-mistakes-fixture" \
-    DEV_TOOLS_UPDATE_HERDR_BIN="$TEST_FAKEBIN/herdr-fixture" \
-    DEV_TOOLS_HEALTH_PRINTENV_BIN="$TEST_FAKEBIN/printenv-fixture" \
-    "$CHECKER" "$@"
+  env HOME="$FIXTURE/home" PATH="${TEST_PATH:-$PATH}" DEV_TOOLS_PINS_FILE="${TEST_PINS_FILE:-$PINS}" DEV_TOOLS_NVIM_LOCK_FILE="$ROOT/config/nvim/lazy-lock.json" \
+    DEV_TOOLS_FLAKE_LOCK_FILE="${TEST_FLAKE_LOCK_FILE:-$ROOT/flake.lock}" \
+    DEV_TOOLS_CLOSURE_FILE="${TEST_CLOSURE_FILE-$CLOSURE_FILE}" \
+    DEV_TOOLS_NVIM_DATA_HOME="$FIXTURE/nvim" DEV_TOOLS_UPDATE_BIN_DIR="$FAKEBIN" DEV_TOOLS_UPDATE_NPM_BIN="$FAKEBIN/npm" \
+    DEV_TOOLS_UPDATE_CURL_BIN="$FAKEBIN/curl" DEV_TOOLS_UPDATE_GIT_BIN="$FAKEBIN/git" DEV_TOOLS_HEALTH_PRINTENV_BIN="$FAKEBIN/printenv" \
+    DEV_TOOLS_UPDATE_CACHE_PATH="$FIXTURE/cache.json" DEV_TOOLS_UPDATE_NOW_EPOCH="${TEST_NOW_EPOCH:-1000}" \
+    TEST_PINS="$PINS" TEST_CALL_LOG="$CALL_LOG" \
+    TEST_FAIL_NPM="${TEST_FAIL_NPM:-0}" TEST_FAIL_CURL="${TEST_FAIL_CURL:-0}" \
+    TEST_NPM_PRERELEASE_PACKAGE="${TEST_NPM_PRERELEASE_PACKAGE:-}" TEST_PRERELEASE_REPO="${TEST_PRERELEASE_REPO:-}" \
+    TEST_NPM_NO_STABLE_TAG="${TEST_NPM_NO_STABLE_TAG:-}" \
+    TEST_HERDR_LATEST_VERSION="${TEST_HERDR_LATEST_VERSION:-}" TEST_ANTIGRAVITY_LATEST_VERSION="${TEST_ANTIGRAVITY_LATEST_VERSION:-}" \
+    TEST_CHROME_ARGS="${TEST_CHROME_ARGS:---no-sandbox --disable-dev-shm-usage --disable-gpu}" "$CHECKER" "$@"
 }
 
-configure_fixture() {
-  local base=$1
-  TEST_HOME="$base/home"
-  TEST_FAKEBIN=$(make_fixture_tools "$base")
-  mkdir -p "$TEST_HOME"
-  TEST_FAKE_CALL_LOG="$base/calls.log"
-  TEST_FAKE_NPM_JSON="$base/npm.json"
-  TEST_FAKE_TREEHOUSE_RELEASE_JSON="$base/treehouse.json"
-  TEST_FAKE_NO_MISTAKES_RELEASE_JSON="$base/no-mistakes.json"
-  TEST_FAKE_HERDR_RELEASE_JSON="$base/herdr.json"
-  TEST_FAKE_NPM_RC=1
-  TEST_FAKE_CURL_FAIL=0
-  TEST_FAKE_TREEHOUSE_VERSION=v2.0.0
-  TEST_FAKE_NO_MISTAKES_VERSION='no-mistakes version v1.40.0 (fake)'
-  TEST_FAKE_HERDR_VERSION='herdr 0.7.4 (fake)'
-  TEST_FAKE_PRINTENV_RC=0
-  TEST_FAKE_CHROME_ARGS='--no-sandbox --disable-dev-shm-usage --disable-gpu'
-  export TEST_FAKE_CALL_LOG TEST_FAKE_NPM_JSON TEST_FAKE_TREEHOUSE_RELEASE_JSON
-  export TEST_FAKE_NO_MISTAKES_RELEASE_JSON TEST_FAKE_HERDR_RELEASE_JSON TEST_FAKE_NPM_RC TEST_FAKE_CURL_FAIL
-  export TEST_FAKE_TREEHOUSE_VERSION TEST_FAKE_NO_MISTAKES_VERSION TEST_FAKE_HERDR_VERSION
-  export TEST_FAKE_PRINTENV_RC TEST_FAKE_CHROME_ARGS
-}
+json=$(run_checker --json --force --no-cache)
+[ "$(printf '%s' "$json" | jq -r '.schema_version')" = 4 ] || fail 'schema version is not 4'
+[ ! -e "$FIXTURE/cache.json" ] || fail '--no-cache wrote the persistent cache'
 
-test_source_parsing_and_summaries() {
-  local base json human startup calls_before calls_after
-  base="$TMP_ROOT/parsing"
-  TEST_REPO=$(make_git_world parsing-git)
-  configure_fixture "$base"
-  cat > "$TEST_FAKE_NPM_JSON" <<'JSON'
+expected=0
+for _row in "${NPM_TOOL_PINS[@]}" "${GITHUB_TOOL_PINS[@]}" "${NIX_PACKAGE_PINS[@]}" "${NEOVIM_PLUGIN_PINS[@]}" "${CI_ACTION_PINS[@]}"; do expected=$((expected + 1)); done
+expected=$((expected + 10)) # antigravity, Cursor, two repos, installer, two inputs, three npx tools
+[ "$(printf '%s' "$json" | jq '.tools | length')" -eq "$expected" ] || fail 'complete manifest inventory was not emitted'
+[ "$(printf '%s' "$json" | jq '[.tools[] | select(.status != "up_to_date")] | length')" -eq 0 ] || fail 'matching installed, pinned, and latest values were not current'
+[ "$(printf '%s' "$json" | jq '.intentionally_unmanaged | length')" -ge 8 ] || fail 'unmanaged documented dependencies were not explicit'
+action_refs=$(workflow_action_refs "$ROOT/.github/workflows/build.yml")
+[ -n "$action_refs" ] || fail 'the workflow model exposed no action steps to check'
+for row in "${CI_ACTION_PINS[@]}"; do
+  IFS='|' read -r _name repo _tag commit <<<"$row"
+  printf '%s\n' "$action_refs" | grep -Fxq "$repo@$commit" || fail "$repo resolves to a different action commit than the manifest"
+done
+if printf '%s\n' "$action_refs" | grep -Evq '@[0-9a-f]{40}$'; then
+  fail 'a workflow action step resolves to a moving ref instead of an exact commit'
+fi
+[ "$(acp_launch_version "$ROOT/config/baby-menu/agents.json" opencode opencode-ai)" = "$OPENCODE_ACP_VERSION" ] || fail 'the OpenCode agent launches a different opencode-ai version than the manifest'
+[ "$(acp_launch_version "$ROOT/config/baby-menu/agents.json" omp omp-acp)" = "$OMP_ACP_VERSION" ] || fail 'the OMP agent launches a different omp-acp version than the manifest'
+grep -Fq 'npm view @anthropic-ai/claude-code dist-tags.stable --json' "$CALL_LOG" || fail 'Claude did not use its authoritative stable dist-tag'
+grep -Fq 'herdr --version' "$CALL_LOG" || fail 'Herdr installed version was not surveyed'
+! grep -Eq 'herdr (update|server|setup|restart|reload|stop|start)' "$CALL_LOG" || fail 'checker drove Herdr lifecycle behavior'
+! grep -Eq 'no-mistakes (daemon|update|setup|restart|reload|stop|start)' "$CALL_LOG" || fail 'checker drove no-mistakes lifecycle behavior'
+pass 'full inventory reports matching installed, pinned, and latest stable values read-only'
+
+# macOS ships shasum but neither sha256sum nor sha512sum. The Cursor snapshot
+# audit must still compare the real installer hash there rather than reporting
+# drift that does not exist.
+SHASUM_ONLY_BIN="$FIXTURE/shasum-only-bin"
+mkdir -p "$SHASUM_ONLY_BIN"
+for command_name in awk basename bash cat cut date dirname env grep head jq ln ls mkdir mktemp rm sed sort tail timeout tr uname wc; do
+  resolved=$(type -P "$command_name") || fail "missing test dependency: $command_name"
+  ln -sf "$resolved" "$SHASUM_ONLY_BIN/$command_name"
+done
+cat >"$SHASUM_ONLY_BIN/shasum" <<SHASUM
+#!/usr/bin/env bash
+set -eu
+bits=\$2
+shift 2
+case "\$bits" in
+  256) exec $(type -P sha256sum) "\$@" ;;
+  512) exec $(type -P sha512sum) "\$@" ;;
+esac
+exit 1
+SHASUM
+chmod +x "$SHASUM_ONLY_BIN/shasum"
+( PATH="$SHASUM_ONLY_BIN"; ! type -P sha256sum >/dev/null && ! type -P sha512sum >/dev/null ) \
+  || fail 'the shasum-only fixture PATH still exposes the coreutils checksum tools'
+
+TEST_PATH="$SHASUM_ONLY_BIN"
+json=$(run_checker --json --force --no-cache)
+unset TEST_PATH
+[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="cursor-agent") | .status')" = up_to_date ] \
+  || fail 'a shasum-only platform manufactured Cursor installer drift'
+[ "$(printf '%s' "$json" | jq '[.tools[] | select(.status != "up_to_date")] | length')" -eq 0 ] \
+  || fail 'a shasum-only platform changed the audit result for some other tool'
+pass 'the Cursor snapshot audit is accurate on platforms that ship only shasum'
+
+TEST_NPM_PRERELEASE_PACKAGE=@openai/codex
+TEST_PRERELEASE_REPO=kunchenguid/treehouse
+json=$(run_checker --json --force --no-cache)
+[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="codex") | .status')" = unknown ] || fail 'npm prerelease was accepted as stable'
+[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="treehouse") | .status')" = unknown ] || fail 'GitHub prerelease was accepted as stable'
+unset TEST_NPM_PRERELEASE_PACKAGE TEST_PRERELEASE_REPO
+pass 'stable-channel filters reject npm and GitHub prereleases'
+
+TEST_HERDR_LATEST_VERSION=0.10.0
+TEST_ANTIGRAVITY_LATEST_VERSION=1.2.0
+json=$(run_checker --json --force --no-cache)
+[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="herdr") | [.latest_stable,.status] | join("|")')" = '0.10.0|pin_outdated' ] || fail 'newer stable Herdr manifest was hidden as unknown'
+[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="antigravity") | [.latest_stable,.status] | join("|")')" = '1.2.0|pin_outdated' ] || fail 'newer stable Antigravity manifest was hidden as unknown'
+unset TEST_HERDR_LATEST_VERSION TEST_ANTIGRAVITY_LATEST_VERSION
+pass 'newer stable publisher manifests remain visible as pin drift'
+
+# A publisher that goes backwards - a yanked release - is still drift, but the
+# audit compares strings, not order, so it must not claim a direction it never
+# established and walk the operator into an attended downgrade.
+TEST_HERDR_LATEST_VERSION=0.8.9
+TEST_ANTIGRAVITY_LATEST_VERSION=1.0.0
+json=$(run_checker --json --force --no-cache)
+for row in 'herdr|0.8.9' 'antigravity|1.0.0'; do
+  IFS='|' read -r tool observed <<<"$row"
+  entry=$(printf '%s' "$json" | jq -ce --arg n "$tool" '.tools[] | select(.name == $n)')
+  [ "$(printf '%s' "$entry" | jq -r '[.latest_stable,.status] | join("|")')" = "$observed|pin_outdated" ] \
+    || fail "a withdrawn publisher release was not reported as drift for $tool"
+  if printf '%s' "$entry" | jq -e '.detail | test("newer")' >/dev/null; then
+    fail "$tool claimed the publisher manifest was newer than a pin it never ordered: $(printf '%s' "$entry" | jq -r '.detail')"
+  fi
+  printf '%s' "$entry" | jq -e '.detail | test("differs from the recorded")' >/dev/null \
+    || fail "$tool did not report the publisher manifest as differing from its pin"
+done
+unset TEST_HERDR_LATEST_VERSION TEST_ANTIGRAVITY_LATEST_VERSION
+pass 'a publisher release below the pin is reported as drift without asserting a direction'
+
+DRIFTED_LOCK="$FIXTURE/drifted-flake.lock"
+jq '.nodes.nixpkgs.locked.rev = "0000000000000000000000000000000000000000"' "$ROOT/flake.lock" >"$DRIFTED_LOCK"
+TEST_FLAKE_LOCK_FILE=$DRIFTED_LOCK
+json=$(run_checker --json --force --no-cache)
+[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="nixpkgs-input") | .status')" = drifted ] || fail 'flake.lock disagreement was hidden'
+unset TEST_FLAKE_LOCK_FILE
+pass 'flake input declarations are checked against the exact lock revisions'
+
+TEST_FAIL_NPM=1
+json=$(run_checker --json --force --no-cache)
+quota=$(printf '%s' "$json" | jq -ce '.tools[] | select(.name=="quota-axi")')
+[ "$(printf '%s' "$quota" | jq -r '.status')" = unknown ] || fail 'unknown registry source was treated as current'
+printf '%s' "$quota" | jq -e '.detail | test("registry lookup failed")' >/dev/null \
+  || fail 'a failing registry call was not reported as a lookup failure'
+unset TEST_FAIL_NPM
+pass 'unknown publication sources remain explicitly unknown'
+
+# A registry that answers with no `stable` dist-tag at all is a different cause
+# from a registry that could not be reached, and the row says which it was.
+TEST_NPM_NO_STABLE_TAG=@anthropic-ai/claude-code
+json=$(run_checker --json --force --no-cache)
+claude_entry=$(printf '%s' "$json" | jq -ce '.tools[] | select(.name=="claude")')
+[ "$(printf '%s' "$claude_entry" | jq -r '[.latest_stable,.status] | join("|")')" = 'unknown|unknown' ] \
+  || fail 'a retired stable dist-tag was not refused as unknown'
+printf '%s' "$claude_entry" | jq -e '.detail | test("publishes no usable version")' >/dev/null \
+  || fail "a retired stable dist-tag was not reported as an empty channel: $(printf '%s' "$claude_entry" | jq -r '.detail')"
+if printf '%s' "$claude_entry" | jq -e '.detail | test("lookup failed")' >/dev/null; then
+  fail 'a successful registry answer was reported as a registry lookup failure'
+fi
+grep -Fq 'npm view @anthropic-ai/claude-code dist-tags.stable --json' "$CALL_LOG" \
+  || fail 'the retired-dist-tag case never reached the stable channel'
+unset TEST_NPM_NO_STABLE_TAG
+pass 'a stable channel that publishes nothing is refused as an empty channel, not a lookup failure'
+
+health=$(run_checker --health --json)
+[ "$(printf '%s' "$health" | jq -r '.checks.chrome_devtools_headless.status')" = healthy ] || fail 'healthy browser flags failed'
+TEST_CHROME_ARGS='--no-sandbox --disable-dev-shm-usage'
+health=$(run_checker --health --json)
+[ "$(printf '%s' "$health" | jq -r '.checks.chrome_devtools_headless.status')" = broken ] || fail 'missing browser flag was hidden'
+unset TEST_CHROME_ARGS
+pass 'health mode remains local and deterministic'
+
+# The Nix wrapper prepends `export DEV_TOOLS_*=/nix/store/...` lines and its own
+# interpreter line ahead of this script's body, so --help must stay anchored to
+# the header instead of "everything from line 2".
+PACKAGED_CHECKER="$FIXTURE/packaged-dev-tools-check-updates"
 {
-  "quota-axi": {"current":"0.1.6","wanted":"0.1.9","latest":"0.1.9"},
-  "@openai/codex": {"current":"1.0.0","wanted":"2.0.0","latest":"2.0.0"}
+  printf '#!/usr/bin/env bash\n'
+  printf 'export DEV_TOOLS_PINS_FILE=/nix/store/aaaaaaaa-dev-tools-versions.sh\n'
+  printf 'export DEV_TOOLS_FLAKE_LOCK_FILE=/nix/store/bbbbbbbb-flake.lock\n'
+  printf 'export DEV_TOOLS_NVIM_LOCK_FILE=/nix/store/cccccccc-nvim-lazy-lock.json\n'
+  cat "$CHECKER"
+} >"$PACKAGED_CHECKER"
+chmod +x "$PACKAGED_CHECKER"
+packaged_help=$("$PACKAGED_CHECKER" --help)
+[ "$(printf '%s\n' "$packaged_help" | head -1)" = "$("$CHECKER" --help | head -1)" ] || fail 'the packaged --help does not start with the usage header'
+if printf '%s\n' "$packaged_help" | grep -Eq '/nix/store/|env bash'; then
+  fail 'the packaged --help leaks wrapper exports or the interpreter line'
+fi
+case "$packaged_help" in *'Usage: dev-tools-check-updates [--json]'*) : ;; *) fail 'the packaged --help omits the usage line' ;; esac
+pass 'the packaged --help prints only the operator contract'
+
+# ------------------- closure rows are immune to the ambient PATH
+
+# These reach the operator only through a wrapper's own PATH, so the audit has to
+# read the store path the generated manifest binds. Every one of their ambient
+# commands answers 0.0.1 above, so a PATH measurement would show up here.
+json=$(run_checker --json --force --no-cache)
+for row in "${CLOSURE_ROWS[@]}"; do
+  IFS='|' read -r package command_name version <<<"$row"
+  entry=$(printf '%s' "$json" | jq -ce --arg n "nix:$package" '.tools[] | select(.name == $n)') \
+    || fail "the inventory omits nix:$package"
+  [ "$(printf '%s' "$entry" | jq -r '.current')" = "$version" ] \
+    || fail "nix:$package was measured as $(printf '%s' "$entry" | jq -r '.current') instead of the closure's $version"
+  [ "$(printf '%s' "$entry" | jq -r '.status')" = up_to_date ] \
+    || fail "nix:$package is not up_to_date against its own closure"
+  [ "$(printf '%s' "$entry" | jq -r '.source')" = nixpkgs-locked-closure ] \
+    || fail "nix:$package does not label its evidence source distinctly"
+  [ "$command_name" = git ] || [ "$command_name" = curl ] || {
+    [ "$("$FAKEBIN/$command_name" | awk '{print $2}')" = 0.0.1 ] \
+      || fail "the hostile ambient stub for $command_name is not actually hostile"
+  }
+done
+pass 'closure Nix rows are measured from the bound store path and are immune to the ambient PATH'
+
+# A user-environment row is the opposite contract: the operator's own command is
+# the pinned one, so drift there has to surface.
+rm -f "$FAKEBIN/node"
+printf '#!%s\nprintf "v20.0.0\\n"\n' "$BASH_BIN" >"$FAKEBIN/node"
+chmod +x "$FAKEBIN/node"
+json=$(run_checker --json --force --no-cache)
+node_entry=$(printf '%s' "$json" | jq -ce '.tools[] | select(.name == "nix:nodejs_22")')
+[ "$(printf '%s' "$node_entry" | jq -r '.current')" = 20.0.0 ] \
+  || fail 'a user-environment Nix row was not measured from the command the operator runs'
+[ "$(printf '%s' "$node_entry" | jq -r '.status')" = drifted ] || fail 'user-environment drift was not reported'
+[ "$(printf '%s' "$node_entry" | jq -r '.source')" = nixpkgs-locked-stable ] \
+  || fail 'a user-environment row does not keep its own evidence source'
+ln -sf tool-version "$FAKEBIN/node"
+pass 'user-environment Nix rows keep their ambient measurement and still expose drift'
+
+# A repository-checkout run binds no manifest, so there is no closure to measure
+# and the honest answer is unknown - never a reading of an unrelated build.
+json=$(TEST_CLOSURE_FILE='' run_checker --json --force --no-cache)
+for row in "${CLOSURE_ROWS[@]}"; do
+  IFS='|' read -r package _command_name _version <<<"$row"
+  entry=$(printf '%s' "$json" | jq -ce --arg n "nix:$package" '.tools[] | select(.name == $n)')
+  [ "$(printf '%s' "$entry" | jq -r '.current')" = unknown ] \
+    || fail "nix:$package fell back to the ambient PATH without a closure manifest: $(printf '%s' "$entry" | jq -r '.current')"
+  printf '%s' "$entry" | jq -e '.detail | test("no closure measurement manifest is bound")' >/dev/null \
+    || fail "nix:$package did not say why it could not be measured"
+done
+[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name == "nix:nodejs_22") | .current')" != unknown ] \
+  || fail 'the missing manifest also suppressed a user-environment measurement'
+pass 'a run with no closure manifest reports every closure row unknown instead of measuring the wrong binary'
+
+# Manifest data that cannot bind the package is the same refusal, named.
+BROKEN_MANIFEST="$FIXTURE/broken-closure.json"
+printf 'not json\n' >"$BROKEN_MANIFEST"
+json=$(TEST_CLOSURE_FILE="$BROKEN_MANIFEST" run_checker --json --force --no-cache)
+gzip_entry=$(printf '%s' "$json" | jq -ce '.tools[] | select(.name == "nix:gzip")')
+[ "$(printf '%s' "$gzip_entry" | jq -r '.current')" = unknown ] || fail 'a malformed closure manifest was measured anyway'
+printf '%s' "$gzip_entry" | jq -e '.detail | test("malformed")' >/dev/null \
+  || fail 'a malformed closure manifest did not say so'
+
+printf '%s\n' '[{"name":"gzip","version":"1.14","store_path":"/nonexistent/gzip"}]' >"$BROKEN_MANIFEST"
+json=$(TEST_CLOSURE_FILE="$BROKEN_MANIFEST" run_checker --json --force --no-cache)
+gzip_entry=$(printf '%s' "$json" | jq -ce '.tools[] | select(.name == "nix:gzip")')
+[ "$(printf '%s' "$gzip_entry" | jq -r '.current')" = unknown ] || fail 'a missing bound path was measured anyway'
+printf '%s' "$gzip_entry" | jq -e '.detail | test("does not carry an executable")' >/dev/null \
+  || fail 'a missing bound executable did not say so'
+pass 'a manifest that cannot bind a closure package reports unknown with the reason'
+
+# ------------------- an unclassed pin row authorises no measurement source
+
+# The evidence class is a closed set: a row that loses or misspells it must not
+# quietly fall back to the ambient PATH, which is what the audit exists to avoid.
+UNCLASSED_PINS="$FIXTURE/pins-unclassed.sh"
+sed "s/'gzip|gzip|\([^|]*\)|closure'/'gzip|gzip|\1'/" "$PINS" >"$UNCLASSED_PINS"
+( # shellcheck disable=SC1090
+  source "$UNCLASSED_PINS"
+  for row in "${NIX_PACKAGE_PINS[@]}"; do
+    case "$row" in
+      gzip\|*) [ "$(awk -F'|' '{print NF}' <<<"$row")" -eq 3 ] || exit 1 ;;
+    esac
+  done ) || fail 'the unclassed-row fixture still carries an evidence class'
+json=$(TEST_PINS_FILE="$UNCLASSED_PINS" run_checker --json --force --no-cache)
+gzip_entry=$(printf '%s' "$json" | jq -ce '.tools[] | select(.name == "nix:gzip")') \
+  || fail 'an unclassed Nix row disappeared from the inventory'
+[ "$(printf '%s' "$gzip_entry" | jq -r '.current')" = unknown ] \
+  || fail "an unclassed pin row was measured as $(printf '%s' "$gzip_entry" | jq -r '.current') instead of refused"
+[ "$(printf '%s' "$gzip_entry" | jq -r '.status')" = unknown ] || fail 'an unclassed pin row did not report unknown'
+printf '%s' "$gzip_entry" | jq -e '.detail | test("no recognised evidence class")' >/dev/null \
+  || fail 'an unclassed pin row did not say why it was not measured'
+pass 'a pin row without a recognised evidence class is refused, not measured through PATH'
+
+# ------------------- the login banner is bounded by the refresh cadence
+
+# The login shell runs `--startup`, which only reads the cache; the weekly timer
+# is the only thing that refreshes it. So the banner accepts a week plus a day of
+# grace - eight days - and calls anything older stale rather than claiming it.
+CACHED_AT=1000
+EIGHT_DAYS=$((8 * 24 * 60 * 60))
+write_startup_cache() { # checked_at_epoch
+  jq -cn --argjson at "$1" '{schema_version:4,checked_at_epoch:$at,tools:[
+    {name:"npm:example",current:"1.0.0",pinned:"1.1.0",latest_stable:"1.1.0",status:"drifted"},
+    {name:"nix:example",current:"2.0.0",pinned:"2.0.0",latest_stable:"2.0.0",status:"up_to_date"}]}' >"$FIXTURE/cache.json"
 }
-JSON
-  write_release "$TEST_FAKE_TREEHOUSE_RELEASE_JSON" v2.1.0
-  write_release "$TEST_FAKE_NO_MISTAKES_RELEASE_JSON" v1.40.0
-  write_release "$TEST_FAKE_HERDR_RELEASE_JSON" v0.7.5
+write_startup_cache "$CACHED_AT"
 
-  json=$(run_checker 1000 --force --json)
-  [ "$(printf '%s' "$json" | jq -r '.sources.firstmate.default_branch')" = trunk ] \
-    || fail "Firstmate default branch was not resolved from origin"
-  [ "$(printf '%s' "$json" | jq -r '.sources.firstmate.behind')" = 1 ] \
-    || fail "Firstmate behind count was not parsed"
-  [ "$(printf '%s' "$json" | jq -r '.sources.npm_global.packages[0].name')" = quota-axi ] \
-    || fail "scoped npm update was not parsed"
-  [ "$(printf '%s' "$json" | jq '.sources.npm_global.packages | length')" -eq 1 ] \
-    || fail "unrelated global npm package leaked into the result"
-  [ "$(printf '%s' "$json" | jq -r '.sources.treehouse.status')" = update_available ] \
-    || fail "treehouse release response was not compared"
-  [ "$(printf '%s' "$json" | jq -r '.sources.no_mistakes.status')" = up_to_date ] \
-    || fail "no-mistakes up-to-date response was not compared"
-  [ "$(printf '%s' "$json" | jq -r '.sources.herdr.status')" = update_available ] \
-    || fail "herdr release response was not compared"
-  [ "$(printf '%s' "$json" | jq -r '.sources.herdr.current')" = 0.7.4 ] \
-    || fail "herdr installed version was not captured"
-  [ "$(printf '%s' "$json" | jq -r '.sources.herdr.latest')" = v0.7.5 ] \
-    || fail "herdr latest release tag was not captured"
-  [ "$(printf '%s' "$json" | jq -r '.sources.nix_pinned.status')" = excluded ] \
-    || fail "nix-pinned exclusion is absent from JSON"
+: >"$CALL_LOG"
+startup=$(run_checker --startup)
+printf '%s\n' "$startup" | grep -Fq 'npm:example drifted' || fail 'a usable cache did not report the drifted tool at login'
+if printf '%s\n' "$startup" | grep -Fq 'nix:example'; then fail 'the login banner reported a tool that is up to date'; fi
+[ ! -s "$CALL_LOG" ] || fail 'the login banner checked a source instead of only reading the cache'
 
-  human=$(run_checker 1001)
-  assert_contains "$human" "firstmate: 1 behind (origin/trunk)" "human Firstmate summary changed"
-  assert_contains "$human" "npm-global: quota-axi 0.1.6 -> 0.1.9" "human npm summary changed"
-  assert_contains "$human" "treehouse: v2.0.0 -> v2.1.0" "human treehouse summary changed"
-  assert_contains "$human" "no-mistakes: up to date" "human no-mistakes summary changed"
-  assert_contains "$human" "herdr: 0.7.4 -> v0.7.5" "human herdr summary changed"
-  assert_contains "$human" "nix-pinned tools are intentionally not tracked here" "human nix exclusion changed"
+# One second inside eight days still reports; the cache TTL that governs the
+# audit itself (four hours) must not govern this line.
+startup=$(TEST_NOW_EPOCH=$((CACHED_AT + EIGHT_DAYS - 1)) run_checker --startup)
+printf '%s\n' "$startup" | grep -Fq 'npm:example drifted' \
+  || fail 'a cache one second inside eight days was treated as stale'
 
-  calls_before=$(wc -l < "$TEST_FAKE_CALL_LOG" | tr -d ' ')
-  startup=$(run_checker 999999 --startup)
-  calls_after=$(wc -l < "$TEST_FAKE_CALL_LOG" | tr -d ' ')
-  [ "$calls_after" -eq "$calls_before" ] || fail "startup mode contacted publication sources"
-  assert_contains "$startup" "dev-tools: updates available" "startup summary lost its prefix"
-  assert_contains "$startup" "firstmate 1 behind" "startup summary omitted Firstmate"
-  assert_contains "$startup" "quota-axi 0.1.6 -> 0.1.9" "startup summary omitted npm update"
-  assert_contains "$startup" "treehouse v2.0.0 -> v2.1.0" "startup summary omitted treehouse"
-  assert_contains "$startup" "herdr 0.7.4 -> v0.7.5 (report-only: apply manually)" "startup summary omitted herdr"
-  assert_not_contains "$startup" "no-mistakes v1.40.0" "startup summary included an up-to-date source"
-  pass "checker parses and renders every scoped source"
-}
+# At exactly eight days, and beyond it, nothing is claimed.
+for now in $((CACHED_AT + EIGHT_DAYS)) $((CACHED_AT + EIGHT_DAYS + 86400)); do
+  startup=$(TEST_NOW_EPOCH=$now run_checker --startup)
+  if printf '%s\n' "$startup" | grep -Fq 'npm:example'; then
+    fail "the login banner replayed a cache $((now - CACHED_AT))s old as current tool state"
+  fi
+  printf '%s\n' "$startup" | grep -Fq 'older than eight days' \
+    || fail 'the login banner did not say the cached audit was stale'
+done
 
-test_fail_soft_unknowns() {
-  local base repo json human
-  base="$TMP_ROOT/unknown"
-  repo="$base/repo"
-  mkdir -p "$repo"
-  git -C "$repo" init -q -b odd-default
-  git -C "$repo" commit -q --allow-empty -m init
-  TEST_REPO="$repo"
-  configure_fixture "$base"
-  TEST_FAKE_NPM_RC=42
-  TEST_FAKE_NO_MISTAKES_VERSION='unexpected version output'
-  TEST_FAKE_HERDR_VERSION='garbled output'
-  export TEST_FAKE_NPM_RC TEST_FAKE_NO_MISTAKES_VERSION TEST_FAKE_HERDR_VERSION
-  printf '{}\n' > "$TEST_FAKE_NPM_JSON"
-  write_release "$TEST_FAKE_TREEHOUSE_RELEASE_JSON" latest
-  write_release "$TEST_FAKE_NO_MISTAKES_RELEASE_JSON" v9.0.0
-  write_release "$TEST_FAKE_HERDR_RELEASE_JSON" v9.9.9
+# A cache stamped in the future is clock skew, not age, and the line says so
+# instead of claiming a staleness this clock never established.
+startup=$(TEST_NOW_EPOCH=$((CACHED_AT - 1)) run_checker --startup)
+if printf '%s\n' "$startup" | grep -Fq 'npm:example'; then fail 'a future-stamped cache was claimed as current'; fi
+printf '%s\n' "$startup" | grep -Fq 'stamped in the future' \
+  || fail "a future-stamped cache was reported as an age problem: $startup"
+if printf '%s\n' "$startup" | grep -Fq 'older than eight days'; then
+  fail 'a future-stamped cache asserted an age the clock could not establish'
+fi
 
-  json=$(run_checker 2000 --force --json) || fail "checker returned non-zero for unavailable sources"
-  [ "$(printf '%s' "$json" | jq '[.sources.firstmate,.sources.npm_global,.sources.treehouse,.sources.no_mistakes,.sources.herdr] | map(select(.status == "unknown")) | length')" -eq 5 ] \
-    || fail "unavailable sources did not all degrade to unknown"
-  human=$(run_checker 2001)
-  assert_contains "$human" "firstmate: unknown" "human output hid Firstmate failure"
-  assert_contains "$human" "npm-global: unknown" "human output hid npm failure"
-  assert_contains "$human" "treehouse: unknown" "human output hid treehouse failure"
-  assert_contains "$human" "no-mistakes: unknown" "human output hid no-mistakes failure"
-  assert_contains "$human" "herdr: unknown" "human output hid herdr failure"
-  pass "source failures are fail-soft unknown results"
-}
+# A timestamp that is not an integer is the third ground, and it is named too.
+jq -cn '{schema_version:4,checked_at_epoch:"recently",tools:[
+  {name:"npm:example",current:"1.0.0",pinned:"1.1.0",latest_stable:"1.1.0",status:"drifted"}]}' >"$FIXTURE/cache.json"
+startup=$(run_checker --startup)
+if printf '%s\n' "$startup" | grep -Fq 'npm:example'; then fail 'a cache with no usable timestamp was claimed as current'; fi
+printf '%s\n' "$startup" | grep -Fq 'carries no usable timestamp' \
+  || fail "a cache with no usable timestamp was reported as an age problem: $startup"
 
-test_cache_ttl_force_and_silent_startup() {
-  local base first second expired forced current startup calls_first calls_cached calls_expired
-  base="$TMP_ROOT/cache"
-  TEST_REPO=$(make_git_world cache-git)
-  configure_fixture "$base"
-  TEST_TTL=10
-  printf '{"quota-axi":{"current":"0.1.6","latest":"0.1.9"}}\n' > "$TEST_FAKE_NPM_JSON"
-  write_release "$TEST_FAKE_TREEHOUSE_RELEASE_JSON" v2.1.0
-  write_release "$TEST_FAKE_NO_MISTAKES_RELEASE_JSON" v1.40.0
-  write_release "$TEST_FAKE_HERDR_RELEASE_JSON" v0.7.4
-  printf '%s\n' '{"schema_version":1,"checked_at_epoch":3000,"cache_ttl_seconds":10,"sources":{"firstmate":{"status":"up_to_date"},"npm_global":{"status":"up_to_date","packages":[]},"treehouse":{"status":"up_to_date"},"no_mistakes":{"status":"up_to_date"},"nix_pinned":{"status":"excluded"}}}' \
-    > "$TEST_HOME/cache.json"
+# Nothing bound at all says nothing: there is no audit to be stale about.
+printf 'not a cache\n' >"$FIXTURE/cache.json"
+[ -z "$(run_checker --startup)" ] || fail 'an unreadable cache produced a login claim'
+rm -f "$FIXTURE/cache.json"
+pass 'the login banner reports tool state for eight days, and names the ground it refuses on'
 
-  first=$(run_checker 3000 --json)
-  [ -e "$TEST_FAKE_CALL_LOG" ] || fail "pre-herdr schema v1 cache was accepted"
-  calls_first=$(wc -l < "$TEST_FAKE_CALL_LOG" | tr -d ' ')
-  [ "$(jq -r '.schema_version' "$TEST_HOME/cache.json")" = 2 ] \
-    || fail "fresh cache did not use schema version 2"
-  [ "$(jq -r '.sources.herdr | type' "$TEST_HOME/cache.json")" = object ] \
-    || fail "fresh schema v2 cache omitted herdr"
-  printf '{"quota-axi":{"current":"0.1.6","latest":"0.1.10"}}\n' > "$TEST_FAKE_NPM_JSON"
-  write_release "$TEST_FAKE_TREEHOUSE_RELEASE_JSON" v2.2.0
-  second=$(run_checker 3009 --json)
-  calls_cached=$(wc -l < "$TEST_FAKE_CALL_LOG" | tr -d ' ')
-  [ "$calls_cached" -eq "$calls_first" ] || fail "fresh cache still called publication sources"
-  [ "$(printf '%s' "$second" | jq -r '.sources.treehouse.latest')" = v2.1.0 ] \
-    || fail "fresh cache did not retain its collected result"
-
-  expired=$(run_checker 3010 --json)
-  calls_expired=$(wc -l < "$TEST_FAKE_CALL_LOG" | tr -d ' ')
-  [ "$calls_expired" -gt "$calls_cached" ] || fail "TTL boundary did not refresh publication sources"
-  [ "$(printf '%s' "$expired" | jq -r '.sources.treehouse.latest')" = v2.2.0 ] \
-    || fail "expired cache did not collect the new release"
-
-  write_release "$TEST_FAKE_TREEHOUSE_RELEASE_JSON" v2.3.0
-  forced=$(run_checker 3011 --force --json)
-  [ "$(printf '%s' "$forced" | jq -r '.sources.treehouse.latest')" = v2.3.0 ] \
-    || fail "--force did not bypass a fresh cache"
-  [ "$(printf '%s' "$first" | jq -r '.checked_at_epoch')" = 3000 ] \
-    || fail "cache did not record the injected collection time"
-
-  current=$(printf '%s' "$forced" | jq '
-    .sources.firstmate.status = "up_to_date"
-    | .sources.firstmate.behind = 0
-    | .sources.npm_global.status = "up_to_date"
-    | .sources.npm_global.packages = []
-    | .sources.treehouse.status = "up_to_date"
-    | .sources.no_mistakes.status = "up_to_date"
-    | .sources.herdr.status = "up_to_date"
-  ')
-  printf '%s\n' "$current" > "$TEST_HOME/cache.json"
-  startup=$(run_checker 999999 --startup)
-  [ -z "$startup" ] || fail "startup mode printed when all cached tools were current"
-  unset TEST_TTL
-  pass "cache honors TTL and force while startup stays cache-only and quiet"
-}
-
-test_chrome_headless_health() {
-  local base human json startup
-  base="$TMP_ROOT/health"
-  TEST_REPO="$base/unused-repo"
-  configure_fixture "$base"
-
-  human=$(run_checker 4000 --health)
-  assert_contains "$human" "chrome-devtools headless flags: healthy" "healthy flags were not reported"
-  [ ! -e "$TEST_FAKE_CALL_LOG" ] || fail "health mode contacted publication sources"
-  json=$(run_checker 4001 --health --json)
-  [ "$(printf '%s' "$json" | jq -r '.checks.chrome_devtools_headless.status')" = healthy ] \
-    || fail "health JSON did not report healthy flags"
-  [ "$(printf '%s' "$json" | jq '.checks.chrome_devtools_headless.required_flags | length')" -eq 3 ] \
-    || fail "health JSON did not preserve the three required flags"
-
-  TEST_FAKE_CHROME_ARGS='--no-sandbox --disable-dev-shm-usage'
-  export TEST_FAKE_CHROME_ARGS
-  human=$(run_checker 4002 --health)
-  assert_contains "$human" "broken (missing required flags: --disable-gpu)" "missing flag was not reported as broken"
-  startup=$(run_checker 4003 --startup)
-  assert_contains "$startup" "dev-tools: chrome-devtools headless flags broken" "startup hid broken headless flags"
-
-  TEST_FAKE_PRINTENV_RC=1
-  export TEST_FAKE_PRINTENV_RC
-  human=$(run_checker 4004 --health)
-  assert_contains "$human" "broken (CHROME_DEVTOOLS_AXI_CHROME_ARGS is unset)" "unset flag environment was not reported as broken"
-
-  TEST_FAKE_PRINTENV_RC=2
-  export TEST_FAKE_PRINTENV_RC
-  json=$(run_checker 4005 --health --json) || fail "unknown health state returned non-zero"
-  [ "$(printf '%s' "$json" | jq -r '.checks.chrome_devtools_headless.status')" = unknown ] \
-    || fail "unreadable environment did not degrade to unknown"
-  pass "chrome-devtools health covers healthy, broken, unknown, and startup visibility"
-}
-
-test_herdr_is_report_only_tier() {
-  # Belt-and-braces: even when the checker reports herdr as update_available,
-  # the help/contract itself must call out that the apply companion is NOT
-  # allowed to install herdr. This is the human-readable guardrail that makes
-  # the report-only behavior obvious from the tool's own --help output.
-  local contract
-  contract=$(sed -n '2,/^set -u$/s/^# \{0,1\}//p' "$CHECKER")
-  assert_contains "$contract" "REPORT ONLY" "checker --help did not call out herdr as report-only"
-  assert_contains "$contract" "dev-tools-apply-updates is intentionally NOT" \
-    "checker --help did not forbid apply-updates from touching herdr"
-  pass "checker --help documents herdr as a report-only tier"
-}
-
-export GIT_AUTHOR_NAME=dev-tools-test
-export GIT_AUTHOR_EMAIL=dev-tools-test@example.invalid
-export GIT_COMMITTER_NAME=dev-tools-test
-export GIT_COMMITTER_EMAIL=dev-tools-test@example.invalid
-test_source_parsing_and_summaries
-test_fail_soft_unknowns
-test_cache_ttl_force_and_silent_startup
-test_chrome_headless_health
-test_herdr_is_report_only_tier
+printf '\nall dev-tools-check-updates tests passed\n'

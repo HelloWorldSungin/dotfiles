@@ -1,36 +1,21 @@
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, devTools, ... }:
 
 let
   dotfiles = "${config.home.homeDirectory}/dotfiles";
   link = path: config.lib.file.mkOutOfStoreSymlink "${dotfiles}/${path}";
-  devToolsUpdateChecker = pkgs.writeShellApplication {
-    name = "dev-tools-check-updates";
-    text = builtins.readFile ../bin/dev-tools-check-updates;
-    bashOptions = [ ]; # The checker deliberately handles source failures itself.
-    runtimeInputs = with pkgs; [
-      coreutils
-      curl
-      gawk
-      git
-      gnugrep
-      gnused
-      jq
-      nodejs_22
-    ];
-  };
-  codexSetContextWindow = pkgs.writeShellApplication {
-    name = "codex-set-context-window";
-    text = builtins.readFile ../bin/codex-set-context-window;
-    runtimeInputs = with pkgs; [ coreutils diffutils gawk ];
-  };
 in
 {
+  imports = [ ./dev-tools.nix ];
+
   home.stateVersion = "25.11";
 
   programs.home-manager.enable = true;
 
-  home.packages = with pkgs; [
-    devToolsUpdateChecker
+  home.packages = (with devTools; [
+    checker
+    pinnedInstaller
+    claudeSpendPinned
+  ]) ++ (with pkgs; [
     gh
     lazygit
     nodejs_22
@@ -43,7 +28,7 @@ in
     tree
     htop
     unzip
-  ];
+  ]);
 
   home.sessionVariables = {
     EDITOR = "nvim";
@@ -62,6 +47,12 @@ in
     defaultEditor = true;
     viAlias = true;
     vimAlias = true;
+    # Preserve the pre-26.05 provider defaults explicitly across channel updates.
+    withPython3 = true;
+    withRuby = true;
+    # Home Manager 26.05 generates provider Lua. Keep it in the wrapper so it
+    # does not collide with the live out-of-store nvim configuration tree.
+    sideloadInitLua = true;
   };
   xdg.configFile."nvim".source = link "config/nvim";
 
@@ -97,7 +88,7 @@ in
   # an atomic idempotent merge rather than taking over the file.
   home.activation.codexContextWindow =
     lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      $DRY_RUN_CMD ${codexSetContextWindow}/bin/codex-set-context-window
+      $DRY_RUN_CMD ${devTools.codexSetContextWindow}/bin/codex-set-context-window
     '';
 
   # ------------------------------------------------------------------ zsh
@@ -130,7 +121,7 @@ in
       cca = "claude --enable-auto-mode";
       ccar = "claude --enable-auto-mode -r";
       ccm = "claude-monitor --plan max20 --theme dark";
-      cspend = "npx claude-spend";
+      cspend = "claude-spend-pinned";
       pi-fusion = "pi -e $HOME/.pi/agent/extensions/fusion-harness/fusion-harness.ts --architect openai-codex/gpt-5.6-sol --architect-thinking xhigh --builder zai/glm-5.2 --builder-thinking max";
 
       # ArkNode AI & LOQ server management
