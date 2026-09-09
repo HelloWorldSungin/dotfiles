@@ -47,12 +47,29 @@ done
 pass "Sol and Terra each override only contextWindow, to 1050000"
 
 # The overrides must not touch model selection, effort, or Luna.
-if jq -e '.. | objects | has("model") or has("reasoningEffort")' "$MODELS_JSON" >/dev/null 2>&1; then
-  fail "pi/models.json must not set a default model or effort"
-fi
-if grep -q 'luna' "$MODELS_JSON"; then
-  fail "pi/models.json must leave gpt-5.6-luna at its built-in default"
-fi
+has_default_model_or_effort() {
+  jq -e '[.. | objects | has("model") or has("reasoningEffort")] | any' "$1" >/dev/null 2>&1
+}
+
+# Negative controls: the guard itself must fire on a document that violates it.
+probe="$TMP_ROOT/default-probe.json"
+for probe_json in \
+  '{"model":"gpt-5.6-sol","providers":{"openai-codex":{"modelOverrides":{"gpt-5.6-sol":{"contextWindow":1050000}}}}}' \
+  '{"providers":{"openai-codex":{"modelOverrides":{"gpt-5.6-sol":{"contextWindow":1050000,"reasoningEffort":"high"}}}}}'
+do
+  printf '%s\n' "$probe_json" > "$probe"
+  has_default_model_or_effort "$probe" \
+    || fail "the default model/effort guard is inert on: $probe_json"
+done
+pass "the default model/effort guard fires on a root model and on a nested effort"
+
+! has_default_model_or_effort "$MODELS_JSON" \
+  || fail "pi/models.json must not set a default model or effort"
+
+# Luna, and anything else, is left alone: the provider object carries only the
+# two overrides already pinned above.
+assert_eq "$(jq -r '.providers["openai-codex"] | keys | join(",")' "$MODELS_JSON")" \
+  "modelOverrides" "the openai-codex provider carries nothing but modelOverrides"
 pass "pi/models.json changes no default model, effort, or Luna"
 
 # ------------------------------------------------- codex config.toml merge

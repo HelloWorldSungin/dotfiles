@@ -63,18 +63,21 @@ separately, and the two ceilings are **not** the same.
 | Harness | Mechanism | Effective window |
 |---------|-----------|------------------|
 | pi | `pi/models.json` → `~/.pi/agent/models.json`, `providers.openai-codex.modelOverrides` | **1,050,000** for `gpt-5.6-sol` and `gpt-5.6-terra` |
-| codex | global `model_context_window` in `~/.codex/config.toml` | **872,000** for every model |
+| codex | global `model_context_window` in `~/.codex/config.toml` | **872,000** for `gpt-5.6-sol`, `gpt-5.6-terra` and `gpt-5.6-luna`; models with a lower `max_context_window` keep their own ceiling |
 
 Pi gets OpenAI's full 1.05M long-context window. Codex does not: its
 0.153.4 catalog advertises `max_context_window = 872000` for Sol, Terra and
 Luna, and `models-manager` applies `configured.min(max_context_window)`, so a
 larger configured value is silently clamped. 872,000 is therefore the real
-effective ceiling and the value this repo commits - do not read Codex as being
-at parity with pi.
+effective ceiling for those models and the value this repo commits - do not
+read Codex as being at parity with pi.
 
-Two consequences of Codex's key being global rather than per-model: it also
-raises Luna, and it is the only mechanism Codex supports. Pi's overrides are
-per-model, so Luna stays at 272,000 there.
+Codex's key is global rather than per-model, and it is the only mechanism Codex
+supports, so it is offered to the whole catalog. The same clamp bounds it
+per model: it lifts every model advertising `max_context_window = 872000` (Sol,
+Terra and Luna, plus `gpt-6-astra`, `gpt-reserve` and `codex-auto-review`),
+while `gpt-5.5` settles at its own 272,000 and `gpt-5.3-codex-spark` at 128,000.
+Pi's overrides are per-model, so Luna stays at 272,000 there.
 
 Requests above 272K total input tokens bill at GPT-5.6's long-context rates for
 the whole request. Neither override changes the selected model or effort.
