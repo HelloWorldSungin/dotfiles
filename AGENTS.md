@@ -23,9 +23,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
      even though the file is a live symlink; use `herdr server reload-config`.
      Never restart the captain's herdr to apply a config - it hosts the live fleet.
 - `config/dev-tools-versions.sh` owns external tool pins and source metadata.
-  The read-only checker lives in `bin/dev-tools-check-updates`, its
-  deterministic self-test is in `tests/`, and `home/sungin-ct110.nix` owns its
-  package, timer, and zsh startup wiring.
+  The read-only checker lives in `bin/dev-tools-check-updates` and its
+  deterministic self-test is in `tests/`. `home/dev-tools.nix` is the single
+  owner of every packaged dev-tool derivation (pin artifacts, checker, pinned
+  installer, cspend wrapper, guarded updater); `common.nix` and
+  `sungin-ct110.nix` consume them through the `devTools` module argument, so
+  the host module owns only its timer and zsh startup wiring.
 - `bin/dev-tools-apply-updates` is the guarded, opt-in companion that applies only
   the two safe tiers the checker tracks (Firstmate exact fast-forward plus six
   allowlisted npm-global tools); it delegates detection to the checker, independently

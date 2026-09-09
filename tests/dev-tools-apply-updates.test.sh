@@ -81,6 +81,8 @@ set -eu
 printf '%s\n' "$*" >>"$TEST_NPM_LOG"
 # shellcheck source=/dev/null
 source "$TEST_PINS"
+# Simulates a worker lane starting inside the bounded re-verification window.
+[ -n "${TEST_WORKER_APPEARS:-}" ] && printf 'lane\n' >"$TEST_WORKER_APPEARS"
 if [ "$1" = view ]; then
   spec=$2
   for row in "${NPM_TOOL_PINS[@]}"; do
@@ -136,7 +138,8 @@ run_apply() {
     DEV_TOOLS_UPDATE_NPM_BIN="$FAKEBIN/npm" DEV_TOOLS_UPDATE_NPM_PREFIX="$PREFIX" DEV_TOOLS_UPDATE_GIT_BIN="$(command -v git)" \
     TEST_PINS="$PINS" TEST_PREFIX="$PREFIX" TEST_FIRSTMATE="$CHECKOUT" TEST_NPM_LOG="$NPM_LOG" TEST_CHECKER_LOG="$CHECKER_LOG" \
     TEST_LIFECYCLE_LOG="$LIFECYCLE_LOG" TEST_BAD_PACKAGE="${TEST_BAD_PACKAGE:-}" TEST_INVALID_CHECKER="${TEST_INVALID_CHECKER:-0}" \
-    TEST_STALE_CHECKER_LATEST="${TEST_STALE_CHECKER_LATEST:-}" "$APPLY" "$@"
+    TEST_STALE_CHECKER_LATEST="${TEST_STALE_CHECKER_LATEST:-}" TEST_WORKER_APPEARS="${TEST_WORKER_APPEARS:-}" \
+    "$APPLY" "$@"
 }
 
 TEST_STALE_CHECKER_LATEST=9.9.9
@@ -215,6 +218,24 @@ json=$(run_apply --json)
 [ ! -s "$NPM_LOG" ] && [ ! -s "$CHECKER_LOG" ] || fail 'worker deferral still queried or mutated sources'
 rm -f "$STATE/active.meta"
 pass 'active Firstmate lanes defer every mutation before detection'
+
+# A lane that only appears inside the re-verification window must be visible in
+# the emitted guard, not just in the tier that deferred because of it.
+: >"$NPM_LOG"; : >"$CHECKER_LOG"
+rm -f "$PREFIX/bin/quota-axi"
+TEST_WORKER_APPEARS="$STATE/appeared.meta"
+set +e
+json=$(run_apply --json)
+set -e
+unset TEST_WORKER_APPEARS
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .detail')" = 'workers appeared during re-verification' ] \
+  || fail 'a lane appearing during re-verification did not defer the mutation'
+[ ! -e "$PREFIX/bin/quota-axi" ] || fail 'a lane appearing during re-verification still installed the package'
+[ "$(printf '%s' "$json" | jq -r '.worker_guard.status')" = active ] \
+  || fail 'the result reported a clear worker guard while a tier deferred on an active lane'
+[ "$(printf '%s' "$json" | jq -r '.worker_guard.in_flight')" = 1 ] || fail 'the result did not count the lane that deferred the mutation'
+rm -f "$STATE/appeared.meta"
+pass 'the emitted worker guard reflects lanes found by pre-mutation re-verification'
 
 TEST_INVALID_CHECKER=1
 set +e

@@ -31,6 +31,15 @@ The entry point. It declares:
 - **outputs**: named machine configurations. `homeConfigurations."sungin@ct110"`
   is the only one now; a Mac target joins later in the same file.
 
+### home/dev-tools.nix
+
+Every developer-tool derivation the repository packages itself - the pin
+artifacts, the read-only checker, the pinned installer, the `cspend` wrapper,
+and the guarded updater - is defined here once and exported through the
+`devTools` module argument. `home/common.nix` and `home/sungin-ct110.nix`
+consume those exports, so a change to a runtime closure or an exported path
+cannot ship two different binaries to the same host.
+
 ### home/sungin-ct110.nix
 
 The actual environment description. Reading it top to bottom IS the

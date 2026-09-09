@@ -143,6 +143,13 @@ current authoritative release or branch commit.
 
 ## Check, install, and apply boundaries
 
+`home/dev-tools.nix` is the single owner of the Nix packaging for these tools.
+It builds the pin, flake-lock, and plugin-lock artifacts and the checker,
+pinned installer, `cspend` wrapper, and guarded updater derivations, each with
+its complete runtime closure declared. The interactive checker, the weekly
+timer, the login-shell startup check, and the updater's checker dependency are
+therefore one derivation rather than four copies that happen to agree.
+
 `dev-tools-check-updates --json --force --no-cache` is the read-only audit. It
 reports every executable and plugin as installed, pinned, and latest stable,
 reports Nix input and package pins, and names intentionally unmanaged tools.
@@ -165,7 +172,9 @@ Bootstrap invokes it after the exact Nix and Home Manager bootstrap.
    after independently re-reading each exact version and integrity from npm.
 
 Both scopes refuse while any Firstmate worker lane exists and recheck that guard
-immediately before mutation. Dry-run performs no install, merge, or fetch.
+immediately before mutation; a lane found by that recheck is reported in the
+result's `worker_guard`, not only in the tier it deferred. Dry-run performs no
+install, merge, or fetch.
 Herdr, no-mistakes, GBrain, Nix, agent harnesses, and Baby Menu are never apply
 targets.
 

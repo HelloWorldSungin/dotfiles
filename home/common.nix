@@ -1,47 +1,8 @@
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, devTools, ... }:
 
 let
   dotfiles = "${config.home.homeDirectory}/dotfiles";
   link = path: config.lib.file.mkOutOfStoreSymlink "${dotfiles}/${path}";
-  devToolsPins = pkgs.writeText "dev-tools-versions.sh" (builtins.readFile ../config/dev-tools-versions.sh);
-  devToolsFlakeLock = pkgs.writeText "flake.lock" (builtins.readFile ../flake.lock);
-  nvimPluginLock = pkgs.writeText "nvim-lazy-lock.json" (builtins.readFile ../config/nvim/lazy-lock.json);
-  devToolsUpdateChecker = pkgs.writeShellApplication {
-    name = "dev-tools-check-updates";
-    text = ''
-      export DEV_TOOLS_PINS_FILE=${devToolsPins}
-      export DEV_TOOLS_FLAKE_LOCK_FILE=${devToolsFlakeLock}
-      export DEV_TOOLS_NVIM_LOCK_FILE=${nvimPluginLock}
-      ${builtins.readFile ../bin/dev-tools-check-updates}
-    '';
-    bashOptions = [ ]; # The checker deliberately handles source failures itself.
-    runtimeInputs = with pkgs; [
-      coreutils
-      curl
-      gawk
-      git
-      gnugrep
-      gnused
-      jq
-      nodejs_22
-    ];
-  };
-  devToolsPinnedInstaller = pkgs.writeShellApplication {
-    name = "dev-tools-install-pinned";
-    text = ''
-      export DEV_TOOLS_PINS_FILE=${devToolsPins}
-      ${builtins.readFile ../bin/dev-tools-install-pinned}
-    '';
-    runtimeInputs = with pkgs; [ coreutils curl gawk git gnugrep gnutar jq nodejs_22 ];
-  };
-  claudeSpendPinned = pkgs.writeShellApplication {
-    name = "claude-spend-pinned";
-    text = ''
-      export DEV_TOOLS_PINS_FILE=${devToolsPins}
-      ${builtins.readFile ../bin/claude-spend-pinned}
-    '';
-    runtimeInputs = with pkgs; [ coreutils gnugrep nodejs_22 ];
-  };
   codexSetContextWindow = pkgs.writeShellApplication {
     name = "codex-set-context-window";
     text = builtins.readFile ../bin/codex-set-context-window;
@@ -49,14 +10,17 @@ let
   };
 in
 {
+  imports = [ ./dev-tools.nix ];
+
   home.stateVersion = "25.11";
 
   programs.home-manager.enable = true;
 
-  home.packages = with pkgs; [
-    devToolsUpdateChecker
-    devToolsPinnedInstaller
+  home.packages = (with devTools; [
+    checker
+    pinnedInstaller
     claudeSpendPinned
+  ]) ++ (with pkgs; [
     gh
     lazygit
     nodejs_22
@@ -69,7 +33,7 @@ in
     tree
     htop
     unzip
-  ];
+  ]);
 
   home.sessionVariables = {
     EDITOR = "nvim";

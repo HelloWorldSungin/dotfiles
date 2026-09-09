@@ -1,51 +1,10 @@
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, devTools, ... }:
 
 let
-  devToolsPins = pkgs.writeText "dev-tools-versions.sh" (builtins.readFile ../config/dev-tools-versions.sh);
-  devToolsFlakeLock = pkgs.writeText "flake.lock" (builtins.readFile ../flake.lock);
-  nvimPluginLock = pkgs.writeText "nvim-lazy-lock.json" (builtins.readFile ../config/nvim/lazy-lock.json);
-  devToolsUpdateChecker = pkgs.writeShellApplication {
-    name = "dev-tools-check-updates";
-    text = ''
-      export DEV_TOOLS_PINS_FILE=${devToolsPins}
-      export DEV_TOOLS_FLAKE_LOCK_FILE=${devToolsFlakeLock}
-      export DEV_TOOLS_NVIM_LOCK_FILE=${nvimPluginLock}
-      ${builtins.readFile ../bin/dev-tools-check-updates}
-    '';
-    bashOptions = [ ]; # The checker deliberately handles source failures itself.
-    runtimeInputs = with pkgs; [
-      coreutils
-      curl
-      gawk
-      git
-      gnugrep
-      gnused
-      jq
-      nodejs_22
-    ];
-  };
-  # Guarded, opt-in companion to the checker. Installed on PATH but deliberately
-  # NOT given a timer: it only ever runs when the captain invokes it. The checker
-  # is on its runtime PATH so the tool's own detection delegation resolves.
-  devToolsApplyUpdates = pkgs.writeShellApplication {
-    name = "dev-tools-apply-updates";
-    text = ''
-      export DEV_TOOLS_PINS_FILE=${devToolsPins}
-      ${builtins.readFile ../bin/dev-tools-apply-updates}
-    '';
-    bashOptions = [ ]; # Applies each tier independently and handles failures itself.
-    runtimeInputs = with pkgs; [
-      coreutils
-      git
-      jq
-      nodejs_22
-      devToolsUpdateChecker
-    ];
-  };
   devToolsUpdateCheckRun = pkgs.writeShellScript "dev-tools-update-checker-run" ''
     export CHROME_DEVTOOLS_AXI_CHROME_ARGS=${lib.escapeShellArg config.home.sessionVariables.CHROME_DEVTOOLS_AXI_CHROME_ARGS}
-    ${devToolsUpdateChecker}/bin/dev-tools-check-updates --force --json
-    ${devToolsUpdateChecker}/bin/dev-tools-check-updates --health --json
+    ${devTools.checker}/bin/dev-tools-check-updates --force --json
+    ${devTools.checker}/bin/dev-tools-check-updates --health --json
   '';
 in
 {
@@ -54,12 +13,13 @@ in
   home.username = "sungin";
   home.homeDirectory = "/home/sungin";
 
-  home.packages = with pkgs; [
+  home.packages = (with pkgs; [
     tea # Gitea CLI - BZ-SIM (and other CT101-hosted repos) track issues there
     chromium # headless browser for chrome-devtools-axi E2E testing
     ghdl     # open-source VHDL simulator
     gtkwave  # view GHDL-produced .ghw/.vcd waveforms
-    devToolsApplyUpdates # opt-in guarded auto-apply for the safe update tiers
+  ]) ++ [
+    devTools.applyUpdates # opt-in guarded auto-apply for the safe update tiers
   ];
 
   home.sessionVariables = {
@@ -74,7 +34,7 @@ in
     '';
     initContent = ''
       if [[ -o login ]]; then
-        ${devToolsUpdateChecker}/bin/dev-tools-check-updates --startup
+        ${devTools.checker}/bin/dev-tools-check-updates --startup
       fi
     '';
   };

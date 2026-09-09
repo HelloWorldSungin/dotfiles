@@ -120,6 +120,7 @@ text only and CT110 is headless. Two bridges:
 
 ```
 flake.nix              inputs (pinned nixpkgs, home-manager) + machine targets
+home/dev-tools.nix     single owner of the packaged developer-tool derivations
 home/common.nix        shared environment (packages, zsh, neovim, git, agent memory)
 home/sungin-ct110.nix  CT110 Linux server specific configuration
 home/sungin-mac.nix    MacBook Air macOS client specific configuration
