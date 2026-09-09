@@ -85,10 +85,11 @@ advertises 1,000,000, is held to the configured 872,000. Pi's overrides are
 per-model, so Luna stays at 272,000 there.
 
 To re-verify against an upgraded Codex, read the catalog the installed binary
-embeds rather than trusting this list:
+embeds rather than trusting this list (npm installs exactly one platform
+package, so the `codex-*` glob resolves on CT110 and the Mac alike):
 
-```
-strings "$(dirname "$(readlink -f "$(command -v codex)")")"/../node_modules/@openai/codex-linux-x64/vendor/*/bin/codex \
+```sh
+strings "$(dirname "$(readlink -f "$(command -v codex)")")"/../node_modules/@openai/codex-*/vendor/*/bin/codex \
   | grep -E '^      "(slug|max_context_window)"'
 ```
 
