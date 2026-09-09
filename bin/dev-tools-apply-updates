@@ -26,11 +26,17 @@
 # against the registry, or - when it is not published there, which is how a
 # locally built or unpublished global install presents - the operator must place
 # that exact artifact in $DEV_TOOLS_APPLY_PRIOR_ARTIFACT_DIR as
-# <package>-<version>.tgz, whose checksum is then the recorded evidence and
-# whose file is what a reversal reinstalls. Without one of the two the tool is
-# refused rather than installed: a recorded mutation that cannot be undone is
-# worse than a refused one, and there is deliberately no override that skips the
-# requirement. The packages around it are unaffected.
+# <package>-<version>.tgz. Its own package manifest must name that package at
+# that version - a file is never trusted on its name alone, because
+# `npm install -g <tarball>` takes its target from the contents - and its
+# checksum is then the recorded evidence, pinning the bytes whose identity was
+# verified. That file is what a reversal reinstalls. Without one of the two the
+# tool is refused rather than installed: a recorded mutation that cannot be
+# undone is worse than a refused one, and there is deliberately no override that
+# skips the requirement. The installed version must also have a shape a reversal
+# could restore - the same shape the rollback preflight accepts and the installed
+# version is read back with - so a prerelease or truncated version is refused
+# rather than recorded as reversible. The packages around it are unaffected.
 # Partial apply is expected and recorded: each tool carries its own completion
 # status, so a run that converges one package and refuses another leaves an
 # accurate per-tool record while the tier reports the worst case. Dry-run names
@@ -42,7 +48,9 @@
 # applyable, and a local branch that is ahead of or diverged from the pin is
 # refused with a non-zero exit rather than silently skipped. The apply repeats
 # its own fetch and comparison and never trusts the preview. Anything the
-# preview cannot prove is `unknown` and also exits non-zero.
+# preview cannot prove is `unknown` and also exits non-zero, and a receipt
+# location the apply could not write is refused by the preview too, so a preview
+# that exits 0 is one the apply can act on.
 #
 # Rollback is attended, never automatic, and never restarts a service:
 #   dev-tools-apply-updates --rollback <receipt>              # check only
@@ -96,6 +104,7 @@ GIT_BIN=${DEV_TOOLS_UPDATE_GIT_BIN:-git}
 NPM_BIN=${DEV_TOOLS_UPDATE_NPM_BIN:-npm}
 NPM_PREFIX=${DEV_TOOLS_UPDATE_NPM_PREFIX:-${HOME:-.}/.npm-global}
 PRIOR_ARTIFACT_DIR=${DEV_TOOLS_APPLY_PRIOR_ARTIFACT_DIR:-}
+TAR_BIN=${DEV_TOOLS_APPLY_TAR_BIN:-tar}
 SHA256_BIN=${DEV_TOOLS_APPLY_SHA256_BIN:-$(command -v sha256sum >/dev/null 2>&1 && printf sha256sum || printf 'shasum -a 256')}
 RECEIPT_DIR=${DEV_TOOLS_APPLY_RECEIPT_DIR:-${XDG_STATE_HOME:-${HOME:-.}/.local/state}/dev-tools-apply-updates}
 TIMEOUT_SECONDS=${DEV_TOOLS_APPLY_TIMEOUT_SECONDS:-120}
@@ -132,6 +141,12 @@ fi
 source "$PINS_FILE"
 FIRSTMATE_PIN=${FIRSTMATE_REV:?Firstmate pin missing}
 ALLOWLIST_NPM_JSON='["chrome-devtools-axi","gh-axi","gnhf","lavish-axi","quota-axi","tasks-axi"]'
+# The one npm version shape this tool can reason about, used by the pin check,
+# the reversal-path gate, the rollback preflight, and the installed-version
+# observer alike. A prior version the observer could never read back, or the
+# preflight could never accept, is not a reversal path.
+NPM_VERSION_RE='[0-9]+(\.[0-9]+){2,3}'
+npm_reversible_version() { printf '%s\n' "$1" | grep -Eq "^$NPM_VERSION_RE\$"; }
 
 run_timed() {
   local seconds=$1
@@ -201,8 +216,8 @@ RECEIPT_DOC=$(jq -cn --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg path "
     npm_global: [
       "no Firstmate worker lane may be in flight",
       "only the exact prior version recorded here is reinstalled",
-      "the registry identity and integrity of that version are independently re-verified first",
-      "an unavailable prior version, or one whose integrity changed, is refused"
+      "its recorded evidence is independently re-verified first - the registry identity and integrity of that version, or the checksum of the operator-supplied artifact whose own manifest was verified when it was recorded",
+      "evidence that is unavailable, unreadable, or changed is refused"
     ]
   },
   tiers: { firstmate: { status: "not_started" }, npm_global: { status: "not_started" } },
@@ -252,8 +267,23 @@ receipt_settle() {
   receipt_put "$(printf '%s' "$entry" | jq -c --arg s "$status" '.status = $s')" || RECEIPT_STALE=1
 }
 
+# Whether `mkdir -p` followed by a private temp file could succeed, decided
+# without creating anything: the receipt directory itself when it exists, else
+# the nearest existing ancestor `mkdir -p` would build from.
+receipt_location_usable() {
+  local dir=$RECEIPT_DIR
+  while [ ! -e "$dir" ]; do
+    case "$dir" in
+      */?*) dir=${dir%/*}; [ -n "$dir" ] || dir=/ ;;
+      *) dir=. ;;
+    esac
+  done
+  [ -d "$dir" ] && [ -w "$dir" ] && [ -x "$dir" ]
+}
+
 receipt_status() {
-  if [ "$DRY_RUN" -eq 1 ]; then printf planned
+  if [ "$DRY_RUN" -eq 1 ]; then
+    if receipt_location_usable; then printf planned; else printf unusable; fi
   elif [ "$RECEIPT_STALE" -eq 1 ]; then printf incomplete
   elif [ "$RECEIPT_WRITTEN" -eq 1 ]; then printf written
   else printf none
@@ -366,10 +396,21 @@ npm_prior_evidence() {
   fi
   artifact=$(npm_prior_artifact "$package" "$version")
   [ -n "$artifact" ] || return 0
+  [ "$(npm_artifact_identity "$artifact")" = "$package $version" ] || return 0
   checksum=$(file_checksum "$artifact") || return 0
   [ -n "$checksum" ] || return 0
   jq -cn --arg pkg "$package" --arg v "$version" --arg p "$artifact" --arg c "$checksum" \
     '{kind:"operator-artifact",package:$pkg,version:$v,path:$p,checksum:$c,integrity:"",available:true}'
+}
+
+# What the tarball says it is, read from its own package manifest. Recording a
+# checksum alone would only pin the bytes, not which package a reversal installs,
+# and `npm install -g <tarball>` takes its target from the contents.
+npm_artifact_identity() {
+  local manifest
+  manifest=$(run_timed "$TIMEOUT_SECONDS" "$TAR_BIN" -xzOf "$1" package/package.json 2>/dev/null) || return 0
+  printf '%s' "$manifest" |
+    jq -r 'if (.name|type) == "string" and (.version|type) == "string" then .name + " " + .version else empty end' 2>/dev/null || true
 }
 
 npm_prior_artifact() {
@@ -411,6 +452,9 @@ apply_firstmate() {
   if [ "$DRY_RUN" -eq 1 ]; then
     firstmate_dry_run_probe "$pinned" "$current"
     firstmate_dry_run_cleanup
+    if [ "$DRY_STATUS" = would_apply ] && ! receipt_location_usable; then
+      DRY_STATUS=refused; DRY_DETAIL='could not write the mutation receipt; refusing to mutate'
+    fi
     set_tier "$DRY_STATUS" "$DRY_DETAIL" "$(jq -cn --arg p "$pinned" '{pinned:$p}')"
     return
   fi
@@ -464,7 +508,7 @@ apply_npm() {
       results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); continue
     fi
     any=1
-    if ! printf '%s\n' "$pinned" | grep -Eq '^[0-9]+(\.[0-9]+){2,3}$' ||
+    if ! npm_reversible_version "$pinned" ||
        ! printf '%s\n' "$integrity" | grep -Eq '^sha512-[A-Za-z0-9+/]+={0,2}$'; then
       item=$(tier_json refused 'unsafe exact version or integrity pin' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')")
       results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
@@ -484,13 +528,21 @@ apply_npm() {
     # install runs, so both directions answer the same question: without evidence
     # for the installed version the mutation would be irreversible, and it is
     # refused rather than recorded with an empty way back.
+    if ! npm_reversible_version "$current"; then
+      item=$(tier_json refused "the installed version $current has no shape a reversal could restore; refusing a mutation it could not reverse" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg c "$current" '{name:$n,pinned:$p,prior:$c}')")
+      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
+    fi
     prior_evidence=$(npm_prior_evidence "$package" "$current")
     if [ -z "$prior_evidence" ]; then
       item=$(tier_json refused "could not verify the installed version $current against the registry or an operator-supplied artifact; refusing a mutation it could not reverse" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg c "$current" '{name:$n,pinned:$p,prior:$c}')")
       results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
     fi
     if [ "$DRY_RUN" -eq 1 ]; then
-      item=$(tier_json would_apply "would install $package@$pinned" "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')")
+      if receipt_location_usable; then
+        item=$(tier_json would_apply "would install $package@$pinned" "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')")
+      else
+        item=$(tier_json refused 'could not write the mutation receipt; refusing to mutate' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')"); refused=1
+      fi
       results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); continue
     fi
     detect_workers
@@ -564,7 +616,7 @@ observe_firstmate() {
 observe_npm() {
   local command_name=$1
   [ -n "$command_name" ] && [ -x "$NPM_PREFIX/bin/$command_name" ] || return 0
-  env NO_UPDATE_NOTIFIER=1 "$NPM_PREFIX/bin/$command_name" --version 2>/dev/null | grep -Eo '[0-9]+(\.[0-9]+){2,3}' | head -1 || true
+  env NO_UPDATE_NOTIFIER=1 "$NPM_PREFIX/bin/$command_name" --version 2>/dev/null | grep -Eo "$NPM_VERSION_RE" | head -1 || true
 }
 
 # Non-mutating tier preconditions, evaluated in the preflight. Each prints the
@@ -592,7 +644,7 @@ preflight_npm_refusal() {
   prior=$(printf '%s' "$entry" | jq -r '.prior')
   kind=$(printf '%s' "$entry" | jq -r '.prior_evidence.kind // ""')
   [ -n "$command_name" ] && [ -n "$package" ] || { printf 'the receipt does not record the package to reinstall'; return; }
-  printf '%s\n' "$prior" | grep -Eq '^[0-9]+(\.[0-9]+){2,3}$' || { printf 'the receipt does not record a usable prior version'; return; }
+  npm_reversible_version "$prior" || { printf 'the receipt does not record a usable prior version'; return; }
   case "$kind" in
     npm-registry)
       recorded=$(printf '%s' "$entry" | jq -r '.prior_evidence.integrity // ""')

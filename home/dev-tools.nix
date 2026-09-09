@@ -40,7 +40,7 @@ let
       export DEV_TOOLS_PINS_FILE=${pins}
       ${builtins.readFile ../bin/dev-tools-install-pinned}
     '';
-    runtimeInputs = with pkgs; [ coreutils curl gawk git gnugrep gnutar jq nodejs_22 ];
+    runtimeInputs = with pkgs; [ coreutils curl gawk git gnugrep gnutar gzip jq nodejs_22 ];
   };
 
   claudeSpendPinned = pkgs.writeShellApplication {
@@ -71,6 +71,8 @@ let
       git
       gnugrep
       gnused
+      gnutar
+      gzip
       jq
       nodejs_22
     ]) ++ [ checker ];

@@ -90,8 +90,9 @@ for row in "\${NPM_TOOL_PINS[@]}"; do
   [ "\$guarded" = yes ] || continue
   current=\$pinned
   if [ -x "\$TEST_PREFIX/bin/\$command_name" ]; then
-    current=\$(env NO_UPDATE_NOTIFIER=1 "\$TEST_PREFIX/bin/\$command_name" --version 2>/dev/null | grep -Eo '[0-9]+(\\.[0-9]+){2,3}' | head -1)
+    current=\$(env NO_UPDATE_NOTIFIER=1 "\$TEST_PREFIX/bin/\$command_name" --version 2>/dev/null | grep -Eo '[0-9]+(\\.[0-9]+){1,3}(-[0-9A-Za-z.]+)?' | head -1)
   fi
+  [ "\$name" = quota-axi ] && [ -n "\${TEST_QUOTA_CURRENT:-}" ] && current=\$TEST_QUOTA_CURRENT
   item=\$(jq -cn --arg n "\$name" --arg c "\$current" --arg p "\$pinned" \\
     '{name:\$n,current:\$c,pinned:\$p,latest_stable:\$p,status:(if \$c==\$p then "up_to_date" else "drifted" end)}')
   tools=\$(jq -cn --argjson t "\$tools" --argjson i "\$item" '\$t+[\$i]')
@@ -198,6 +199,7 @@ run_tool() {
     TEST_PINS="$PINS" TEST_PREFIX="$PREFIX" TEST_FIRSTMATE="$CHECKOUT" TEST_NPM_LOG="$NPM_LOG" \
     TEST_PRE_LOG="$PRE_LOG" TEST_LIFECYCLE_LOG="$LIFECYCLE_LOG" TEST_REGISTRY="$REGISTRY" \
     TEST_BREAK_RECEIPT_DIR="${TEST_BREAK_RECEIPT_DIR:-}" \
+    TEST_QUOTA_CURRENT="${TEST_QUOTA_CURRENT:-}" \
     DEV_TOOLS_APPLY_PRIOR_ARTIFACT_DIR="${TEST_ARTIFACT_DIR:-}" \
     TEST_RECEIPT_DIR="${TEST_RECEIPT_DIR:-$RECEIPTS}" TEST_BAD_INSTALL="${TEST_BAD_INSTALL:-0}" \
     TEST_BREAK_RECEIPT="${TEST_BREAK_RECEIPT:-}" \
@@ -526,6 +528,8 @@ printf '%s\n' "$human" | grep -Fq '  firstmate: the recorded prior commit must v
   || fail 'a partial apply did not print the exact Firstmate rollback preconditions'
 printf '%s\n' "$human" | grep -Fq '  npm_global: only the exact prior version recorded here is reinstalled' \
   || fail 'a partial apply did not print the exact npm rollback preconditions'
+printf '%s\n' "$human" | grep -Fq 'the checksum of the operator-supplied artifact' \
+  || fail 'a partial apply did not print the exact npm rollback preconditions'
 pass 'a partial apply records every tool separately and prints the receipt and its preconditions'
 
 # --------------------------------- a post-install verification failure is reversible
@@ -758,7 +762,16 @@ pass 'a mutation with no reversal path is refused identically by the preview and
 # a reversal reinstalls.
 ARTIFACTS="$TMP_ROOT/artifacts"
 mkdir -p "$ARTIFACTS"
-printf 'quota-axi %s tarball\n' "$QUOTA_PRIOR" >"$ARTIFACTS/quota-axi-$QUOTA_PRIOR.tgz"
+make_artifact() { # file-package, file-version, manifest-name, manifest-version
+  local dir
+  dir=$(mktemp -d "$TMP_ROOT/pack.XXXXXX")
+  mkdir -p "$dir/package"
+  printf '{"name":"%s","version":"%s"}\n' "${3:-$1}" "${4:-$2}" >"$dir/package/package.json"
+  tar -czf "$ARTIFACTS/$1-$2.tgz" -C "$dir" package
+  rm -rf "$dir"
+}
+make_artifact quota-axi "$QUOTA_PRIOR"
+cp "$ARTIFACTS/quota-axi-$QUOTA_PRIOR.tgz" "$TMP_ROOT/artifact.original"
 reset_to_prior
 unpublish "quota-axi@$QUOTA_PRIOR"
 TEST_ARTIFACT_DIR="$ARTIFACTS"
@@ -789,7 +802,7 @@ set -e
 [ "$(tool_version "$QUOTA_COMMAND")" = "$QUOTA_VERSION" ] || fail 'a changed prior artifact was still reinstalled'
 
 # Restored to what the receipt recorded, the reversal installs from that file.
-printf 'quota-axi %s tarball\n' "$QUOTA_PRIOR" >"$ARTIFACTS/quota-axi-$QUOTA_PRIOR.tgz"
+cp "$TMP_ROOT/artifact.original" "$ARTIFACTS/quota-axi-$QUOTA_PRIOR.tgz"
 : >"$NPM_LOG"
 json=$(run_rollback "$ARTIFACT_RECEIPT" --attended --json)
 [ "$(tool_status "$json" quota-axi)" = rolled_back ] || fail 'an operator-supplied artifact could not be reversed'
@@ -856,5 +869,73 @@ PINS=$SAFE_PINS
 [ "$(printf '%s' "$json" | jq -r '[.tiers.npm_global.packages[] | select(.status=="refused")] | length')" -ge 1 ] \
   || fail 'the tier refused but no package in the list carries the refusal'
 pass 'an allowlisted name with no guarded pin reports its own refusal'
+
+# --------------------------------- a mislabelled artifact is not evidence
+
+# `npm install -g <tarball>` installs whatever the tarball contains, so the
+# filename alone cannot be the reversal path.
+reset_to_prior
+unpublish "quota-axi@$QUOTA_PRIOR"
+make_artifact quota-axi "$QUOTA_PRIOR" lavish-axi 0.1.60
+TEST_ARTIFACT_DIR="$ARTIFACTS"
+: >"$NPM_LOG"
+set +e
+json=$(run_tool --json)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail 'an artifact naming a different package exited successfully'
+[ "$(package_status "$json" quota-axi)" = refused ] || fail 'an artifact naming a different package was accepted as evidence'
+! grep -Fq "install -g quota-axi@$QUOTA_VERSION" "$NPM_LOG" || fail 'a mutation ran on unverified artifact evidence'
+[ "$(tool_version "$QUOTA_COMMAND")" = "$QUOTA_PRIOR" ] || fail 'the tool was changed on unverified artifact evidence'
+make_artifact quota-axi "$QUOTA_PRIOR"
+unset TEST_ARTIFACT_DIR
+publish "quota-axi@$QUOTA_PRIOR" "$QUOTA_PRIOR_INTEGRITY"
+pass 'an artifact whose own manifest names another package is refused, not recorded'
+
+# --------------------------------- an unrestorable version shape is refused
+
+# The rollback preflight and the installed-version observer both accept only
+# X.Y.Z; recording anything else as the prior version would be a dead end.
+reset_to_prior
+TEST_QUOTA_CURRENT=0.1.42-rc1
+set +e
+dry=$(run_tool --dry-run --json)
+dry_rc=$?
+json=$(run_tool --json)
+apply_rc=$?
+set -e
+unset TEST_QUOTA_CURRENT
+[ "$apply_rc" -ne 0 ] || fail 'a prerelease installed version exited successfully'
+[ "$(package_status "$json" quota-axi)" = refused ] || fail 'a prerelease installed version was recorded as reversible'
+case "$(package_detail "$json" quota-axi)" in
+  'the installed version 0.1.42-rc1 has no shape a reversal could restore;'*) : ;;
+  *) fail "a prerelease installed version was refused for the wrong reason: $(package_detail "$json" quota-axi)" ;;
+esac
+[ "$dry_rc" -eq "$apply_rc" ] || fail "the preview exited $dry_rc but the apply exited $apply_rc"
+[ "$(package_detail "$dry" quota-axi)" = "$(package_detail "$json" quota-axi)" ] \
+  || fail 'the preview and the apply disagreed on an unrestorable version shape'
+[ "$(tool_version "$QUOTA_COMMAND")" = "$QUOTA_PRIOR" ] || fail 'a prerelease installed version was still mutated'
+pass 'an installed version the rollback could never restore is refused by both directions'
+
+# --------------------------------- the preview answers the receipt question too
+
+# The apply refuses every mutation when the receipt cannot be written; a preview
+# that reported would_apply here would send the operator into that refusal.
+reset_to_prior
+set +e
+dry=$(TEST_RECEIPT_DIR="$BLOCKER/receipts" run_tool --dry-run --json)
+dry_rc=$?
+json=$(TEST_RECEIPT_DIR="$BLOCKER/receipts" run_tool --json)
+apply_rc=$?
+set -e
+[ "$dry_rc" -eq "$apply_rc" ] || fail "the preview exited $dry_rc but the apply exited $apply_rc on an unusable receipt location"
+[ "$(printf '%s' "$dry" | jq -r '.receipt.status')" = unusable ] \
+  || fail "a preview with an unusable receipt location still claimed a planned receipt: $(printf '%s' "$dry" | jq -r '.receipt.status')"
+for tier in firstmate npm_global; do
+  [ "$(printf '%s' "$dry" | jq -r --arg t "$tier" '.tiers[$t].detail')" = "$(printf '%s' "$json" | jq -r --arg t "$tier" '.tiers[$t].detail')" ] \
+    || fail "the preview and the apply disagreed on $tier for an unusable receipt location"
+done
+at_prior || fail 'a preview with an unusable receipt location mutated a tool'
+pass 'a receipt location the apply could not write is refused by the preview too'
 
 printf '\nall dev-tools-apply-updates receipt and rollback tests passed\n'

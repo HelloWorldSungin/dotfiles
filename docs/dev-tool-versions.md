@@ -177,7 +177,11 @@ result's `worker_guard`, not only in the tier it deferred. Herdr, no-mistakes,
 GBrain, Nix, agent harnesses, and Baby Menu are never apply targets.
 
 Dry-run installs and merges nothing, and writes nothing to the Firstmate
-checkout - no ref, object, index, `FETCH_HEAD`, or configuration. It does answer
+checkout - no ref, object, index, `FETCH_HEAD`, or configuration - and does not
+create the receipt directory. It does check, without creating anything, that the
+receipt location could be written, and refuses exactly what the apply would
+refuse if it could not; `receipt.status` then reads `unusable` rather than
+`planned`. So a preview that exits 0 is one the apply can act on. It does answer
 the Firstmate tier from the same authoritative remote the real run uses, because
 a preview computed from whatever is already fetched locally would report
 `skipped` in exactly the pending-update case where the real run applies. The
@@ -221,9 +225,15 @@ A version that is absent from the registry - a locally built global install, or
 one whose version was unpublished - would otherwise refuse forever. The single
 recovery inside this updater is to supply that artifact yourself: put the exact
 tarball at `$DEV_TOOLS_APPLY_PRIOR_ARTIFACT_DIR/<package>-<version>.tgz`
-(`npm pack` names it that way). Its checksum becomes the recorded prior
-evidence, and a reversal reinstalls that file after re-verifying the checksum,
-refusing if it has moved or changed. There is deliberately no flag that records
+(`npm pack` names it that way). Its own `package/package.json` must name that
+package at that version - the filename alone is never trusted, because
+`npm install -g <tarball>` takes its target from the contents - and its checksum
+then becomes the recorded prior evidence, pinning the bytes whose identity was
+verified. A reversal reinstalls that file after re-verifying the checksum,
+refusing if it has moved or changed. The installed version must also have a
+shape a reversal could restore (`X.Y.Z`, optionally with a fourth component); a
+prerelease or two-component version is refused rather than recorded as
+reversible, because the rollback preflight could never accept it back. There is deliberately no flag that records
 a mutation without evidence: an override would trade a refusal you can act on
 for a receipt that cannot reverse anything. If you would rather not keep the
 artifact, install a published version of that tool by hand first - that step is
@@ -272,8 +282,9 @@ The same preflight then proves each eligible tier is actually reversible: no
 in-flight Firstmate worker lane (npm reversal is the same live-tool mutation
 class as the apply direction and takes the same guard), a checkout on `main`
 that is clean with the recorded prior commit verified as an ancestor of the
-applied commit, and every eligible npm prior artifact re-verified against the
-registry for exact identity and integrity. A single unreconcilable or
+applied commit, and every eligible npm prior artifact re-verified against its
+recorded evidence - registry identity and integrity, or the checksum of the
+operator-supplied artifact. A single unreconcilable or
 unverifiable entry refuses its whole tier, so no tool in that tier is changed
 and the tier never ends up half reverted.
 
