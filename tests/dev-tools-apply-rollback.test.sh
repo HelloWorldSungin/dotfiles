@@ -356,6 +356,7 @@ set -e
 [ "$(tool_detail "$json" quota-axi)" = "the recorded prior version $QUOTA_PRIOR is no longer available" ] \
   || fail 'an unavailable prior version was not refused'
 publish "quota-axi@$QUOTA_PRIOR" sha512-CHANGEDEVIDENCE00000000000000000000000000000000000000000000000000000000000000000000000==
+: >"$NPM_LOG"
 set +e
 json=$(run_rollback "$WORK" --attended --json)
 rc=$?
@@ -363,12 +364,15 @@ set -e
 [ "$rc" -ne 0 ] || fail 'changed prior integrity exited successfully'
 [ "$(tool_detail "$json" quota-axi)" = "the registry integrity for $QUOTA_PRIOR changed since the receipt was written" ] \
   || fail 'changed prior integrity was not refused'
-! grep -Fq "install -g quota-axi@$QUOTA_PRIOR" "$NPM_LOG" || fail 'a refused artifact was still reinstalled'
+no_install_ran || fail 'a tier with unverifiable prior evidence still reinstalled a package'
 [ "$(tool_version "$QUOTA_COMMAND")" = "$QUOTA_VERSION" ] || fail 'a refused artifact still changed the installed version'
+# gh-axi sorts before quota-axi in the allowlist, so it is the package that would
+# have been reinstalled first if the evidence check ran inside the mutation loop.
+[ "$(tool_status "$json" gh-axi)" = refused ] || fail 'the earlier package in the tier was reverted before the later one was verified'
+[ "$(tool_version "$GH_COMMAND")" = "$GH_VERSION" ] || fail 'the tier was left half reverted by an unverifiable sibling'
 publish "quota-axi@$QUOTA_PRIOR" "$QUOTA_PRIOR_INTEGRITY"
 git -C "$CHECKOUT" reset -q --hard "$TARGET_COMMIT"
-fake_install "$GH_COMMAND" "$GH_VERSION"
-pass 'rollback refuses an unavailable or changed prior artifact before reinstalling'
+pass 'an unavailable or changed prior artifact refuses its whole tier before the first install'
 
 # --------------------------------- attended rollback restores the exact prior
 
@@ -482,13 +486,83 @@ done
 printf '%s\n' "$human" | grep -Fq "receipt: $PARTIAL" || fail 'a partial apply did not print the receipt path'
 printf '%s\n' "$human" | grep -Fq 'rollback: attended only, never automatic, never restarts a service' \
   || fail 'a partial apply did not print the rollback contract'
-printf '%s\n' "$human" | grep -Fq '  preflight: any other state - a third version, a moved commit, an absent or unreadable tool - refuses that whole tier' \
+printf '%s\n' "$human" | grep -Fq '  preflight: any unreconcilable or unverifiable entry refuses its whole tier' \
   || fail 'a partial apply did not print the reconciliation preconditions'
 printf '%s\n' "$human" | grep -Fq '  firstmate: the recorded prior commit must verify as an ancestor of the applied commit' \
   || fail 'a partial apply did not print the exact Firstmate rollback preconditions'
 printf '%s\n' "$human" | grep -Fq '  npm_global: only the exact prior version recorded here is reinstalled' \
   || fail 'a partial apply did not print the exact npm rollback preconditions'
 pass 'a partial apply records every tool separately and prints the receipt and its preconditions'
+
+# --------------------------------- a post-install verification failure is reversible
+
+# TEST_BAD_INSTALL replaces the global binary and then reports 0.0.0, so the
+# receipt records `failed` for a mutation that really happened. That is a state
+# the receipt itself does not name, so it must refuse rather than look settled.
+: >"$NPM_LOG"
+set +e
+json=$(run_rollback "$PARTIAL" --attended --json)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail 'a receipt recording a real mutation as failed exited successfully'
+[ "$(tool_detail "$json" quota-axi)" = 'the current state 0.0.0 matches neither the recorded prior nor the recorded target' ] \
+  || fail 'a post-install verification failure was reported as nothing left to reverse'
+[ "$(tool_status "$json" gh-axi)" = refused ] || fail 'the sibling package was mutated despite an unreconcilable tier'
+no_install_ran || fail 'an unreconcilable tier still installed a package'
+[ "$(tool_version "$QUOTA_COMMAND")" = 0.0.0 ] || fail 'the refused tier was changed anyway'
+pass 'a mutation recorded as failed is reconciled and refuses instead of looking settled'
+
+# --------------------------------- a failed reversal can be retried
+
+fake_install "$QUOTA_COMMAND" "$QUOTA_VERSION"
+fake_install "$GH_COMMAND" "$GH_VERSION"
+RETRY="$RECEIPTS/retry.json"
+jq '.tools |= map(. + {status:"rollback_failed"} | del(.observed, .reconciliation, .reconciled_at))' "$RECEIPT" >"$RETRY"
+git -C "$CHECKOUT" reset -q --hard "$TARGET_COMMIT"
+: >"$NPM_LOG"
+json=$(run_rollback "$RETRY" --attended --json)
+for tool in firstmate quota-axi gh-axi; do
+  [ "$(tool_status "$json" "$tool")" = rolled_back ] || fail "a previously failed reversal could not be retried for $tool"
+done
+at_prior || fail 'retrying a failed reversal did not restore the recorded prior state'
+pass 'a reversal recorded as failed can be retried once its cause is fixed'
+
+# --------------------------------- an operator-owned receipt directory is untouched
+
+SHARED="$TMP_ROOT/shared"
+mkdir -p "$SHARED"
+chmod 755 "$SHARED"
+SHARED_RECEIPT="$SHARED/receipt.json"
+jq '.tools |= map(. + {status:"applied"} | del(.observed, .reconciliation, .reconciled_at))' "$RECEIPT" >"$SHARED_RECEIPT"
+chmod 600 "$SHARED_RECEIPT"
+json=$(run_rollback "$SHARED_RECEIPT" --json)
+[ "$(tool_status "$json" quota-axi)" = reconciled ] || fail 'the shared-directory receipt was not reconciled'
+[ "$(file_mode "$SHARED")" = 755 ] || fail "rollback changed the operator's receipt directory mode to $(file_mode "$SHARED")"
+[ "$(file_mode "$SHARED_RECEIPT")" = 600 ] || fail 'the reconciled receipt is no longer mode 0600'
+[ "$(jq -r '.tools[] | select(.name=="quota-axi") | .status' "$SHARED_RECEIPT")" = reconciled_at_prior ] \
+  || fail 'the shared-directory receipt was not settled in place'
+[ "$(find "$SHARED" -mindepth 1 | wc -l)" -eq 1 ] || fail 'rollback left a temp file beside the receipt'
+pass 'rollback settles the receipt in place and never changes its parent directory mode'
+
+# --------------------------------- a receipt that cannot be appended is stale
+
+READONLY="$TMP_ROOT/readonly"
+mkdir -p "$READONLY"
+STALE_RECEIPT="$READONLY/receipt.json"
+jq '.tools |= map(. + {status:"applied"} | del(.observed, .reconciliation, .reconciled_at))' "$RECEIPT" >"$STALE_RECEIPT"
+chmod 500 "$READONLY"
+set +e
+json=$(run_rollback "$STALE_RECEIPT" --json)
+rc=$?
+human=$(run_rollback "$STALE_RECEIPT" 2>&1)
+set -e
+[ "$rc" -ne 0 ] || fail 'a receipt that could not be appended exited successfully'
+[ "$(printf '%s' "$json" | jq -r '.receipt.status')" = stale ] || fail 'a failed receipt append was not reported as stale'
+[ "$(jq -r '.tools[] | select(.name=="quota-axi") | .status' "$STALE_RECEIPT")" = applied ] \
+  || fail 'the test fixture does not actually leave the on-disk receipt unchanged'
+printf '%s\n' "$human" | grep -Fq 'receipt is stale' || fail 'human output did not warn about the stale receipt'
+chmod 700 "$READONLY"
+pass 'a reversal whose receipt append fails reports a stale receipt and exits non-zero'
 
 # --------------------------------- unusable receipts fail closed
 
