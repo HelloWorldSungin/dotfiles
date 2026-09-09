@@ -31,7 +31,7 @@ alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
 | lavish-axi | 0.1.67 | npm default tag | Exact npm package and registry integrity | Guarded exact apply |
 | OpenCode ACP invocation | 1.18.30 | npm default tag | Exact `npx` spec in `config/baby-menu/agents.json` | Report only |
 | OMP ACP invocation | 0.1.2 | npm default tag | Exact `npx` spec in `config/baby-menu/agents.json` | Report only |
-| claude-spend invocation | 1.0.6 | npm default tag | Exact `npx` spec in `home/common.nix` | Report only |
+| claude-spend invocation | 1.0.6 | npm default tag | `CLAUDE_SPEND_VERSION` in `config/dev-tools-versions.sh`, read at run time by `bin/claude-spend-pinned` (the `cspend` alias) | Report only |
 | Firstmate source | `0fe226c93efd...` | No upstream releases exist, so the audited default-branch commit is the explicit exception | Exact commit | Guarded exact fast-forward only |
 | Baby Menu source | 0.1.24 / `65eb280ea0e0...` | Latest non-prerelease `baby-menu-v0.1.24` release | Exact release commit | Report only |
 | actions/checkout | v7.0.1 / `3d3c42e5aac5...` | Latest GitHub GA action release | Exact workflow action SHA | CI only |

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# claude-spend-pinned - run claude-spend at exactly the version this repository
+# pins. config/dev-tools-versions.sh is the single owner of that version; this
+# wrapper carries no copy of it and refuses to run rather than falling back to
+# a moving tag or an unversioned package. Every argument is forwarded verbatim.
+set -u
+
+SELF_DIR=$(cd "$(dirname "$0")" && pwd)
+ROOT=$(cd "$SELF_DIR/.." && pwd)
+PINS_FILE=${DEV_TOOLS_PINS_FILE:-$ROOT/config/dev-tools-versions.sh}
+NPX_BIN=${CLAUDE_SPEND_NPX_BIN:-npx}
+
+refuse() {
+  printf 'claude-spend-pinned: %s\n' "$1" >&2
+  exit 2
+}
+
+[ -f "$PINS_FILE" ] || refuse "pin manifest unavailable: $PINS_FILE"
+
+CLAUDE_SPEND_VERSION=
+# shellcheck source=../config/dev-tools-versions.sh
+# shellcheck disable=SC1091
+source "$PINS_FILE" || refuse "pin manifest could not be read: $PINS_FILE"
+
+printf '%s\n' "$CLAUDE_SPEND_VERSION" | grep -Eq '^[0-9]+(\.[0-9]+){2,3}$' \
+  || refuse "refusing to run: CLAUDE_SPEND_VERSION is missing or not an exact version ('$CLAUDE_SPEND_VERSION')"
+
+exec "$NPX_BIN" -y "claude-spend@$CLAUDE_SPEND_VERSION" "$@"

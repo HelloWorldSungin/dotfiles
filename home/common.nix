@@ -34,6 +34,14 @@ let
     '';
     runtimeInputs = with pkgs; [ coreutils curl gawk git gnugrep gnutar jq nodejs_22 ];
   };
+  claudeSpendPinned = pkgs.writeShellApplication {
+    name = "claude-spend-pinned";
+    text = ''
+      export DEV_TOOLS_PINS_FILE=${devToolsPins}
+      ${builtins.readFile ../bin/claude-spend-pinned}
+    '';
+    runtimeInputs = with pkgs; [ coreutils gnugrep nodejs_22 ];
+  };
   codexSetContextWindow = pkgs.writeShellApplication {
     name = "codex-set-context-window";
     text = builtins.readFile ../bin/codex-set-context-window;
@@ -48,6 +56,7 @@ in
   home.packages = with pkgs; [
     devToolsUpdateChecker
     devToolsPinnedInstaller
+    claudeSpendPinned
     gh
     lazygit
     nodejs_22
@@ -107,8 +116,8 @@ in
   home.file.".pi/agent/extensions/fusion-harness".source = link "pi/extensions/fusion-harness";
 
   # ------------------------------------------------- pi model overrides
-  # Opts GPT-5.6 Sol and GPT-5.6 Terra into OpenAI's 1,050,000-token long-context
-  # window. `modelOverrides` patches the two built-in models in
+  # Opts GPT-5.6 Sol, GPT-5.6 Terra and GPT-6 Astra into OpenAI's 1,050,000-token
+  # long-context window. `modelOverrides` patches the three built-in models in
   # place, so the rest of the openai-codex catalog (Luna included) keeps its
   # 272,000 default and every built-in model's pricing metadata is preserved.
   # See docs/agents.md.
@@ -153,7 +162,7 @@ in
       cca = "claude --enable-auto-mode";
       ccar = "claude --enable-auto-mode -r";
       ccm = "claude-monitor --plan max20 --theme dark";
-      cspend = "npx -y claude-spend@1.0.6";
+      cspend = "claude-spend-pinned";
       pi-fusion = "pi -e $HOME/.pi/agent/extensions/fusion-harness/fusion-harness.ts --architect openai-codex/gpt-5.6-sol --architect-thinking xhigh --builder zai/glm-5.2 --builder-thinking max";
 
       # ArkNode AI & LOQ server management

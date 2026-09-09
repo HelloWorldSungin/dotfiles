@@ -218,6 +218,7 @@ ln -sf tool-version "$FAKEBIN/nix"
 # Machine-consumed declarative artifacts are read through a semantic model
 # rather than grepped: the workflow's action steps and the Baby Menu agents'
 # launch specs.
+python3 -c 'import yaml' >/dev/null 2>&1 || fail 'missing test dependency: python3 with PyYAML'
 workflow_action_refs() {
   python3 - "$1" <<'PARSE_WORKFLOW'
 import sys, yaml
@@ -239,7 +240,7 @@ acp_launch_version() {
 }
 
 run_checker() {
-  env HOME="$FIXTURE/home" DEV_TOOLS_PINS_FILE="$PINS" DEV_TOOLS_NVIM_LOCK_FILE="$ROOT/config/nvim/lazy-lock.json" \
+  env HOME="$FIXTURE/home" PATH="${TEST_PATH:-$PATH}" DEV_TOOLS_PINS_FILE="$PINS" DEV_TOOLS_NVIM_LOCK_FILE="$ROOT/config/nvim/lazy-lock.json" \
     DEV_TOOLS_FLAKE_LOCK_FILE="${TEST_FLAKE_LOCK_FILE:-$ROOT/flake.lock}" \
     DEV_TOOLS_NVIM_DATA_HOME="$FIXTURE/nvim" DEV_TOOLS_UPDATE_BIN_DIR="$FAKEBIN" DEV_TOOLS_UPDATE_NPM_BIN="$FAKEBIN/npm" \
     DEV_TOOLS_UPDATE_CURL_BIN="$FAKEBIN/curl" DEV_TOOLS_UPDATE_GIT_BIN="$FAKEBIN/git" DEV_TOOLS_HEALTH_PRINTENV_BIN="$FAKEBIN/printenv" \
@@ -260,17 +261,14 @@ expected=$((expected + 10)) # antigravity, Cursor, two repos, installer, two inp
 [ "$(printf '%s' "$json" | jq '.tools | length')" -eq "$expected" ] || fail 'complete manifest inventory was not emitted'
 [ "$(printf '%s' "$json" | jq '[.tools[] | select(.status != "up_to_date")] | length')" -eq 0 ] || fail 'matching installed, pinned, and latest values were not current'
 [ "$(printf '%s' "$json" | jq '.intentionally_unmanaged | length')" -ge 8 ] || fail 'unmanaged documented dependencies were not explicit'
-if python3 -c 'import yaml' >/dev/null 2>&1; then
-  action_refs=$(workflow_action_refs "$ROOT/.github/workflows/build.yml")
-  for row in "${CI_ACTION_PINS[@]}"; do
-    IFS='|' read -r _name repo _tag commit <<<"$row"
-    printf '%s\n' "$action_refs" | grep -Fxq "$repo@$commit" || fail "$repo resolves to a different action commit than the manifest"
-  done
-  if printf '%s\n' "$action_refs" | grep -Evq '@[0-9a-f]{40}$'; then
-    fail 'a workflow action step resolves to a moving ref instead of an exact commit'
-  fi
-else
-  printf 'skip - PyYAML unavailable, workflow action model not checked\n'
+action_refs=$(workflow_action_refs "$ROOT/.github/workflows/build.yml")
+[ -n "$action_refs" ] || fail 'the workflow model exposed no action steps to check'
+for row in "${CI_ACTION_PINS[@]}"; do
+  IFS='|' read -r _name repo _tag commit <<<"$row"
+  printf '%s\n' "$action_refs" | grep -Fxq "$repo@$commit" || fail "$repo resolves to a different action commit than the manifest"
+done
+if printf '%s\n' "$action_refs" | grep -Evq '@[0-9a-f]{40}$'; then
+  fail 'a workflow action step resolves to a moving ref instead of an exact commit'
 fi
 [ "$(acp_launch_version "$ROOT/config/baby-menu/agents.json" opencode opencode-ai)" = "$OPENCODE_ACP_VERSION" ] || fail 'the OpenCode agent launches a different opencode-ai version than the manifest'
 [ "$(acp_launch_version "$ROOT/config/baby-menu/agents.json" omp omp-acp)" = "$OMP_ACP_VERSION" ] || fail 'the OMP agent launches a different omp-acp version than the manifest'
@@ -279,6 +277,39 @@ grep -Fq 'herdr --version' "$CALL_LOG" || fail 'Herdr installed version was not 
 ! grep -Eq 'herdr (update|server|setup|restart|reload|stop|start)' "$CALL_LOG" || fail 'checker drove Herdr lifecycle behavior'
 ! grep -Eq 'no-mistakes (daemon|update|setup|restart|reload|stop|start)' "$CALL_LOG" || fail 'checker drove no-mistakes lifecycle behavior'
 pass 'full inventory reports matching installed, pinned, and latest stable values read-only'
+
+# macOS ships shasum but neither sha256sum nor sha512sum. The Cursor snapshot
+# audit must still compare the real installer hash there rather than reporting
+# drift that does not exist.
+SHASUM_ONLY_BIN="$FIXTURE/shasum-only-bin"
+mkdir -p "$SHASUM_ONLY_BIN"
+for command_name in awk basename bash cat cut date dirname env grep head jq ln ls mkdir mktemp rm sed sort tail timeout tr uname wc; do
+  resolved=$(type -P "$command_name") || fail "missing test dependency: $command_name"
+  ln -sf "$resolved" "$SHASUM_ONLY_BIN/$command_name"
+done
+cat >"$SHASUM_ONLY_BIN/shasum" <<SHASUM
+#!/usr/bin/env bash
+set -eu
+bits=\$2
+shift 2
+case "\$bits" in
+  256) exec $(type -P sha256sum) "\$@" ;;
+  512) exec $(type -P sha512sum) "\$@" ;;
+esac
+exit 1
+SHASUM
+chmod +x "$SHASUM_ONLY_BIN/shasum"
+( PATH="$SHASUM_ONLY_BIN"; ! type -P sha256sum >/dev/null && ! type -P sha512sum >/dev/null ) \
+  || fail 'the shasum-only fixture PATH still exposes the coreutils checksum tools'
+
+TEST_PATH="$SHASUM_ONLY_BIN"
+json=$(run_checker --json --force --no-cache)
+unset TEST_PATH
+[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="cursor-agent") | .status')" = up_to_date ] \
+  || fail 'a shasum-only platform manufactured Cursor installer drift'
+[ "$(printf '%s' "$json" | jq '[.tools[] | select(.status != "up_to_date")] | length')" -eq 0 ] \
+  || fail 'a shasum-only platform changed the audit result for some other tool'
+pass 'the Cursor snapshot audit is accurate on platforms that ship only shasum'
 
 TEST_NPM_PRERELEASE_PACKAGE=@openai/codex
 TEST_PRERELEASE_REPO=kunchenguid/treehouse
