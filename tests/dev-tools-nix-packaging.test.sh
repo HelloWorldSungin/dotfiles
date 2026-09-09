@@ -228,15 +228,26 @@ pass 'the packaged updater runs entirely from its declared closure'
 # shellcheck disable=SC1091
 source "$ROOT/config/dev-tools-versions.sh"
 pinned_attrs=()
+closure_attrs=()
+user_env_attrs=()
 for row in "${NIX_PACKAGE_PINS[@]}"; do
-  IFS='|' read -r attr _command _version <<<"$row"
+  IFS='|' read -r attr _command _version evidence <<<"$row"
   pinned_attrs+=("$attr")
+  case "$evidence" in
+    closure) closure_attrs+=("$attr") ;;
+    user-env) user_env_attrs+=("$attr") ;;
+    *) fail "the pin row for $attr carries no evidence class" ;;
+  esac
 done
 [ "${#pinned_attrs[@]}" -gt 0 ] || fail 'the pin manifest declares no Nix packages'
+[ "${#closure_attrs[@]}" -gt 0 ] || fail 'the pin manifest classes no package as closure-only'
+[ "${#user_env_attrs[@]}" -gt 0 ] || fail 'the pin manifest classes no package as user-env'
 
-PINNED_PATHS=$(nix eval --raw "$ROOT#homeConfigurations.\"sungin@ct110\".pkgs" --apply \
-  "pkgs: builtins.concatStringsSep \"\n\" (map (n: (builtins.getAttr n pkgs).outPath) [ $(printf '"%s" ' "${pinned_attrs[@]}")])") \
+PINNED_ROWS=$(nix eval --raw "$ROOT#homeConfigurations.\"sungin@ct110\".pkgs" --apply \
+  "pkgs: builtins.concatStringsSep \"\n\" (map (n: n + \" \" + (builtins.getAttr n pkgs).outPath) [ $(printf '"%s" ' "${pinned_attrs[@]}")])") \
   || fail 'the pin manifest names a Nix package the pinned nixpkgs does not have'
+PINNED_PATHS=$(awk '{print $2}' <<<"$PINNED_ROWS")
+pinned_path_of() { awk -v n="$1" '$1 == n {print $2}' <<<"$PINNED_ROWS"; }
 
 wrapper_text() { # wrapper name -> its generated script
   # shellcheck disable=SC2016 # the --apply argument is Nix, not shell
@@ -286,17 +297,34 @@ printf '%s' "$MANIFEST" | jq -e 'type == "array" and length > 0' >/dev/null \
 while IFS= read -r manifest_name; do
   [ -n "$manifest_name" ] || continue
   manifest_path=$(printf '%s' "$MANIFEST" | jq -r --arg n "$manifest_name" '.[] | select(.name == $n) | .store_path')
-  evaluated=$(nix eval --raw "$ROOT#homeConfigurations.\"sungin@ct110\".pkgs" \
-    --apply "pkgs: (builtins.getAttr \"$manifest_name\" pkgs).outPath") \
-    || fail "the closure manifest names $manifest_name, which the pinned nixpkgs does not have"
+  evaluated=$(pinned_path_of "$manifest_name")
+  [ -n "$evaluated" ] \
+    || fail "the closure manifest names $manifest_name but no NIX_PACKAGE_PINS row does"
   [ "$manifest_path" = "$evaluated" ] \
     || fail "the closure manifest points $manifest_name at $manifest_path instead of $evaluated"
-  printf '%s\n' "$PINNED_PATHS" | grep -Fqx "$manifest_path" \
-    || fail "the closure manifest names $manifest_name but no NIX_PACKAGE_PINS row does"
+  printf '%s\n' "${closure_attrs[@]}" | grep -Fqx "$manifest_name" \
+    || fail "the closure manifest measures $manifest_name, which its pin row does not class as closure-only"
 done <<<"$(printf '%s' "$MANIFEST" | jq -r '.[].name')"
+for attr in "${closure_attrs[@]}"; do
+  printf '%s' "$MANIFEST" | jq -e --arg n "$attr" 'any(.[]; .name == $n)' >/dev/null \
+    || fail "$attr is classed closure-only but the generated manifest cannot measure it"
+done
 
-# Nothing a wrapper carries may be missing from it, or the audit has no way to
-# measure that package without falling back to the ambient PATH.
+# The other half of the split has to be earned: a row keeps its ambient
+# measurement only when the package really is in the user environment, so the
+# command the operator runs is the pinned one. Checked for the wrapper inputs,
+# which are the packages the split decides about.
+HOME_PATHS=$(nix eval --raw "$ROOT#$CONFIG.home.packages" \
+  --apply 'ps: builtins.concatStringsSep "\n" (map (p: p.outPath) ps)') \
+  || fail 'the generation exposes no home.packages closure'
+for attr in "${closure_attrs[@]}"; do
+  if printf '%s\n' "$HOME_PATHS" | grep -Fqx "$(pinned_path_of "$attr")"; then
+    fail "$attr is in the user environment, so classing it closure-only hides drift the operator would see"
+  fi
+done
+
+# Nothing a wrapper carries may be unmeasurable: each input is either in the
+# manifest, or user-facing and therefore honestly measured through PATH.
 for wrapper in dev-tools-check-updates dev-tools-install-pinned claude-spend-pinned dev-tools-apply-updates; do
   text=$(wrapper_text "$wrapper") || fail "the generation does not ship exactly one $wrapper"
   path_line=$(grep -m1 '^export PATH=' <<<"$text") || fail "$wrapper declares no runtime closure"
@@ -304,10 +332,14 @@ for wrapper in dev-tools-check-updates dev-tools-install-pinned claude-spend-pin
     case "$entry" in /nix/store/*) : ;; *) continue ;; esac
     store_path=${entry%/bin}
     case "$store_path" in *-dev-tools-check-updates|*-dev-tools-versions.sh) continue ;; esac
-    printf '%s' "$MANIFEST" | jq -e --arg p "$store_path" 'any(.[]; .store_path == $p)' >/dev/null \
-      || fail "$wrapper carries ${store_path##*/} but the closure manifest does not name it"
+    printf '%s' "$MANIFEST" | jq -e --arg p "$store_path" 'any(.[]; .store_path == $p)' >/dev/null && continue
+    attr=$(awk -v p="$store_path" '$2 == p {print $1}' <<<"$PINNED_ROWS")
+    printf '%s\n' "${user_env_attrs[@]}" | grep -Fqx "$attr" \
+      || fail "$wrapper carries ${store_path##*/}, which is neither in the closure manifest nor classed user-env"
+    printf '%s\n' "$HOME_PATHS" | grep -Fqx "$store_path" \
+      || fail "$wrapper carries ${store_path##*/} as a user-env row, but it is not in the user environment"
   done <<<"$(printf '%s' "${path_line#export PATH=\"}" | tr ':' '\n')"
 done
-pass 'the generated closure manifest names every wrapper input at its exact store path'
+pass 'the closure manifest measures exactly the closure-only rows, and every other wrapper input is user-facing'
 
 printf '\nall dev-tools nix packaging tests passed\n'

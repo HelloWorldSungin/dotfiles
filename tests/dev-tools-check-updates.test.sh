@@ -186,7 +186,7 @@ for row in "${GITHUB_TOOL_PINS[@]}"; do
   [ "$candidate" = "$command_name" ] && { printf '%s %s\n' "$command_name" "$version"; exit 0; }
 done
 for row in "${NIX_PACKAGE_PINS[@]}"; do
-  IFS='|' read -r _package candidate version <<<"$row"
+  IFS='|' read -r _package candidate version _evidence <<<"$row"
   if [ "$candidate" = "$command_name" ]; then
     [ "$candidate" = unzip ] && version=6.00
     printf '%s %s\n' "$command_name" "$version"
@@ -208,7 +208,7 @@ chmod +x "$FAKEBIN"/*
 for row in "${NPM_TOOL_PINS[@]}"; do IFS='|' read -r _name command_name _rest <<<"$row"; ln -s tool-version "$FAKEBIN/$command_name"; done
 for row in "${GITHUB_TOOL_PINS[@]}"; do IFS='|' read -r _name command_name _rest <<<"$row"; ln -sf tool-version "$FAKEBIN/$command_name"; done
 for row in "${NIX_PACKAGE_PINS[@]}"; do
-  IFS='|' read -r _package command_name _version <<<"$row"
+  IFS='|' read -r _package command_name _version _evidence <<<"$row"
   [ "$command_name" = git ] || [ "$command_name" = curl ] || ln -sf tool-version "$FAKEBIN/$command_name"
 done
 # The closure manifest home/dev-tools.nix generates: name -> exact store path.
@@ -220,28 +220,29 @@ done
 BASH_BIN=$(command -v bash) || fail 'missing test dependency: bash'
 CLOSURE_DIR="$FIXTURE/closure"
 CLOSURE_FILE="$FIXTURE/dev-tools-closure.json"
-CLOSURE_NAMES=(coreutils curl diffutils gawk git gnugrep gnused gnutar gzip jq nodejs_22)
 closure_entries='[]'
-for closure_name in "${CLOSURE_NAMES[@]}"; do
-  for row in "${NIX_PACKAGE_PINS[@]}"; do
-    IFS='|' read -r package command_name version <<<"$row"
-    [ "$package" = "$closure_name" ] || continue
-    mkdir -p "$CLOSURE_DIR/$package/bin"
-    printf '#!%s\nprintf "%s (closure) %s\\n"\n' "$BASH_BIN" "$command_name" "$version" \
-      >"$CLOSURE_DIR/$package/bin/$command_name"
-    chmod +x "$CLOSURE_DIR/$package/bin/$command_name"
-    closure_entries=$(jq -cn --argjson a "$closure_entries" --arg n "$package" --arg v "$version" \
-      --arg p "$CLOSURE_DIR/$package" '$a + [{name:$n,version:$v,store_path:$p}]')
-    case "$command_name" in
-      git|curl) ;;
-      *)
-        rm -f "$FAKEBIN/$command_name"
-        printf '#!%s\nprintf "%s 0.0.1\\n"\n' "$BASH_BIN" "$command_name" >"$FAKEBIN/$command_name"
-        chmod +x "$FAKEBIN/$command_name"
-        ;;
-    esac
-  done
+CLOSURE_ROWS=()
+for row in "${NIX_PACKAGE_PINS[@]}"; do
+  IFS='|' read -r package command_name version evidence <<<"$row"
+  [ "$evidence" = closure ] || continue
+  CLOSURE_ROWS+=("$package|$command_name|$version")
+  mkdir -p "$CLOSURE_DIR/$package/bin"
+  printf '#!%s\nprintf "%s (closure) %s\\n"\n' "$BASH_BIN" "$command_name" "$version" \
+    >"$CLOSURE_DIR/$package/bin/$command_name"
+  chmod +x "$CLOSURE_DIR/$package/bin/$command_name"
+  closure_entries=$(jq -cn --argjson a "$closure_entries" --arg n "$package" --arg v "$version" \
+    --arg p "$CLOSURE_DIR/$package" '$a + [{name:$n,version:$v,store_path:$p}]')
+  # A hostile ambient answer for the same command, so any PATH measurement shows.
+  case "$command_name" in
+    git|curl) ;;
+    *)
+      rm -f "$FAKEBIN/$command_name"
+      printf '#!%s\nprintf "%s 0.0.1\\n"\n' "$BASH_BIN" "$command_name" >"$FAKEBIN/$command_name"
+      chmod +x "$FAKEBIN/$command_name"
+      ;;
+  esac
 done
+[ "${#CLOSURE_ROWS[@]}" -gt 0 ] || fail 'the manifest declares no closure-classed Nix rows'
 printf '%s\n' "$closure_entries" >"$CLOSURE_FILE"
 
 ln -sf tool-version "$FAKEBIN/agy"
@@ -403,31 +404,74 @@ fi
 case "$packaged_help" in *'Usage: dev-tools-check-updates [--json]'*) : ;; *) fail 'the packaged --help omits the usage line' ;; esac
 pass 'the packaged --help prints only the operator contract'
 
-# ------------------- closure-only packages are measured from the closure
+# ------------------- closure rows are immune to the ambient PATH
 
-# These reach the operator only through a wrapper's own PATH, so the audit has
-# to read the store path the generated manifest names. The ambient stubs above
-# answer 0.0.1 for the same commands, so a PATH-based measurement shows up here.
+# These reach the operator only through a wrapper's own PATH, so the audit has to
+# read the store path the generated manifest binds. Every one of their ambient
+# commands answers 0.0.1 above, so a PATH measurement would show up here.
 json=$(run_checker --json --force --no-cache)
-for closure_name in coreutils diffutils gawk gnugrep gnused gnutar gzip; do
-  for row in "${NIX_PACKAGE_PINS[@]}"; do
-    IFS='|' read -r package _command_name version <<<"$row"
-    [ "$package" = "$closure_name" ] || continue
-    entry=$(printf '%s' "$json" | jq -ce --arg n "nix:$package" '.tools[] | select(.name == $n)') \
-      || fail "the inventory omits nix:$package"
-    [ "$(printf '%s' "$entry" | jq -r '.current')" = "$version" ] \
-      || fail "nix:$package was measured as $(printf '%s' "$entry" | jq -r '.current') instead of the closure's $version"
-    [ "$(printf '%s' "$entry" | jq -r '.status')" = up_to_date ] \
-      || fail "nix:$package is not up_to_date against its own closure"
-  done
+for row in "${CLOSURE_ROWS[@]}"; do
+  IFS='|' read -r package command_name version <<<"$row"
+  entry=$(printf '%s' "$json" | jq -ce --arg n "nix:$package" '.tools[] | select(.name == $n)') \
+    || fail "the inventory omits nix:$package"
+  [ "$(printf '%s' "$entry" | jq -r '.current')" = "$version" ] \
+    || fail "nix:$package was measured as $(printf '%s' "$entry" | jq -r '.current') instead of the closure's $version"
+  [ "$(printf '%s' "$entry" | jq -r '.status')" = up_to_date ] \
+    || fail "nix:$package is not up_to_date against its own closure"
+  [ "$(printf '%s' "$entry" | jq -r '.source')" = nixpkgs-locked-closure ] \
+    || fail "nix:$package does not label its evidence source distinctly"
+  [ "$command_name" = git ] || [ "$command_name" = curl ] || {
+    [ "$("$FAKEBIN/$command_name" | awk '{print $2}')" = 0.0.1 ] \
+      || fail "the hostile ambient stub for $command_name is not actually hostile"
+  }
 done
-pass 'closure-only Nix packages are measured from the exact store path, not the ambient PATH'
+pass 'closure Nix rows are measured from the bound store path and are immune to the ambient PATH'
 
-# Without the manifest there is no closure to measure, so the reading falls back
-# to the ambient command - which is exactly why the manifest exists.
+# A user-environment row is the opposite contract: the operator's own command is
+# the pinned one, so drift there has to surface.
+rm -f "$FAKEBIN/node"
+printf '#!%s\nprintf "v20.0.0\\n"\n' "$BASH_BIN" >"$FAKEBIN/node"
+chmod +x "$FAKEBIN/node"
+json=$(run_checker --json --force --no-cache)
+node_entry=$(printf '%s' "$json" | jq -ce '.tools[] | select(.name == "nix:nodejs_22")')
+[ "$(printf '%s' "$node_entry" | jq -r '.current')" = 20.0.0 ] \
+  || fail 'a user-environment Nix row was not measured from the command the operator runs'
+[ "$(printf '%s' "$node_entry" | jq -r '.status')" = drifted ] || fail 'user-environment drift was not reported'
+[ "$(printf '%s' "$node_entry" | jq -r '.source')" = nixpkgs-locked-stable ] \
+  || fail 'a user-environment row does not keep its own evidence source'
+ln -sf tool-version "$FAKEBIN/node"
+pass 'user-environment Nix rows keep their ambient measurement and still expose drift'
+
+# A repository-checkout run binds no manifest, so there is no closure to measure
+# and the honest answer is unknown - never a reading of an unrelated build.
 json=$(TEST_CLOSURE_FILE='' run_checker --json --force --no-cache)
-[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name == "nix:gzip") | .current')" = 0.0.1 ] \
-  || fail 'the no-manifest control did not fall back to the ambient stub'
-pass 'the closure manifest, not the ambient PATH, is what the measurement comes from'
+for row in "${CLOSURE_ROWS[@]}"; do
+  IFS='|' read -r package _command_name _version <<<"$row"
+  entry=$(printf '%s' "$json" | jq -ce --arg n "nix:$package" '.tools[] | select(.name == $n)')
+  [ "$(printf '%s' "$entry" | jq -r '.current')" = unknown ] \
+    || fail "nix:$package fell back to the ambient PATH without a closure manifest: $(printf '%s' "$entry" | jq -r '.current')"
+  printf '%s' "$entry" | jq -e '.detail | test("no closure measurement manifest is bound")' >/dev/null \
+    || fail "nix:$package did not say why it could not be measured"
+done
+[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name == "nix:nodejs_22") | .current')" != unknown ] \
+  || fail 'the missing manifest also suppressed a user-environment measurement'
+pass 'a run with no closure manifest reports every closure row unknown instead of measuring the wrong binary'
+
+# Manifest data that cannot bind the package is the same refusal, named.
+BROKEN_MANIFEST="$FIXTURE/broken-closure.json"
+printf 'not json\n' >"$BROKEN_MANIFEST"
+json=$(TEST_CLOSURE_FILE="$BROKEN_MANIFEST" run_checker --json --force --no-cache)
+gzip_entry=$(printf '%s' "$json" | jq -ce '.tools[] | select(.name == "nix:gzip")')
+[ "$(printf '%s' "$gzip_entry" | jq -r '.current')" = unknown ] || fail 'a malformed closure manifest was measured anyway'
+printf '%s' "$gzip_entry" | jq -e '.detail | test("malformed")' >/dev/null \
+  || fail 'a malformed closure manifest did not say so'
+
+printf '%s\n' '[{"name":"gzip","version":"1.14","store_path":"/nonexistent/gzip"}]' >"$BROKEN_MANIFEST"
+json=$(TEST_CLOSURE_FILE="$BROKEN_MANIFEST" run_checker --json --force --no-cache)
+gzip_entry=$(printf '%s' "$json" | jq -ce '.tools[] | select(.name == "nix:gzip")')
+[ "$(printf '%s' "$gzip_entry" | jq -r '.current')" = unknown ] || fail 'a missing bound path was measured anyway'
+printf '%s' "$gzip_entry" | jq -e '.detail | test("does not carry an executable")' >/dev/null \
+  || fail 'a missing bound executable did not say so'
+pass 'a manifest that cannot bind a closure package reports unknown with the reason'
 
 printf '\nall dev-tools-check-updates tests passed\n'

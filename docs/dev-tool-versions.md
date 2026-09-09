@@ -87,17 +87,24 @@ deprecated 25.11 channel. The lock file carries the content hashes.
 | gnutar | 1.35 | gzip | 1.14 |
 
 The table includes user-facing packages and runtime inputs of the
-repository-owned tool scripts. `home/dev-tools.nix` owns one closure-input
-attrset that every wrapper selects from, and generates a measurement manifest
-from that same attrset mapping each name to the exact store path Home Manager
-materialized. The checker measures those rows by running the version command out
-of that store path. Most of them - coreutils, curl, gawk, gnugrep, gnused,
-diffutils, gnutar, gzip - reach the operator only through a wrapper's own PATH,
-so resolving them with `command -v` would report an unrelated system build, or
-none at all, and label the pinned closure as drifted. A run without the manifest
-(the repository checkout rather than the packaged wrapper) has no closure to
-audit and reports those rows as `unknown` rather than measuring the wrong
-binary. Home Manager modules also own home-manager,
+repository-owned tool scripts. Every row carries an evidence class that says
+where its installed version may be read from, and `home/dev-tools.nix` owns the
+matching split.
+
+`user-env` rows are in the user environment, so the command the operator runs is
+the pinned one and is measured through PATH. `closure` rows - coreutils, curl,
+gawk, gnugrep, gnused, diffutils, gnutar, gzip - reach the operator only through
+a wrapper's own PATH; `command -v` would report an unrelated system build, or
+none at all, and label the pinned closure as drifted. Those are measured from the
+exact store path in the manifest `home/dev-tools.nix` generates from the same
+closure-only attrset the wrappers select from, and they never fall back to PATH:
+a manifest that is absent, unreadable, malformed, does not bind the package, or
+binds a path without a runnable version command reports `unknown` and says which
+of those it was. So a repository-checkout run - the script rather than the
+packaged wrapper - reports every `closure` row as `unknown` instead of measuring
+the wrong binary. `git`, `jq`, and `nodejs_22` are wrapper inputs too, but they
+are also in the user environment, so they stay `user-env`: an operator whose
+`node` resolves to another build still sees that drift. Home Manager modules also own home-manager,
 Neovim, zsh, Starship, fzf, and Git. Neovim's fourteen plugin commits remain
 independently exact in `config/nvim/lazy-lock.json`; the initial lazy.nvim clone
 uses the exact v11.17.5 GA tag instead of the moving `stable` alias, and the lock

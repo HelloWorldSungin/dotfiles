@@ -75,19 +75,30 @@ ANTIGRAVITY_ASSET_PINS=(
   'darwin-arm64|https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.28-5576113066475520/darwin-arm/cli_mac_arm64.tar.gz|84a3bb980b0d967649e66932b04365a578a55609dea9572349a07b114067216447c1fc2f0ff55940fb6657309da665bd3af4fe8aa16af7886e131243b684087f'
 )
 
-# package|version-command|version. Nixpkgs 26.05 at NIXPKGS_REV is the
-# authoritative stable source. Runtime inputs of repository-owned wrappers are
-# included so the inventory covers everything Home Manager materializes.
+# package|version-command|version|evidence-class. Nixpkgs 26.05 at NIXPKGS_REV
+# is the authoritative stable source. Runtime inputs of repository-owned wrappers
+# are included so the inventory covers everything Home Manager materializes.
+# The evidence class says where the installed version may be read from:
+#   user-env  the package is in the user environment, so the command the operator
+#             runs is the pinned one and is measured through PATH.
+#   closure   the package reaches the operator only through a wrapper's own PATH,
+#             so it is measured from the exact store path home/dev-tools.nix
+#             generates. It is never read through PATH - that would report an
+#             unrelated system build - and reports unknown when the generated
+#             manifest is absent or does not bind it.
 NIX_PACKAGE_PINS=(
-  'gh|gh|2.100.0' 'lazygit|lazygit|0.61.1' 'nodejs_22|node|22.23.2' 'uv|uv|0.11.21'
-  'bats|bats|1.12.0' 'ripgrep|rg|15.1.0' 'fd|fd|10.4.2' 'fzf|fzf|0.72.0'
-  'jq|jq|1.8.2' 'tree|tree|2.3.2' 'htop|htop|3.5.1' 'unzip|unzip|6.0'
-  'neovim|nvim|0.12.4' 'zsh|zsh|5.9.1' 'starship|starship|1.25.1' 'tea|tea|0.14.0'
-  'chromium|chromium|152.0.7977.82' 'ghdl|ghdl|6.0.0' 'gtkwave|gtkwave|3.3.127'
-  'coreutils|timeout|9.11' 'curl|curl|8.21.0' 'gawk|gawk|5.4.1' 'git|git|2.54.0'
-  'gnugrep|grep|3.12' 'gnused|sed|4.10' 'diffutils|diff|3.12'
-  'gnutar|tar|1.35' 'gzip|gzip|1.14'
+  'gh|gh|2.100.0|user-env' 'lazygit|lazygit|0.61.1|user-env' 'nodejs_22|node|22.23.2|user-env'
+  'uv|uv|0.11.21|user-env' 'bats|bats|1.12.0|user-env' 'ripgrep|rg|15.1.0|user-env'
+  'fd|fd|10.4.2|user-env' 'fzf|fzf|0.72.0|user-env' 'jq|jq|1.8.2|user-env'
+  'tree|tree|2.3.2|user-env' 'htop|htop|3.5.1|user-env' 'unzip|unzip|6.0|user-env'
+  'neovim|nvim|0.12.4|user-env' 'zsh|zsh|5.9.1|user-env' 'starship|starship|1.25.1|user-env'
+  'tea|tea|0.14.0|user-env' 'chromium|chromium|152.0.7977.82|user-env' 'ghdl|ghdl|6.0.0|user-env'
+  'gtkwave|gtkwave|3.3.127|user-env' 'coreutils|timeout|9.11|closure' 'curl|curl|8.21.0|closure'
+  'gawk|gawk|5.4.1|closure' 'git|git|2.54.0|user-env' 'gnugrep|grep|3.12|closure'
+  'gnused|sed|4.10|closure' 'diffutils|diff|3.12|closure' 'gnutar|tar|1.35|closure'
+  'gzip|gzip|1.14|closure'
 )
+
 
 # lock-name|repository|stable-policy|recorded-release-or-ref|commit
 # "head" is used only when the upstream has no release feed.

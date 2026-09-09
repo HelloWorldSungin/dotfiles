@@ -18,6 +18,8 @@ FLAKE_LOCK_FILE=${DEV_TOOLS_FLAKE_LOCK_FILE:-$ROOT/flake.lock}
 # select from: name -> the exact store path Home Manager materialized. Present
 # only in the packaged wrappers; a repository-local run has no closure to audit.
 CLOSURE_FILE=${DEV_TOOLS_CLOSURE_FILE:-}
+CLOSURE_VERSION=
+CLOSURE_REASON=
 CACHE_HOME=${XDG_CACHE_HOME:-${HOME:-.}/.cache}
 CACHE_PATH=${DEV_TOOLS_UPDATE_CACHE_PATH:-$CACHE_HOME/dev-tools-update-checker/cache.json}
 CACHE_TTL=${DEV_TOOLS_UPDATE_CACHE_TTL_SECONDS:-14400}
@@ -84,22 +86,54 @@ stable_version() {
   printf '%s\n' "$version" | grep -Eq '^[0-9]+(\.[0-9]+){2,3}$'
 }
 
-# A package that reaches the operator only through a wrapper's PATH must be
-# measured from the store path that wrapper actually carries. Resolving it with
-# `command -v` would report whatever the ambient PATH happens to hold - a
-# different build, or none at all - and label the pinned closure as drifted.
+# A `closure` package reaches the operator only through a wrapper's own PATH, so
+# it is measured from the store path that wrapper carries. `command -v` would
+# report whatever the ambient PATH holds - an unrelated system build, or none at
+# all - and label the pinned closure as drifted, so the closure path never falls
+# back to it: every way the generated manifest can fail to bind the package is
+# reported as unknown, with the reason in the detail.
 closure_store_path() {
   [ -n "$CLOSURE_FILE" ] && [ -r "$CLOSURE_FILE" ] || return 1
-  jq -r --arg n "$1" '.[] | select(.name == $n) | .store_path' "$CLOSURE_FILE" 2>/dev/null | head -1
+  jq -e -r --arg n "$1" '.[] | select(.name == $n) | .store_path' "$CLOSURE_FILE" 2>/dev/null | head -1
 }
 
-closure_command_version() {
-  local store_path=$1 command_name=$2 output version
-  [ -x "$store_path/bin/$command_name" ] || return 1
-  output=$(run_timed "$NETWORK_TIMEOUT" env NO_UPDATE_NOTIFIER=1 "$store_path/bin/$command_name" --version 2>&1) || return 2
-  version=$(normalize_version "$output")
-  [ -n "$version" ] || return 2
-  printf '%s\n' "$version"
+# Sets CLOSURE_VERSION and CLOSURE_REASON; the version is `unknown` when the
+# manifest cannot bind this package to a runnable executable.
+closure_measure() {
+  local package=$1 command_name=$2 store_path output
+  CLOSURE_VERSION=unknown
+  if [ -z "$CLOSURE_FILE" ]; then
+    CLOSURE_REASON='no closure measurement manifest is bound, so the wrapper closure cannot be measured'
+    return
+  fi
+  if [ ! -r "$CLOSURE_FILE" ]; then
+    CLOSURE_REASON='the closure measurement manifest is unreadable'
+    return
+  fi
+  if ! jq -e 'type == "array"' "$CLOSURE_FILE" >/dev/null 2>&1; then
+    CLOSURE_REASON='the closure measurement manifest is malformed'
+    return
+  fi
+  store_path=$(closure_store_path "$package" || true)
+  if [ -z "$store_path" ]; then
+    CLOSURE_REASON='the closure measurement manifest does not bind this package'
+    return
+  fi
+  if [ ! -x "$store_path/bin/$command_name" ]; then
+    CLOSURE_REASON="the bound closure path does not carry an executable $command_name"
+    return
+  fi
+  output=$(run_timed "$NETWORK_TIMEOUT" env NO_UPDATE_NOTIFIER=1 "$store_path/bin/$command_name" --version 2>&1) || {
+    CLOSURE_REASON='the bound closure executable did not report a version'
+    return
+  }
+  CLOSURE_VERSION=$(normalize_version "$output")
+  if [ -z "$CLOSURE_VERSION" ]; then
+    CLOSURE_VERSION=unknown
+    CLOSURE_REASON='the bound closure executable reported no recognisable version'
+    return
+  fi
+  CLOSURE_REASON='measured from the exact wrapper closure store path, never the ambient PATH'
 }
 
 installed_command_version() {
@@ -333,15 +367,14 @@ check_nix_input() {
 }
 
 check_nix_package() {
-  local package=$1 command_name=$2 pinned=$3 current path resolved store_name detail closure_path
+  local package=$1 command_name=$2 pinned=$3 evidence=$4 current path resolved store_name detail
   detail='latest stable is defined by the exact locked Nixpkgs revision'
-  closure_path=$(closure_store_path "$package" || true)
-  if [ -n "$closure_path" ]; then
-    current=$(closure_command_version "$closure_path" "$command_name" || printf unknown)
-    detail="$detail; measured from the wrapper closure store path, not the ambient PATH"
-    tool_json "nix:$package" nixpkgs-locked-stable "$current" "$pinned" "$pinned" exact-nix-derivation rebuild-only "$detail"
+  if [ "$evidence" = closure ]; then
+    closure_measure "$package" "$command_name"
+    tool_json "nix:$package" nixpkgs-locked-closure "$CLOSURE_VERSION" "$pinned" "$pinned" exact-nix-derivation rebuild-only "$detail; $CLOSURE_REASON"
     return
   fi
+  detail="$detail; measured from the user environment command"
   current=$(installed_command_version "$command_name" || printf unknown)
   if [ "$package" = unzip ] && [ "$current" = 6.00 ]; then
     current=6.0
@@ -445,8 +478,8 @@ collect() {
   append_tool "$(check_npx_tool omp-acp omp-acp "$OMP_ACP_VERSION")"
   append_tool "$(check_npx_tool claude-spend claude-spend "$CLAUDE_SPEND_VERSION")"
   for row in "${NIX_PACKAGE_PINS[@]}"; do
-    IFS='|' read -r package command_name version <<<"$row"
-    append_tool "$(check_nix_package "$package" "$command_name" "$version")"
+    IFS='|' read -r package command_name version evidence <<<"$row"
+    append_tool "$(check_nix_package "$package" "$command_name" "$version" "$evidence")"
   done
   for row in "${CI_ACTION_PINS[@]}"; do
     IFS='|' read -r name repo tag commit <<<"$row"

@@ -11,22 +11,28 @@
 let
   lib = pkgs.lib;
 
-  # One owner for every wrapper runtime closure. `closureInputs` is keyed by the
-  # same nixpkgs attribute names `config/dev-tools-versions.sh` pins, and every
-  # wrapper below selects from it - nothing lands on a wrapper's PATH without a
-  # row here. `closureManifest` is generated from the same attrset, so the audit
-  # measures the exact store path Home Manager materialized instead of guessing
-  # from whatever the operator's ambient PATH happens to carry.
-  closureInputs = {
-    inherit (pkgs) coreutils curl diffutils gawk git gnugrep gnused gnutar gzip jq;
+  # One owner for every wrapper runtime input, keyed by the same nixpkgs
+  # attribute names `config/dev-tools-versions.sh` pins, and split by where the
+  # audit may read the installed version from. `closureOnlyInputs` reach the
+  # operator only through a wrapper's own PATH, so the generated manifest binds
+  # each of them to its exact store path and the checker measures them there.
+  # `userEnvInputs` are also in the user environment, so the command the operator
+  # runs is the pinned one and keeps its ambient measurement - they are wrapper
+  # inputs too, but they are deliberately not in the manifest.
+  closureOnlyInputs = {
+    inherit (pkgs) coreutils curl diffutils gawk gnugrep gnused gnutar gzip;
+  };
+  userEnvInputs = {
+    inherit (pkgs) git jq;
     nodejs_22 = pkgs.nodejs_22;
   };
-  pick = names: map (name: closureInputs.${name}) names;
+  runtimeInputsByName = closureOnlyInputs // userEnvInputs;
+  pick = names: map (name: runtimeInputsByName.${name}) names;
 
   closureManifest = pkgs.writeText "dev-tools-closure.json" (builtins.toJSON
     (lib.mapAttrsToList
       (name: package: { inherit name; version = lib.getVersion package; store_path = package.outPath; })
-      closureInputs));
+      closureOnlyInputs));
 
   pins = pkgs.writeText "dev-tools-versions.sh" (builtins.readFile ../config/dev-tools-versions.sh);
   flakeLock = pkgs.writeText "flake.lock" (builtins.readFile ../flake.lock);
@@ -90,7 +96,7 @@ in
 {
   _module.args.devTools = {
     inherit
-      closureInputs closureManifest pins flakeLock nvimPluginLock
+      closureOnlyInputs userEnvInputs closureManifest pins flakeLock nvimPluginLock
       checker pinnedInstaller claudeSpendPinned codexSetContextWindow applyUpdates;
   };
 }
