@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Behavior tests for the GPT long-context configuration (GPT-5.6 Sol/Terra):
-#   - pi/models.json: the exact two openai-codex modelOverrides, never Astra.
+# Behavior tests for the GPT long-context configuration (GPT-5.6 Sol/Terra and
+# GPT-6 Astra):
+#   - pi/models.json: the exact three openai-codex modelOverrides.
 #   - bin/codex-set-context-window: the narrowly scoped, atomic, idempotent
 #     merge of the single owned key into a machine-maintained config.toml.
 # No test touches the real ~/.codex or ~/.pi; every case uses a temp file.
@@ -35,16 +36,16 @@ assert_eq "$(jq -r '.providers | keys | join(",")' "$MODELS_JSON")" \
 pass "pi/models.json configures only the openai-codex provider"
 
 assert_eq "$(jq -r '.providers["openai-codex"].modelOverrides | keys | sort | join(",")' "$MODELS_JSON")" \
-  "gpt-5.6-sol,gpt-5.6-terra" "modelOverrides covers exactly Sol and Terra"
-pass "modelOverrides covers exactly Sol and Terra, never Astra"
+  "gpt-5.6-sol,gpt-5.6-terra,gpt-6-astra" "modelOverrides covers exactly Sol, Terra and Astra"
+pass "modelOverrides covers exactly Sol, Terra and Astra"
 
-for model in gpt-5.6-sol gpt-5.6-terra; do
+for model in gpt-5.6-sol gpt-5.6-terra gpt-6-astra; do
   assert_eq "$(jq -r --arg m "$model" '.providers["openai-codex"].modelOverrides[$m].contextWindow' "$MODELS_JSON")" \
     "1050000" "$model contextWindow is 1050000"
   assert_eq "$(jq -r --arg m "$model" '.providers["openai-codex"].modelOverrides[$m] | keys | join(",")' "$MODELS_JSON")" \
     "contextWindow" "$model overrides only contextWindow"
 done
-pass "Sol and Terra each override only contextWindow, to 1050000"
+pass "Sol, Terra and Astra each override only contextWindow, to 1050000"
 
 # The overrides must not touch model selection, effort, or any unrelated model
 # such as Luna.
@@ -68,7 +69,7 @@ pass "the default model/effort guard fires on a root model and on a nested effor
   || fail "pi/models.json must not set a default model or effort"
 
 # Luna, and every other unrelated model, is left alone: the provider object
-# carries only the two overrides already pinned above.
+# carries only the three overrides already pinned above.
 assert_eq "$(jq -r '.providers["openai-codex"] | keys | join(",")' "$MODELS_JSON")" \
   "modelOverrides" "the openai-codex provider carries nothing but modelOverrides"
 pass "pi/models.json changes no default model, effort, or Luna"

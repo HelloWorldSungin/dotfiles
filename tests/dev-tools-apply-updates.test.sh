@@ -232,4 +232,19 @@ help=$($APPLY --help)
 case "$help" in *'MUST NEVER install, update, invoke, reload, stop, or restart'*) : ;; *) fail 'operator contract omits the runtime-hosting safety boundary' ;; esac
 pass 'Herdr and the shared no-mistakes daemon are absent from apply behavior'
 
+PACKAGED_APPLY="$TMP_ROOT/packaged-dev-tools-apply-updates"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'export DEV_TOOLS_PINS_FILE=/nix/store/aaaaaaaa-dev-tools-versions.sh\n'
+  cat "$APPLY"
+} >"$PACKAGED_APPLY"
+chmod +x "$PACKAGED_APPLY"
+packaged_help=$("$PACKAGED_APPLY" --help)
+[ "$(printf '%s\n' "$packaged_help" | head -1)" = "$(printf '%s\n' "$help" | head -1)" ] || fail 'the packaged --help does not start with the usage header'
+if printf '%s\n' "$packaged_help" | grep -Eq '/nix/store/|env bash'; then
+  fail 'the packaged --help leaks wrapper exports or the interpreter line'
+fi
+case "$packaged_help" in *'MUST NEVER install, update, invoke, reload, stop, or restart'*) : ;; *) fail 'the packaged --help omits the runtime-hosting safety boundary' ;; esac
+pass 'the packaged --help prints only the operator contract'
+
 printf '\nall dev-tools-apply-updates tests passed\n'

@@ -33,7 +33,7 @@ NO_CACHE=0
 STARTUP=0
 HEALTH=0
 
-usage() { sed -n '2,/^set -u$/s/^# \{0,1\}//p' "$0"; }
+usage() { sed -n '/^# dev-tools-check-updates - /,/^set -u$/s/^# \{0,1\}//p' "$0"; }
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --json) MODE=json ;;

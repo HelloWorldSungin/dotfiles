@@ -34,7 +34,7 @@ NETWORK_TIMEOUT=${DEV_TOOLS_UPDATE_NETWORK_TIMEOUT_SECONDS:-15}
 MODE=human
 DRY_RUN=0
 
-usage() { sed -n '2,/^set -u$/s/^# \{0,1\}//p' "$0"; }
+usage() { sed -n '/^# dev-tools-apply-updates - /,/^set -u$/s/^# \{0,1\}//p' "$0"; }
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --json) MODE=json ;;

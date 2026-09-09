@@ -215,6 +215,29 @@ ln -sf tool-version "$FAKEBIN/agy"
 ln -sf tool-version "$FAKEBIN/cursor-agent"
 ln -sf tool-version "$FAKEBIN/nix"
 
+# Machine-consumed declarative artifacts are read through a semantic model
+# rather than grepped: the workflow's action steps and the Baby Menu agents'
+# launch specs.
+workflow_action_refs() {
+  python3 - "$1" <<'PARSE_WORKFLOW'
+import sys, yaml
+with open(sys.argv[1]) as handle:
+    workflow = yaml.safe_load(handle)
+for job in (workflow.get("jobs") or {}).values():
+    for step in job.get("steps") or []:
+        if step.get("uses"):
+            print(step["uses"])
+PARSE_WORKFLOW
+}
+
+acp_launch_version() {
+  jq -r --arg agent "$2" --arg package "$3" '
+    .[] | select(.name == $agent) | .launchCommand | split(" ")
+    | map(select(startswith($package + "@"))) | first // ""
+    | ltrimstr($package + "@")
+  ' "$1"
+}
+
 run_checker() {
   env HOME="$FIXTURE/home" DEV_TOOLS_PINS_FILE="$PINS" DEV_TOOLS_NVIM_LOCK_FILE="$ROOT/config/nvim/lazy-lock.json" \
     DEV_TOOLS_FLAKE_LOCK_FILE="${TEST_FLAKE_LOCK_FILE:-$ROOT/flake.lock}" \
@@ -237,13 +260,20 @@ expected=$((expected + 10)) # antigravity, Cursor, two repos, installer, two inp
 [ "$(printf '%s' "$json" | jq '.tools | length')" -eq "$expected" ] || fail 'complete manifest inventory was not emitted'
 [ "$(printf '%s' "$json" | jq '[.tools[] | select(.status != "up_to_date")] | length')" -eq 0 ] || fail 'matching installed, pinned, and latest values were not current'
 [ "$(printf '%s' "$json" | jq '.intentionally_unmanaged | length')" -ge 8 ] || fail 'unmanaged documented dependencies were not explicit'
-for row in "${CI_ACTION_PINS[@]}"; do
-  IFS='|' read -r _name repo _tag commit <<<"$row"
-  grep -Fq "uses: $repo@$commit" "$ROOT/.github/workflows/build.yml" || fail "$repo workflow declaration disagrees with the manifest"
-done
-grep -Fq "opencode-ai@$OPENCODE_ACP_VERSION" "$ROOT/config/baby-menu/agents.json" || fail 'OpenCode ACP declaration disagrees with the manifest'
-grep -Fq "omp-acp@$OMP_ACP_VERSION" "$ROOT/config/baby-menu/agents.json" || fail 'OMP ACP declaration disagrees with the manifest'
-grep -Fq "claude-spend@$CLAUDE_SPEND_VERSION" "$ROOT/home/common.nix" || fail 'claude-spend declaration disagrees with the manifest'
+if python3 -c 'import yaml' >/dev/null 2>&1; then
+  action_refs=$(workflow_action_refs "$ROOT/.github/workflows/build.yml")
+  for row in "${CI_ACTION_PINS[@]}"; do
+    IFS='|' read -r _name repo _tag commit <<<"$row"
+    printf '%s\n' "$action_refs" | grep -Fxq "$repo@$commit" || fail "$repo resolves to a different action commit than the manifest"
+  done
+  if printf '%s\n' "$action_refs" | grep -Evq '@[0-9a-f]{40}$'; then
+    fail 'a workflow action step resolves to a moving ref instead of an exact commit'
+  fi
+else
+  printf 'skip - PyYAML unavailable, workflow action model not checked\n'
+fi
+[ "$(acp_launch_version "$ROOT/config/baby-menu/agents.json" opencode opencode-ai)" = "$OPENCODE_ACP_VERSION" ] || fail 'the OpenCode agent launches a different opencode-ai version than the manifest'
+[ "$(acp_launch_version "$ROOT/config/baby-menu/agents.json" omp omp-acp)" = "$OMP_ACP_VERSION" ] || fail 'the OMP agent launches a different omp-acp version than the manifest'
 grep -Fq 'npm view @anthropic-ai/claude-code dist-tags.stable --json' "$CALL_LOG" || fail 'Claude did not use its authoritative stable dist-tag'
 grep -Fq 'herdr --version' "$CALL_LOG" || fail 'Herdr installed version was not surveyed'
 ! grep -Eq 'herdr (update|server|setup|restart|reload|stop|start)' "$CALL_LOG" || fail 'checker drove Herdr lifecycle behavior'
@@ -287,5 +317,25 @@ health=$(run_checker --health --json)
 [ "$(printf '%s' "$health" | jq -r '.checks.chrome_devtools_headless.status')" = broken ] || fail 'missing browser flag was hidden'
 unset TEST_CHROME_ARGS
 pass 'health mode remains local and deterministic'
+
+# The Nix wrapper prepends `export DEV_TOOLS_*=/nix/store/...` lines and its own
+# interpreter line ahead of this script's body, so --help must stay anchored to
+# the header instead of "everything from line 2".
+PACKAGED_CHECKER="$FIXTURE/packaged-dev-tools-check-updates"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'export DEV_TOOLS_PINS_FILE=/nix/store/aaaaaaaa-dev-tools-versions.sh\n'
+  printf 'export DEV_TOOLS_FLAKE_LOCK_FILE=/nix/store/bbbbbbbb-flake.lock\n'
+  printf 'export DEV_TOOLS_NVIM_LOCK_FILE=/nix/store/cccccccc-nvim-lazy-lock.json\n'
+  cat "$CHECKER"
+} >"$PACKAGED_CHECKER"
+chmod +x "$PACKAGED_CHECKER"
+packaged_help=$("$PACKAGED_CHECKER" --help)
+[ "$(printf '%s\n' "$packaged_help" | head -1)" = "$("$CHECKER" --help | head -1)" ] || fail 'the packaged --help does not start with the usage header'
+if printf '%s\n' "$packaged_help" | grep -Eq '/nix/store/|env bash'; then
+  fail 'the packaged --help leaks wrapper exports or the interpreter line'
+fi
+case "$packaged_help" in *'Usage: dev-tools-check-updates [--json]'*) : ;; *) fail 'the packaged --help omits the usage line' ;; esac
+pass 'the packaged --help prints only the operator contract'
 
 printf '\nall dev-tools-check-updates tests passed\n'

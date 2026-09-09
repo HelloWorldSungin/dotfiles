@@ -131,7 +131,7 @@ SH
 chmod +x "$FAKEBIN"/*
 
 run_installer() {
-  env HOME="$FIXTURE/home" PATH="$FAKEBIN:/usr/bin:/bin" DEV_TOOLS_PINS_FILE="$PINS" \
+  env HOME="$FIXTURE/home" PATH="${TEST_PATH:-$FAKEBIN:/usr/bin:/bin}" DEV_TOOLS_PINS_FILE="$PINS" \
     DEV_TOOLS_INSTALL_CURL_BIN="$FAKEBIN/curl" DEV_TOOLS_INSTALL_NPM_BIN="$FAKEBIN/npm" \
     DEV_TOOLS_INSTALL_GIT_BIN="$FAKEBIN/git" \
     DEV_TOOLS_INSTALL_LOCAL_BIN="$LOCAL_BIN" DEV_TOOLS_UPDATE_NPM_PREFIX="$PREFIX" \
@@ -180,6 +180,39 @@ for command_name in treehouse no-mistakes herdr agy; do [ -x "$LOCAL_BIN/$comman
 ! grep -Eq 'no-mistakes (daemon|update|setup|restart|reload|stop|start)' "$FIXTURE/tool-calls.log" || fail 'no-mistakes daemon lifecycle was driven'
 pass 'publisher-checksummed releases install exact binaries without lifecycle actions'
 
+# macOS ships neither sha256sum nor sha512sum, only `shasum`. Rebuild the
+# fixture PATH without the coreutils checksum tools and reinstall both
+# checksummed artifacts over it.
+NO_COREUTILS_SHA_BIN="$FIXTURE/no-coreutils-sha-bin"
+mkdir -p "$NO_COREUTILS_SHA_BIN"
+for command_name in awk bash cat chmod cp dirname env grep gzip head install ln mkdir mktemp mv rm sed tar uname jq; do
+  resolved=$(type -P "$command_name") || fail "missing test dependency: $command_name"
+  ln -sf "$resolved" "$NO_COREUTILS_SHA_BIN/$command_name"
+done
+cat >"$NO_COREUTILS_SHA_BIN/shasum" <<SHASUM
+#!/usr/bin/env bash
+set -eu
+bits=\$2
+shift 2
+case "\$bits" in
+  256) exec $(type -P sha256sum) "\$@" ;;
+  512) exec $(type -P sha512sum) "\$@" ;;
+esac
+exit 1
+SHASUM
+chmod +x "$NO_COREUTILS_SHA_BIN/shasum"
+( PATH="$FAKEBIN:$NO_COREUTILS_SHA_BIN"; ! type -P sha256sum >/dev/null && ! type -P sha512sum >/dev/null ) \
+  || fail 'the shasum-only fixture PATH still exposes the coreutils checksum tools'
+
+rm -f "$LOCAL_BIN/herdr" "$LOCAL_BIN/agy"
+TEST_PATH="$FAKEBIN:$NO_COREUTILS_SHA_BIN"
+run_installer --only herdr >/dev/null || fail 'sha256 verification broke without coreutils checksum tools'
+run_installer --only agy >/dev/null || fail 'sha512 verification broke without coreutils checksum tools'
+unset TEST_PATH
+[ -x "$LOCAL_BIN/herdr" ] || fail 'herdr was not installed on a shasum-only platform'
+[ -x "$LOCAL_BIN/agy" ] || fail 'agy was not installed on a shasum-only platform'
+pass 'publisher checksums verify on platforms that ship only shasum'
+
 run_installer --only firstmate >/dev/null
 run_installer --only baby-menu >/dev/null
 [ "$(git -C "$FIXTURE/home/firstmate" rev-parse HEAD)" = "$FIRSTMATE_TEST_REV" ] || fail 'Firstmate clone did not use the exact commit'
@@ -191,9 +224,12 @@ pass 'source repositories install exact commits atomically and idempotently'
 if run_installer --only cursor-agent >/dev/null 2>&1; then fail 'unpinable Cursor install was accepted'; fi
 [ ! -e "$FIXTURE/cursor-fetched" ] || fail 'moving Cursor installer was fetched or executed'
 pass 'unpinable Cursor channel refuses automated installation without side effects'
-! grep -Fq -- '--only cursor-agent' "$ROOT/bootstrap.sh" || fail 'bootstrap still invokes the unpinable Cursor installer'
-! grep -Eq '(curl|fetch).*cursor|bash .*cursor' "$ROOT/bootstrap.sh" "$INSTALLER" || fail 'moving Cursor installer remains executable from bootstrap'
-pass 'bootstrap skips the unsupported moving Cursor installer'
+
+run_installer >"$FIXTURE/full-run.out"
+[ ! -e "$FIXTURE/cursor-fetched" ] || fail 'the unattended fresh-machine run fetched the moving Cursor installer'
+[ ! -e "$LOCAL_BIN/cursor-agent" ] || fail 'the unattended fresh-machine run installed cursor-agent'
+grep -Fq 'skip cursor-agent' "$FIXTURE/full-run.out" || fail 'the unattended run did not report Cursor as skipped'
+pass 'the unattended fresh-machine run skips the unsupported moving Cursor installer'
 
 set +e
 run_installer --only unknown-source >/dev/null 2>&1

@@ -9,8 +9,8 @@ PINS_FILE=${DEV_TOOLS_PINS_FILE:-$ROOT/config/dev-tools-versions.sh}
 CURL_BIN=${DEV_TOOLS_INSTALL_CURL_BIN:-curl}
 NPM_BIN=${DEV_TOOLS_INSTALL_NPM_BIN:-npm}
 GIT_BIN=${DEV_TOOLS_INSTALL_GIT_BIN:-git}
-SHA256_BIN=${DEV_TOOLS_INSTALL_SHA256_BIN:-sha256sum}
-SHA512_BIN=${DEV_TOOLS_INSTALL_SHA512_BIN:-sha512sum}
+SHA256_BIN=${DEV_TOOLS_INSTALL_SHA256_BIN:-$(command -v sha256sum >/dev/null 2>&1 && printf sha256sum || printf 'shasum -a 256')}
+SHA512_BIN=${DEV_TOOLS_INSTALL_SHA512_BIN:-$(command -v sha512sum >/dev/null 2>&1 && printf sha512sum || printf 'shasum -a 512')}
 TAR_BIN=${DEV_TOOLS_INSTALL_TAR_BIN:-tar}
 INSTALL_BIN=${DEV_TOOLS_INSTALL_INSTALL_BIN:-install}
 LOCAL_BIN=${DEV_TOOLS_INSTALL_LOCAL_BIN:-${HOME:?}/.local/bin}
@@ -123,6 +123,12 @@ verify_sha256() {
   [ "$actual" = "$expected" ]
 }
 
+verify_sha512() {
+  local file=$1 expected=$2 actual
+  actual=$($SHA512_BIN "$file" | awk '{print $1}')
+  [ "$actual" = "$expected" ]
+}
+
 install_release_tool() {
   local name=$1 version=$2 expected filename url tmp binary
   selected "$name" || return 0
@@ -194,7 +200,7 @@ install_herdr() {
 }
 
 install_antigravity() {
-  local row key url expected tmp archive actual
+  local row key url expected tmp archive
   selected agy || selected antigravity || return 0
   safe_version "$ANTIGRAVITY_VERSION" || { say "refuse agy: unsafe stable version '$ANTIGRAVITY_VERSION'" >&2; return 1; }
   if command -v agy >/dev/null 2>&1; then
@@ -215,8 +221,7 @@ install_antigravity() {
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/antigravity-install.XXXXXX")
   archive="$tmp/agy.tar.gz"
   fetch "$url" "$archive"
-  actual=$($SHA512_BIN "$archive" | awk '{print $1}')
-  [ "$actual" = "$expected" ] || { rm -rf "$tmp"; say 'refuse agy: publisher checksum mismatch' >&2; return 1; }
+  verify_sha512 "$archive" "$expected" || { rm -rf "$tmp"; say 'refuse agy: publisher checksum mismatch' >&2; return 1; }
   $TAR_BIN -xzf "$archive" -C "$tmp" antigravity
   mkdir -p "$LOCAL_BIN"
   $INSTALL_BIN -m 0755 "$tmp/antigravity" "$LOCAL_BIN/agy"
