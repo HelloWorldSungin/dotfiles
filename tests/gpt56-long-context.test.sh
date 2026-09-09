@@ -75,7 +75,7 @@ pass "pi/models.json changes no default model, effort, or Luna"
 # ------------------------------------------------- codex config.toml merge
 
 run_merge() {
-  CODEX_CONFIG_FILE="$1" "$MERGE"
+  CODEX_CONFIG_FILE="$1" CODEX_MODEL_CONTEXT_WINDOW=872000 "$MERGE"
 }
 
 # A realistic machine-maintained config: top-level keys, then nested tables,
@@ -102,6 +102,7 @@ TOML
 cfg="$TMP_ROOT/config.toml"
 fixture > "$cfg"
 before=$(cat "$cfg")
+inode_before=$(stat -c %i "$cfg")
 
 run_merge "$cfg" || fail "merge failed on a populated config"
 
@@ -121,14 +122,24 @@ after_without_key=$(grep -v '^model_context_window = 872000$' "$cfg")
 assert_eq "$after_without_key" "$before" "unrelated config content is preserved verbatim"
 pass "all unrelated and nested TOML content is preserved verbatim"
 
-# Idempotence: a second and third run change nothing at all, mtime included.
-mtime1=$(stat -c %Y "$cfg")
+# The merge replaces the file by rename, so a run that really wrote is visible
+# as a new inode. That is what makes the no-op assertion below falsifiable.
+inode1=$(stat -c %i "$cfg")
+[ "$inode1" != "$inode_before" ] \
+  || fail "the merge did not rewrite the config, so a no-op cannot be distinguished"
+pass "a merge that has work to do replaces the config atomically"
+
+# Idempotence: a second and third run do not rewrite the file at all. The inode
+# is checked after every run, not once at the end: a rename frees an inode that
+# the next mktemp reclaims, so an even number of rewrites lands back on inode1.
 sum1=$(cksum < "$cfg")
-run_merge "$cfg" && run_merge "$cfg" || fail "repeat merge failed"
-assert_eq "$(cksum < "$cfg")" "$sum1" "repeat merges must not change the file"
-assert_eq "$(stat -c %Y "$cfg")" "$mtime1" "repeat merges must not churn the mtime"
+for run in 2 3; do
+  run_merge "$cfg" || fail "repeat merge $run failed"
+  assert_eq "$(stat -c %i "$cfg")" "$inode1" "run $run must not rewrite the file"
+  assert_eq "$(cksum < "$cfg")" "$sum1" "run $run must not change the file"
+done
 assert_eq "$(grep -c '^model_context_window' "$cfg")" "1" "the key must not be duplicated"
-pass "repeated merges are idempotent and do not duplicate the key"
+pass "repeated merges are idempotent and do not rewrite or duplicate the key"
 
 # An existing stale value is updated in place, not appended.
 sed -i 's/^model_context_window = 872000$/model_context_window = 272000/' "$cfg"
