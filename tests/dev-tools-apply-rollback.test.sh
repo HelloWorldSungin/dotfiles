@@ -936,6 +936,20 @@ for tier in firstmate npm_global; do
     || fail "the preview and the apply disagreed on $tier for an unusable receipt location"
 done
 at_prior || fail 'a preview with an unusable receipt location mutated a tool'
-pass 'a receipt location the apply could not write is refused by the preview too'
+
+# Human mode is what the operator reads, so the cause has to be there too: the
+# per-package detail that names it lives only in the JSON packages array.
+set +e
+human=$(TEST_RECEIPT_DIR="$BLOCKER/receipts" run_tool --dry-run)
+human_rc=$?
+set -e
+[ "$human_rc" -eq "$dry_rc" ] || fail "human dry-run exited $human_rc but JSON dry-run exited $dry_rc"
+printf '%s\n' "$human" | grep -Fq "receipt: $BLOCKER/receipts/" \
+  || fail 'human dry-run did not name the receipt it could not write'
+printf '%s\n' "$human" | grep -Fq '(unusable; the receipt could not be written there)' \
+  || fail 'human dry-run did not report the receipt as unusable'
+printf '%s\n' "$human" | grep -Fq 'npm_global is refused for that reason, not for its own state' \
+  || fail 'human dry-run did not tie the refused tier to the unusable receipt'
+pass 'a receipt location the apply could not write is refused by the preview too, in both output modes'
 
 printf '\nall dev-tools-apply-updates receipt and rollback tests passed\n'

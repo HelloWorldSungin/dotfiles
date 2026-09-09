@@ -84,7 +84,7 @@ deprecated 25.11 channel. The lock file carries the content hashes.
 | curl | 8.21.0 | gawk | 5.4.1 |
 | git | 2.54.0 | gnugrep | 3.12 |
 | gnused | 4.10 | diffutils | 3.12 |
-| gnutar | 1.35 | | |
+| gnutar | 1.35 | gzip | 1.14 |
 
 The table includes user-facing packages and runtime inputs of the
 repository-owned tool scripts. Home Manager modules also own home-manager,

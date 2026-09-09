@@ -86,7 +86,7 @@ NIX_PACKAGE_PINS=(
   'chromium|chromium|152.0.7977.82' 'ghdl|ghdl|6.0.0' 'gtkwave|gtkwave|3.3.127'
   'coreutils|timeout|9.11' 'curl|curl|8.21.0' 'gawk|gawk|5.4.1' 'git|git|2.54.0'
   'gnugrep|grep|3.12' 'gnused|sed|4.10' 'diffutils|diff|3.12'
-  'gnutar|tar|1.35'
+  'gnutar|tar|1.35' 'gzip|gzip|1.14'
 )
 
 # lock-name|repository|stable-policy|recorded-release-or-ref|commit

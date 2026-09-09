@@ -893,6 +893,10 @@ else
         (.receipt.rollback | to_entries[] | select(.key == "preflight" or .key == "firstmate" or .key == "npm_global") | .key as $scope | .value[] | "  " + $scope + ": " + .)'
       ;;
     planned) printf '%s' "$RESULT" | jq -r '"receipt: " + .receipt.path + " (planned; nothing written)"' ;;
+    unusable)
+      printf '%s' "$RESULT" | jq -r '"receipt: " + .receipt.path + " (unusable; the receipt could not be written there)",
+        (.tiers | to_entries[] | select(.value.status == "refused") | "  " + .key + " is refused for that reason, not for its own state")'
+      ;;
   esac
   [ "$(receipt_status)" = incomplete ] &&
     printf 'receipt is incomplete: %s could not record every outcome, so a converged tool above may be missing from it; the rollback preconditions above still apply, and rerunning once the receipt is writable re-records it\n' "$RECEIPT_PATH" >&2

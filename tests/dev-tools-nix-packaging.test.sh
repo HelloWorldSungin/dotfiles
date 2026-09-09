@@ -212,4 +212,52 @@ case "$help" in
 esac
 pass 'the packaged updater runs entirely from its declared closure'
 
+# ------------------------- every wrapper runtime input is in the pin inventory
+
+# config/dev-tools-versions.sh states that its Nix rows cover the runtime inputs
+# of the repository-owned wrappers, so the deployed closure and the manifest have
+# to agree. The comparison is by store path, not by name: an attribute whose
+# store name differs from it (nodejs_22 -> nodejs-22.23.2) would otherwise look
+# like a miss. Scope is the four wrappers on PATH.
+# shellcheck source=../config/dev-tools-versions.sh
+# shellcheck disable=SC1091
+source "$ROOT/config/dev-tools-versions.sh"
+pinned_attrs=()
+for row in "${NIX_PACKAGE_PINS[@]}"; do
+  IFS='|' read -r attr _command _version <<<"$row"
+  pinned_attrs+=("$attr")
+done
+[ "${#pinned_attrs[@]}" -gt 0 ] || fail 'the pin manifest declares no Nix packages'
+
+PINNED_PATHS=$(nix eval --raw "$ROOT#homeConfigurations.\"sungin@ct110\".pkgs" --apply \
+  "pkgs: builtins.concatStringsSep \"\n\" (map (n: (builtins.getAttr n pkgs).outPath) [ $(printf '"%s" ' "${pinned_attrs[@]}")])") \
+  || fail 'the pin manifest names a Nix package the pinned nixpkgs does not have'
+
+wrapper_text() { # wrapper name -> its generated script
+  # shellcheck disable=SC2016 # the --apply argument is Nix, not shell
+  nix eval --raw "$ROOT#$CONFIG.home.packages" --apply "
+    packages:
+      let matches = builtins.filter (p: (p.name or \"\") == \"$1\") packages;
+      in if builtins.length matches == 1 then (builtins.head matches).text
+         else throw \"expected exactly one $1 package\""
+}
+
+for wrapper in dev-tools-check-updates dev-tools-install-pinned claude-spend-pinned dev-tools-apply-updates; do
+  text=$(wrapper_text "$wrapper") || fail "the generation does not ship exactly one $wrapper"
+  path_line=$(grep -m1 '^export PATH=' <<<"$text") || fail "$wrapper declares no runtime closure"
+  path_line=${path_line#export PATH=\"}
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    case "$entry" in /nix/store/*) : ;; *) continue ;; esac
+    store_path=${entry%/bin}
+    # A wrapper may depend on a sibling wrapper; those are not nixpkgs packages.
+    case "$store_path" in
+      *-dev-tools-check-updates|*-dev-tools-versions.sh) continue ;;
+    esac
+    printf '%s\n' "$PINNED_PATHS" | grep -Fqx "$store_path" \
+      || fail "$wrapper depends on ${store_path##*/} but no NIX_PACKAGE_PINS row names it"
+  done <<<"$(printf '%s' "$path_line" | tr ':' '\n')"
+done
+pass 'every runtime input of every packaged wrapper has a pin inventory row'
+
 printf '\nall dev-tools nix packaging tests passed\n'
