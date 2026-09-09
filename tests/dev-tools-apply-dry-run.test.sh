@@ -103,7 +103,8 @@ checkout_fingerprint() {
   find "$CHECKOUT/.git" -maxdepth 1 | sort
 }
 
-# Runs in this shell so DRY_RC survives; a command substitution would discard it.
+# Run in this shell so the exit status survives; a command substitution
+# would discard it.
 DRY_JSON=
 DRY_RC=0
 dry_run() {
@@ -111,6 +112,28 @@ dry_run() {
   DRY_JSON=$(run_tool --dry-run --json)
   DRY_RC=$?
   set -e
+}
+APPLY_JSON=
+APPLY_RC=0
+apply_run() {
+  set +e
+  APPLY_JSON=$(run_tool --json)
+  APPLY_RC=$?
+  set -e
+}
+
+# The contract the preview makes: the very next unflagged run must reach the
+# same conclusion, with the same status, detail, and exit code.
+assert_apply_agrees() {
+  local label=$1 expected_head=$2
+  apply_run
+  [ "$APPLY_RC" -eq "$DRY_RC" ] \
+    || fail "$label: the preview exited $DRY_RC but the apply exited $APPLY_RC"
+  [ "$(firstmate_status "$APPLY_JSON")" = "$(firstmate_status "$DRY_JSON")" ] \
+    || fail "$label: the preview said $(firstmate_status "$DRY_JSON") but the apply said $(firstmate_status "$APPLY_JSON")"
+  [ "$(firstmate_detail "$APPLY_JSON")" = "$(firstmate_detail "$DRY_JSON")" ] \
+    || fail "$label: the preview and the apply gave different reasons"
+  [ "$(head_commit)" = "$expected_head" ] || fail "$label: the apply moved the checkout on a refused state"
 }
 
 # ------------------------- a pin that is not fetched locally is still previewed
@@ -157,7 +180,8 @@ dry_run; json=$DRY_JSON
 [ "$(firstmate_detail "$json")" = 'the local default branch is ahead of the exact pin' ] \
   || fail "a checkout ahead of the pin was refused for the wrong reason: $(firstmate_detail "$json")"
 [ "$(head_commit)" = "$AHEAD_COMMIT" ] || fail 'a refused preview moved the checkout'
-pass 'a checkout ahead of the exact pin is refused, not previewed as applyable'
+assert_apply_agrees 'a checkout ahead of the pin' "$AHEAD_COMMIT"
+pass 'a checkout ahead of the exact pin is refused identically by the preview and the apply'
 
 # ------------------------- a diverged checkout is refused
 
@@ -172,7 +196,8 @@ dry_run; json=$DRY_JSON
 [ "$(firstmate_status "$json")" = refused ] || fail 'a diverged checkout was not refused'
 [ "$(firstmate_detail "$json")" = 'the local default branch has diverged from the exact pin' ] \
   || fail "a diverged checkout was refused for the wrong reason: $(firstmate_detail "$json")"
-pass 'a checkout diverged from the exact pin is refused'
+assert_apply_agrees 'a diverged checkout' "$AHEAD_COMMIT"
+pass 'a checkout diverged from the exact pin is refused identically by the preview and the apply'
 
 # ------------------------- a pin the remote does not carry is refused
 
@@ -184,7 +209,8 @@ dry_run; json=$DRY_JSON
 [ "$(firstmate_status "$json")" = refused ] || fail 'a pin absent from the remote was not refused'
 [ "$(firstmate_detail "$json")" = 'the exact pin is absent from the authoritative Firstmate main branch' ] \
   || fail "an absent pin was refused for the wrong reason: $(firstmate_detail "$json")"
-pass 'a pin the authoritative remote does not carry is refused'
+assert_apply_agrees 'a pin the remote does not carry' "$AHEAD_COMMIT"
+pass 'a pin the authoritative remote does not carry is refused identically by both directions'
 
 # ------------------------- an unreachable remote is unknown, never applyable
 

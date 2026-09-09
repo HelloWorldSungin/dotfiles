@@ -183,24 +183,30 @@ a preview computed from whatever is already fetched locally would report
 `skipped` in exactly the pending-update case where the real run applies. The
 observed local default branch and the remote default branch are read into two
 temporary refs in a private throwaway bare repository, with the same URL and ref
-selection the apply path uses, and compared there: `would_apply` only on proven
-ancestry, `up_to_date` only on equality, and a refusal when the checkout is
-ahead of or diverged from the pin. Anything that cannot be proven - an
-unreachable remote, a remote that moves mid-check, a missing object, temporary
-state that cannot be created or removed - is reported as `unknown` and exits
-non-zero rather than predicting success. The apply path repeats its own fetch
-and ancestry verification and never trusts a dry-run result.
+selection the apply path uses.
+
+Both directions then run one shared comparison, so a preview's status and exit
+code are the apply's: `up_to_date` only on equality, `would_apply` only on a
+proven local ancestor of the pin, and a refusal - non-zero, never a quiet
+`skipped` - when the pin is absent from or not contained in the authoritative
+branch, or when the checkout is ahead of or diverged from it. The apply path
+repeats its own fresh `ls-remote`, fetch, and remote-movement check before
+running that comparison against the real checkout, and never trusts a dry-run
+result. Anything the preview cannot prove - an unreachable remote, a remote that
+moves mid-check, a missing object, temporary state that cannot be created or
+removed - is reported as `unknown` and also exits non-zero.
 
 Every real mutation is preceded by a mode-0600 receipt written atomically under
 `$DEV_TOOLS_APPLY_RECEIPT_DIR` (by default `$XDG_STATE_HOME/dev-tools-apply-updates`).
 It records each affected tool, its exact prior commit or version, its exact
 target, the independently verified remote or registry evidence for both, and
-per-tool and per-tier completion status. The receipt directory is created and
-secured only when the run creates it; an operator-supplied
-`DEV_TOOLS_APPLY_RECEIPT_DIR` keeps its own mode, and one that is missing or
-unwritable refuses the mutation instead of being repaired in place. A receipt
-that cannot be written refuses the mutation it would have covered, so nothing is
-ever changed without a record, and a receipt that could not record every outcome is reported as
+per-tool and per-tier completion status. A receipt directory the run has to
+create - the default location, or a `DEV_TOOLS_APPLY_RECEIPT_DIR` that does not
+exist yet - is created and secured privately; an existing operator-supplied one
+keeps its own mode, and one that cannot be created or written refuses the
+mutation instead of being repaired in place. A receipt that cannot be written
+refuses the mutation it would have covered, so nothing is ever changed without a
+record, and a receipt that could not record every outcome is reported as
 `receipt.status: incomplete` in both output modes and exits non-zero even when
 the tools themselves converged. Dry-run names the receipt it would write and
 writes nothing.

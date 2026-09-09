@@ -159,6 +159,14 @@ for arg in "\$@"; do
     break
   fi
 done
+# The rollback observes the checkout after it has already read the receipt, so
+# this is the moment to make the receipt's own directory unusable. A regular
+# file where a directory belongs defeats mktemp for every uid, unlike a chmod.
+if [ -n "\${TEST_BREAK_RECEIPT_DIR:-}" ]; then
+  case "\$*" in
+    *rev-parse*) rm -rf "\$TEST_BREAK_RECEIPT_DIR"; : >"\$TEST_BREAK_RECEIPT_DIR" ;;
+  esac
+fi
 exec $REAL_GIT "\$@"
 SH
 
@@ -183,6 +191,7 @@ run_tool() {
     DEV_TOOLS_APPLY_RECEIPT_DIR="${TEST_RECEIPT_DIR:-$RECEIPTS}" \
     TEST_PINS="$PINS" TEST_PREFIX="$PREFIX" TEST_FIRSTMATE="$CHECKOUT" TEST_NPM_LOG="$NPM_LOG" \
     TEST_PRE_LOG="$PRE_LOG" TEST_LIFECYCLE_LOG="$LIFECYCLE_LOG" TEST_REGISTRY="$REGISTRY" \
+    TEST_BREAK_RECEIPT_DIR="${TEST_BREAK_RECEIPT_DIR:-}" \
     TEST_RECEIPT_DIR="${TEST_RECEIPT_DIR:-$RECEIPTS}" TEST_BAD_INSTALL="${TEST_BAD_INSTALL:-0}" \
     TEST_BREAK_RECEIPT="${TEST_BREAK_RECEIPT:-}" \
     "$APPLY" "$@"
@@ -590,22 +599,29 @@ pass 'a check-only rollback leaves the receipt and its evidence completely untou
 
 # --------------------------------- a receipt that cannot be appended is stale
 
-READONLY="$TMP_ROOT/readonly"
-mkdir -p "$READONLY"
-STALE_RECEIPT="$READONLY/receipt.json"
-jq '.tools |= map(. + {status:"applied"} | del(.observed, .reconciliation, .reconciled_at))' "$RECEIPT" >"$STALE_RECEIPT"
-chmod 500 "$READONLY"
+# The git stub turns the receipt's own directory into a regular file once the
+# tool has read the receipt, so the write-back fails for every uid.
+seed_stale_receipt() {
+  rm -rf "$UNWRITABLE"
+  mkdir -p "$UNWRITABLE"
+  jq '.tools |= map(. + {status:"applied"} | del(.observed, .reconciliation, .reconciled_at))' "$RECEIPT" >"$STALE_RECEIPT"
+}
+UNWRITABLE="$TMP_ROOT/unwritable"
+STALE_RECEIPT="$UNWRITABLE/receipt.json"
+TEST_BREAK_RECEIPT_DIR="$UNWRITABLE"
+seed_stale_receipt
 set +e
 json=$(run_rollback "$STALE_RECEIPT" --attended --json)
 rc=$?
+seed_stale_receipt
 human=$(run_rollback "$STALE_RECEIPT" --attended 2>&1)
 set -e
+unset TEST_BREAK_RECEIPT_DIR
 [ "$rc" -ne 0 ] || fail 'a receipt that could not be appended exited successfully'
 [ "$(printf '%s' "$json" | jq -r '.receipt.status')" = stale ] || fail 'a failed receipt append was not reported as stale'
-[ "$(jq -r '.tools[] | select(.name=="quota-axi") | .status' "$STALE_RECEIPT")" = applied ] \
-  || fail 'the test fixture does not actually leave the on-disk receipt unchanged'
+[ ! -d "$UNWRITABLE" ] || fail 'the fault injection did not actually make the receipt directory unusable'
 printf '%s\n' "$human" | grep -Fq 'receipt is stale' || fail 'human output did not warn about the stale receipt'
-chmod 700 "$READONLY"
+rm -f "$UNWRITABLE"
 pass 'an attended reversal whose receipt append fails reports a stale receipt and exits non-zero'
 
 # --------------------------------- unusable receipts fail closed
@@ -678,17 +694,28 @@ OPERATOR_RECEIPT=$(printf '%s' "$json" | jq -r '.receipt.path')
 [ "$(file_mode "$OPERATOR_RECEIPT")" = 600 ] || fail 'the receipt itself is not mode 0600'
 converged || fail 'the operator-directory run did not converge'
 
-chmod 500 "$OPERATOR_DIR"
+# A receipt location that is not a directory at all is unusable for every uid.
+UNUSABLE_DIR="$TMP_ROOT/unusable-receipts"
+rm -rf "$UNUSABLE_DIR"
+: >"$UNUSABLE_DIR"
 reset_to_prior
 set +e
-json=$(TEST_RECEIPT_DIR="$OPERATOR_DIR" run_tool --json)
+json=$(TEST_RECEIPT_DIR="$UNUSABLE_DIR" run_tool --json)
 rc=$?
 set -e
-chmod 700 "$OPERATOR_DIR"
-[ "$rc" -ne 0 ] || fail 'an unwritable receipt directory exited successfully'
+[ "$rc" -ne 0 ] || fail 'an unusable receipt directory exited successfully'
 [ "$(printf '%s' "$json" | jq -r '.tiers.firstmate.detail')" = 'could not write the mutation receipt; refusing to mutate' ] \
-  || fail 'an unwritable receipt directory did not refuse the mutation'
-at_prior || fail 'an unwritable receipt directory still mutated a tool'
-pass 'the apply secures only a directory it creates and refuses an unusable one'
+  || fail 'an unusable receipt directory did not refuse the mutation'
+at_prior || fail 'an unusable receipt directory still mutated a tool'
+rm -f "$UNUSABLE_DIR"
+
+# A directory the run has to create is created and secured privately.
+CREATED_DIR="$TMP_ROOT/created/receipts"
+rm -rf "$TMP_ROOT/created"
+reset_to_prior
+json=$(TEST_RECEIPT_DIR="$CREATED_DIR" run_tool --json)
+[ "$(printf '%s' "$json" | jq -r '.receipt.status')" = written ] || fail 'the apply did not create its own receipt directory'
+[ "$(file_mode "$CREATED_DIR")" = 700 ] || fail "a directory the run created is not private: $(file_mode "$CREATED_DIR")"
+pass 'the apply secures only a directory it creates and refuses an unusable location'
 
 printf '\nall dev-tools-apply-updates receipt and rollback tests passed\n'

@@ -12,11 +12,12 @@
 # GBrain, harness CLIs, Baby Menu, and other report-only tools are also excluded.
 #
 # Every real mutation is preceded by a mode-0600 receipt, written atomically
-# under $DEV_TOOLS_APPLY_RECEIPT_DIR. That directory is only created and secured
-# when this run creates it; an operator-supplied one keeps its own mode, and an
-# unusable one refuses the mutation instead of being repaired. It records each affected tool, its exact
+# under $DEV_TOOLS_APPLY_RECEIPT_DIR. It records each affected tool, its exact
 # prior commit or version, its exact target, the independently verified remote
-# or registry evidence for both, and per-tool and per-tier completion status. A
+# or registry evidence for both, and per-tool and per-tier completion status.
+# A receipt directory this run has to create is created and secured privately;
+# an existing operator-supplied one keeps its own mode, and one that cannot be
+# created or written refuses the mutation instead of being repaired. A
 # receipt that cannot be written refuses the mutation it would have covered, and
 # one that could not record every outcome is reported as incomplete and exits
 # non-zero even when the tools themselves converged.
@@ -25,9 +26,13 @@
 # accurate per-tool record while the tier reports the worst case. Dry-run names
 # the receipt it would write and writes nothing, and answers the Firstmate tier
 # from the same authoritative remote the real run uses - fetched into a private
-# throwaway repository, never into the checkout - so its preview matches what an
-# apply would do instead of guessing from whatever is already fetched locally.
-# Anything it cannot prove is `unknown` and exits non-zero.
+# throwaway repository, never into the checkout. Both directions then run one
+# shared comparison, so the preview's status and exit code are the apply's:
+# equality is up to date, a proven local ancestor of the fetched pin is
+# applyable, and a local branch that is ahead of or diverged from the pin is
+# refused with a non-zero exit rather than silently skipped. The apply repeats
+# its own fetch and comparison and never trusts the preview. Anything the
+# preview cannot prove is `unknown` and also exits non-zero.
 #
 # Rollback is attended, never automatic, and never restarts a service:
 #   dev-tools-apply-updates --rollback <receipt>              # check only
@@ -276,6 +281,31 @@ firstmate_dry_run_cleanup() {
 }
 trap firstmate_dry_run_cleanup EXIT
 
+# The single decision ladder both directions run, each against its own
+# repository: the dry-run against its private throwaway one, the apply against
+# the real checkout after its own fresh fetch. Keeping one implementation is
+# what makes the preview's status and exit code match the apply's.
+CMP_STATUS=
+CMP_DETAIL=
+firstmate_compare() {
+  local pinned=$1 local_commit=$2 remote_commit=$3
+  shift 3
+  $GIT_BIN "$@" cat-file -e "$pinned^{commit}" 2>/dev/null ||
+    { CMP_STATUS=refused; CMP_DETAIL='the exact pin is absent from the authoritative Firstmate main branch'; return; }
+  $GIT_BIN "$@" merge-base --is-ancestor "$pinned" "$remote_commit" 2>/dev/null ||
+    { CMP_STATUS=refused; CMP_DETAIL='the exact pin is not contained in the authoritative Firstmate main branch'; return; }
+  if [ "$local_commit" = "$pinned" ]; then
+    CMP_STATUS=up_to_date; CMP_DETAIL="already at pinned commit $pinned"; return
+  fi
+  if $GIT_BIN "$@" merge-base --is-ancestor "$local_commit" "$pinned" 2>/dev/null; then
+    CMP_STATUS=would_apply; CMP_DETAIL="would fast-forward main to exact pin $pinned"; return
+  fi
+  if $GIT_BIN "$@" merge-base --is-ancestor "$pinned" "$local_commit" 2>/dev/null; then
+    CMP_STATUS=refused; CMP_DETAIL='the local default branch is ahead of the exact pin'; return
+  fi
+  CMP_STATUS=refused; CMP_DETAIL='the local default branch has diverged from the exact pin'
+}
+
 firstmate_dry_run_probe() {
   local pinned=$1 local_head=$2 gd remote_head fetched_local fetched_remote
   DRY_TMP=$(mktemp -d "${TMPDIR:-/tmp}/dev-tools-apply-dry-run.XXXXXX" 2>/dev/null) ||
@@ -300,24 +330,13 @@ firstmate_dry_run_probe() {
     { DRY_STATUS=unknown; DRY_DETAIL='the authoritative Firstmate main branch produced no commit'; return; }
   [ "$fetched_remote" = "$remote_head" ] ||
     { DRY_STATUS=unknown; DRY_DETAIL='the authoritative Firstmate main branch moved during verification'; return; }
-  $GIT_BIN --git-dir="$gd" cat-file -e "$pinned^{commit}" 2>/dev/null ||
-    { DRY_STATUS=refused; DRY_DETAIL='the exact pin is absent from the authoritative Firstmate main branch'; return; }
-  $GIT_BIN --git-dir="$gd" merge-base --is-ancestor "$pinned" refs/dev-tools/remote 2>/dev/null ||
-    { DRY_STATUS=refused; DRY_DETAIL='the exact pin is not contained in the authoritative Firstmate main branch'; return; }
-  if [ "$fetched_local" = "$pinned" ]; then
-    DRY_STATUS=up_to_date; DRY_DETAIL="already at pinned commit $pinned"; return
-  fi
-  if $GIT_BIN --git-dir="$gd" merge-base --is-ancestor refs/dev-tools/local "$pinned" 2>/dev/null; then
-    DRY_STATUS=would_apply; DRY_DETAIL="would fast-forward main to exact pin $pinned"; return
-  fi
-  if $GIT_BIN --git-dir="$gd" merge-base --is-ancestor "$pinned" refs/dev-tools/local 2>/dev/null; then
-    DRY_STATUS=refused; DRY_DETAIL='the local default branch is ahead of the exact pin'; return
-  fi
-  DRY_STATUS=refused; DRY_DETAIL='the local default branch has diverged from the exact pin'
+  firstmate_compare "$pinned" "$fetched_local" "$fetched_remote" --git-dir="$gd"
+  DRY_STATUS=$CMP_STATUS
+  DRY_DETAIL=$CMP_DETAIL
 }
 
 apply_firstmate() {
-  local detection=$1 row current pinned latest branch remote_head fetch_out prior entry
+  local detection=$1 row current pinned latest branch remote_head fetched_remote fetch_out prior entry
   row=$(printf '%s' "$detection" | jq -ce '.tools[] | select(.name == "firstmate")' 2>/dev/null || true)
   if [ -z "$row" ]; then set_tier refused 'checker did not return the allowlisted Firstmate source'; return; fi
   current=$(printf '%s' "$row" | jq -r '.current // "unknown"')
@@ -343,13 +362,16 @@ apply_firstmate() {
     return
   fi
   remote_head=$(run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" ls-remote "$FIRSTMATE_REPO" refs/heads/main 2>/dev/null | awk '$2 == "refs/heads/main" {print $1; exit}')
-  [ -n "$remote_head" ] || { set_tier refused 'could not re-verify the authoritative Firstmate main branch'; return; }
+  [ -n "$remote_head" ] || { set_tier refused 'could not reach the authoritative Firstmate main branch'; return; }
   if ! fetch_out=$(run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" -C "$FIRSTMATE_PATH" fetch --quiet "$FIRSTMATE_REPO" main 2>&1); then
     set_tier refused "could not fetch the authoritative Firstmate main branch: $fetch_out"; return
   fi
-  $GIT_BIN -C "$FIRSTMATE_PATH" cat-file -e "$pinned^{commit}" 2>/dev/null || { set_tier refused 'pin is absent after authoritative remote re-verification'; return; }
-  $GIT_BIN -C "$FIRSTMATE_PATH" merge-base --is-ancestor "$pinned" "$remote_head" 2>/dev/null || { set_tier refused 'pin is not contained in the authoritative Firstmate main branch'; return; }
-  $GIT_BIN -C "$FIRSTMATE_PATH" merge-base --is-ancestor HEAD "$pinned" 2>/dev/null || { set_tier skipped 'pin is not a clean fast-forward from local HEAD'; return; }
+  fetched_remote=$($GIT_BIN -C "$FIRSTMATE_PATH" rev-parse FETCH_HEAD 2>/dev/null || true)
+  [ "$fetched_remote" = "$remote_head" ] ||
+    { set_tier refused 'the authoritative Firstmate main branch moved during verification'; return; }
+  current=$($GIT_BIN -C "$FIRSTMATE_PATH" rev-parse HEAD 2>/dev/null || printf unknown)
+  firstmate_compare "$pinned" "$current" "$remote_head" -C "$FIRSTMATE_PATH"
+  [ "$CMP_STATUS" = would_apply ] || { set_tier "$CMP_STATUS" "$CMP_DETAIL"; return; }
   detect_workers
   [ "$WG_STATUS" = clear ] || { set_tier deferred 'workers appeared during re-verification'; return; }
   [ "$($GIT_BIN -C "$FIRSTMATE_PATH" symbolic-ref --quiet --short HEAD 2>/dev/null || true)" = main ] || { set_tier skipped 'Firstmate branch changed during re-verification'; return; }

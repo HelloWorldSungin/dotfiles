@@ -191,7 +191,7 @@ firstmate_detail=$(printf '%s' "$json" | jq -r '.tiers.firstmate.detail')
   || fail 'a stripped PATH made the packaged updater reject its own well-formed commit pin'
 # awk is the only thing that turns `git ls-remote` output into the remote head;
 # without it the run stops one step earlier, at a different refusal.
-[ "$firstmate_detail" = 'pin is absent after authoritative remote re-verification' ] \
+[ "$firstmate_detail" = 'the exact pin is absent from the authoritative Firstmate main branch' ] \
   || fail "the packaged updater did not re-verify the authoritative remote: $firstmate_status - $firstmate_detail"
 quota_status=$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')
 quota_detail=$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .detail')
