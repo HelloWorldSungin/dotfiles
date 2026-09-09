@@ -54,3 +54,35 @@ It is a verbatim copy, so it does NOT auto-update with the ark-skills repo -
 re-copy the file when you want a newer version. It expects each vault repo to
 carry its own `vault/_meta/` OKF tooling (they already do); the skill is pure
 instructions.
+
+## GPT-5.6 long context (Sol and Terra)
+
+Both harnesses default GPT-5.6 to a 272,000-token window; each is opted in
+separately, and the two ceilings are **not** the same.
+
+| Harness | Mechanism | Effective window |
+|---------|-----------|------------------|
+| pi | `pi/models.json` → `~/.pi/agent/models.json`, `providers.openai-codex.modelOverrides` | **1,050,000** for `gpt-5.6-sol` and `gpt-5.6-terra` |
+| codex | global `model_context_window` in `~/.codex/config.toml` | **872,000** for every model |
+
+Pi gets OpenAI's full 1.05M long-context window. Codex does not: its
+0.153.4 catalog advertises `max_context_window = 872000` for Sol, Terra and
+Luna, and `models-manager` applies `configured.min(max_context_window)`, so a
+larger configured value is silently clamped. 872,000 is therefore the real
+effective ceiling and the value this repo commits - do not read Codex as being
+at parity with pi.
+
+Two consequences of Codex's key being global rather than per-model: it also
+raises Luna, and it is the only mechanism Codex supports. Pi's overrides are
+per-model, so Luna stays at 272,000 there.
+
+Requests above 272K total input tokens bill at GPT-5.6's long-context rates for
+the whole request. Neither override changes the selected model or effort.
+
+**Activation:** run `bash ~/dotfiles/rebuild.sh`. `~/.pi/agent/models.json` is a
+live symlink into the repo, and `~/.codex/config.toml` is patched by a
+home-manager activation step (`bin/codex-set-context-window`) that merges only
+that one key - the file stays machine-owned, so project trust entries, hook
+approvals and TUI preferences are untouched, and repeat rebuilds are a no-op.
+Both tools read their config at startup, so **start a new session** to pick the
+change up; no model reselection is needed.

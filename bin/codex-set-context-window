@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Own exactly one setting in the machine-maintained ~/.codex/config.toml:
+# the global `model_context_window`.
+#
+# Codex writes that file itself (project trust entries, hook approvals, TUI
+# preferences), so it must never be replaced or symlinked to a repo file.
+# This performs a narrowly scoped, atomic, idempotent merge of the single
+# owned key and leaves every other line byte-identical.
+#
+# Placement rule: TOML top-level keys must appear before the first table
+# header, so the key is written into (or prepended to) the pre-table region.
+set -euo pipefail
+
+KEY="model_context_window"
+VALUE="${CODEX_MODEL_CONTEXT_WINDOW:-872000}"
+CONFIG="${CODEX_CONFIG_FILE:-${HOME}/.codex/config.toml}"
+
+mkdir -p "$(dirname "$CONFIG")"
+[ -f "$CONFIG" ] || : > "$CONFIG"
+
+new=$(awk -v key="$KEY" -v value="$VALUE" '
+  BEGIN { in_top = 1; done = 0; last_top = 0; n = 0 }
+  {
+    n = NR
+    line[NR] = $0
+    if (in_top && $0 ~ /^[[:space:]]*\[/) in_top = 0
+    if (in_top) {
+      if ($0 ~ "^[[:space:]]*" key "[[:space:]]*=") {
+        line[NR] = key " = " value
+        done = 1
+      }
+      if ($0 ~ /[^[:space:]]/) last_top = NR
+    }
+  }
+  END {
+    if (!done && last_top == 0) print key " = " value
+    for (i = 1; i <= n; i++) {
+      print line[i]
+      if (!done && i == last_top) print key " = " value
+    }
+  }
+' "$CONFIG")
+
+# Idempotence: never rewrite (and never churn the mtime) when nothing changed.
+if printf '%s\n' "$new" | cmp -s - "$CONFIG"; then
+  exit 0
+fi
+
+tmp=$(mktemp "${CONFIG}.XXXXXX")
+trap 'rm -f "$tmp"' EXIT
+printf '%s\n' "$new" > "$tmp"
+chmod --reference="$CONFIG" "$tmp" 2>/dev/null || true
+mv -f "$tmp" "$CONFIG"
+trap - EXIT
