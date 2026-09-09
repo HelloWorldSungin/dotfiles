@@ -26,9 +26,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The read-only checker lives in `bin/dev-tools-check-updates` and its
   deterministic self-test is in `tests/`. `home/dev-tools.nix` is the single
   owner of every packaged dev-tool derivation (pin artifacts, checker, pinned
-  installer, cspend wrapper, guarded updater); `common.nix` and
-  `sungin-ct110.nix` consume them through the `devTools` module argument, so
-  the host module owns only its timer and zsh startup wiring.
+  installer, cspend wrapper, codex context-window helper, guarded updater) and
+  of the one closure-input attrset they select from, which also generates the
+  store-path manifest the checker measures closure-only packages with;
+  `common.nix` and `sungin-ct110.nix` consume them through the `devTools` module
+  argument, so the host module owns only its timer and zsh startup wiring.
 - `bin/dev-tools-apply-updates` is the guarded, opt-in companion that applies only
   the two safe tiers the checker tracks (Firstmate exact fast-forward plus six
   allowlisted npm-global tools); it delegates detection to the checker, independently

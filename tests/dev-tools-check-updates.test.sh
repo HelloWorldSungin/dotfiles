@@ -211,6 +211,39 @@ for row in "${NIX_PACKAGE_PINS[@]}"; do
   IFS='|' read -r _package command_name _version <<<"$row"
   [ "$command_name" = git ] || [ "$command_name" = curl ] || ln -sf tool-version "$FAKEBIN/$command_name"
 done
+# The closure manifest home/dev-tools.nix generates: name -> exact store path.
+# Its stubs answer with the pinned version while the ambient stubs for the same
+# commands answer with a wrong one, so which source the checker measured is
+# observable in the result rather than assumed. The ambient stub replaces the
+# shared `tool-version` symlink instead of writing through it, and git and curl
+# keep the suite's own behavioural stubs, which the checker is pointed at.
+BASH_BIN=$(command -v bash) || fail 'missing test dependency: bash'
+CLOSURE_DIR="$FIXTURE/closure"
+CLOSURE_FILE="$FIXTURE/dev-tools-closure.json"
+CLOSURE_NAMES=(coreutils curl diffutils gawk git gnugrep gnused gnutar gzip jq nodejs_22)
+closure_entries='[]'
+for closure_name in "${CLOSURE_NAMES[@]}"; do
+  for row in "${NIX_PACKAGE_PINS[@]}"; do
+    IFS='|' read -r package command_name version <<<"$row"
+    [ "$package" = "$closure_name" ] || continue
+    mkdir -p "$CLOSURE_DIR/$package/bin"
+    printf '#!%s\nprintf "%s (closure) %s\\n"\n' "$BASH_BIN" "$command_name" "$version" \
+      >"$CLOSURE_DIR/$package/bin/$command_name"
+    chmod +x "$CLOSURE_DIR/$package/bin/$command_name"
+    closure_entries=$(jq -cn --argjson a "$closure_entries" --arg n "$package" --arg v "$version" \
+      --arg p "$CLOSURE_DIR/$package" '$a + [{name:$n,version:$v,store_path:$p}]')
+    case "$command_name" in
+      git|curl) ;;
+      *)
+        rm -f "$FAKEBIN/$command_name"
+        printf '#!%s\nprintf "%s 0.0.1\\n"\n' "$BASH_BIN" "$command_name" >"$FAKEBIN/$command_name"
+        chmod +x "$FAKEBIN/$command_name"
+        ;;
+    esac
+  done
+done
+printf '%s\n' "$closure_entries" >"$CLOSURE_FILE"
+
 ln -sf tool-version "$FAKEBIN/agy"
 ln -sf tool-version "$FAKEBIN/cursor-agent"
 ln -sf tool-version "$FAKEBIN/nix"
@@ -242,6 +275,7 @@ acp_launch_version() {
 run_checker() {
   env HOME="$FIXTURE/home" PATH="${TEST_PATH:-$PATH}" DEV_TOOLS_PINS_FILE="$PINS" DEV_TOOLS_NVIM_LOCK_FILE="$ROOT/config/nvim/lazy-lock.json" \
     DEV_TOOLS_FLAKE_LOCK_FILE="${TEST_FLAKE_LOCK_FILE:-$ROOT/flake.lock}" \
+    DEV_TOOLS_CLOSURE_FILE="${TEST_CLOSURE_FILE-$CLOSURE_FILE}" \
     DEV_TOOLS_NVIM_DATA_HOME="$FIXTURE/nvim" DEV_TOOLS_UPDATE_BIN_DIR="$FAKEBIN" DEV_TOOLS_UPDATE_NPM_BIN="$FAKEBIN/npm" \
     DEV_TOOLS_UPDATE_CURL_BIN="$FAKEBIN/curl" DEV_TOOLS_UPDATE_GIT_BIN="$FAKEBIN/git" DEV_TOOLS_HEALTH_PRINTENV_BIN="$FAKEBIN/printenv" \
     DEV_TOOLS_UPDATE_CACHE_PATH="$FIXTURE/cache.json" DEV_TOOLS_UPDATE_NOW_EPOCH=1000 TEST_PINS="$PINS" TEST_CALL_LOG="$CALL_LOG" \
@@ -368,5 +402,32 @@ if printf '%s\n' "$packaged_help" | grep -Eq '/nix/store/|env bash'; then
 fi
 case "$packaged_help" in *'Usage: dev-tools-check-updates [--json]'*) : ;; *) fail 'the packaged --help omits the usage line' ;; esac
 pass 'the packaged --help prints only the operator contract'
+
+# ------------------- closure-only packages are measured from the closure
+
+# These reach the operator only through a wrapper's own PATH, so the audit has
+# to read the store path the generated manifest names. The ambient stubs above
+# answer 0.0.1 for the same commands, so a PATH-based measurement shows up here.
+json=$(run_checker --json --force --no-cache)
+for closure_name in coreutils diffutils gawk gnugrep gnused gnutar gzip; do
+  for row in "${NIX_PACKAGE_PINS[@]}"; do
+    IFS='|' read -r package _command_name version <<<"$row"
+    [ "$package" = "$closure_name" ] || continue
+    entry=$(printf '%s' "$json" | jq -ce --arg n "nix:$package" '.tools[] | select(.name == $n)') \
+      || fail "the inventory omits nix:$package"
+    [ "$(printf '%s' "$entry" | jq -r '.current')" = "$version" ] \
+      || fail "nix:$package was measured as $(printf '%s' "$entry" | jq -r '.current') instead of the closure's $version"
+    [ "$(printf '%s' "$entry" | jq -r '.status')" = up_to_date ] \
+      || fail "nix:$package is not up_to_date against its own closure"
+  done
+done
+pass 'closure-only Nix packages are measured from the exact store path, not the ambient PATH'
+
+# Without the manifest there is no closure to measure, so the reading falls back
+# to the ambient command - which is exactly why the manifest exists.
+json=$(TEST_CLOSURE_FILE='' run_checker --json --force --no-cache)
+[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name == "nix:gzip") | .current')" = 0.0.1 ] \
+  || fail 'the no-manifest control did not fall back to the ambient stub'
+pass 'the closure manifest, not the ambient PATH, is what the measurement comes from'
 
 printf '\nall dev-tools-check-updates tests passed\n'

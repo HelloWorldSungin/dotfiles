@@ -87,7 +87,17 @@ deprecated 25.11 channel. The lock file carries the content hashes.
 | gnutar | 1.35 | gzip | 1.14 |
 
 The table includes user-facing packages and runtime inputs of the
-repository-owned tool scripts. Home Manager modules also own home-manager,
+repository-owned tool scripts. `home/dev-tools.nix` owns one closure-input
+attrset that every wrapper selects from, and generates a measurement manifest
+from that same attrset mapping each name to the exact store path Home Manager
+materialized. The checker measures those rows by running the version command out
+of that store path. Most of them - coreutils, curl, gawk, gnugrep, gnused,
+diffutils, gnutar, gzip - reach the operator only through a wrapper's own PATH,
+so resolving them with `command -v` would report an unrelated system build, or
+none at all, and label the pinned closure as drifted. A run without the manifest
+(the repository checkout rather than the packaged wrapper) has no closure to
+audit and reports those rows as `unknown` rather than measuring the wrong
+binary. Home Manager modules also own home-manager,
 Neovim, zsh, Starship, fzf, and Git. Neovim's fourteen plugin commits remain
 independently exact in `config/nvim/lazy-lock.json`; the initial lazy.nvim clone
 uses the exact v11.17.5 GA tag instead of the moving `stable` alias, and the lock

@@ -3,11 +3,6 @@
 let
   dotfiles = "${config.home.homeDirectory}/dotfiles";
   link = path: config.lib.file.mkOutOfStoreSymlink "${dotfiles}/${path}";
-  codexSetContextWindow = pkgs.writeShellApplication {
-    name = "codex-set-context-window";
-    text = builtins.readFile ../bin/codex-set-context-window;
-    runtimeInputs = with pkgs; [ coreutils diffutils gawk ];
-  };
 in
 {
   imports = [ ./dev-tools.nix ];
@@ -93,7 +88,7 @@ in
   # an atomic idempotent merge rather than taking over the file.
   home.activation.codexContextWindow =
     lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      $DRY_RUN_CMD ${codexSetContextWindow}/bin/codex-set-context-window
+      $DRY_RUN_CMD ${devTools.codexSetContextWindow}/bin/codex-set-context-window
     '';
 
   # ------------------------------------------------------------------ zsh

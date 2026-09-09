@@ -559,7 +559,7 @@ apply_npm() {
     if ! receipt_put "$entry"; then
       item=$(tier_json refused 'could not write the mutation receipt; refusing to mutate' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')"); refused=1
     elif run_timed "$TIMEOUT_SECONDS" env NPM_CONFIG_PREFIX="$NPM_PREFIX" "$NPM_BIN" install -g "$package@$pinned" >/dev/null 2>&1; then
-      installed=$(env NO_UPDATE_NOTIFIER=1 "$NPM_PREFIX/bin/$command_name" --version 2>/dev/null | grep -Eo '[0-9]+(\.[0-9]+){2,3}' | head -1 || true)
+      installed=$(observe_npm "$command_name")
       if [ "$installed" = "$pinned" ]; then
         receipt_settle "$entry" applied
         item=$(tier_json applied "installed $package@$pinned" "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')")
@@ -686,7 +686,7 @@ rollback_firstmate() {
 }
 
 rollback_npm() {
-  local entry=$1 command_name package prior target source installed
+  local entry=$1 command_name package prior target source installed refusal
   command_name=$(printf '%s' "$entry" | jq -r '.command // ""')
   package=$(printf '%s' "$entry" | jq -r '.package // ""')
   prior=$(printf '%s' "$entry" | jq -r '.prior')
@@ -700,7 +700,8 @@ rollback_npm() {
   detect_workers
   [ "$WG_STATUS" = clear ] || { set_tier refused 'a Firstmate worker lane appeared during the preflight'; return; }
   [ "$(observe_npm "$command_name")" = "$target" ] || { set_tier refused 'the installed version left the recorded applied version during the preflight'; return; }
-  [ -z "$(preflight_npm_refusal "$entry")" ] || { set_tier refused 'the prior artifact evidence changed during the preflight'; return; }
+  refusal=$(preflight_npm_refusal "$entry")
+  [ -z "$refusal" ] || { set_tier refused "$refusal"; return; }
   if run_timed "$TIMEOUT_SECONDS" env NPM_CONFIG_PREFIX="$NPM_PREFIX" "$NPM_BIN" install -g "$source" >/dev/null 2>&1; then
     installed=$(observe_npm "$command_name")
     if [ "$installed" = "$prior" ]; then
@@ -894,8 +895,11 @@ else
       ;;
     planned) printf '%s' "$RESULT" | jq -r '"receipt: " + .receipt.path + " (planned; nothing written)"' ;;
     unusable)
-      printf '%s' "$RESULT" | jq -r '"receipt: " + .receipt.path + " (unusable; the receipt could not be written there)",
-        (.tiers | to_entries[] | select(.value.status == "refused") | "  " + .key + " is refused for that reason, not for its own state")'
+      printf '%s' "$RESULT" | jq -r --arg cause 'could not write the mutation receipt; refusing to mutate' \
+        '"receipt: " + .receipt.path + " (unusable; the receipt could not be written there)",
+        (.tiers | to_entries[]
+          | select(.value.detail == $cause or ([.value.packages // [] | .[] | select(.detail == $cause)] | length > 0))
+          | "  " + .key + " is refused for that reason, not for its own state")'
       ;;
   esac
   [ "$(receipt_status)" = incomplete ] &&

@@ -92,10 +92,15 @@ SCRATCH="$TMP_ROOT/repo"
 mkdir -p "$SCRATCH"
 tar -C "$ROOT" --exclude=./.git -cf - . | tar -C "$SCRATCH" -xf -
 # Adds one package to the checker's declared runtime closure and nothing else.
-CHECKER_ONLY_INPUT='^      curl$'
-grep -cE "$CHECKER_ONLY_INPUT" "$SCRATCH/home/dev-tools.nix" | grep -qx 1 \
+CHECKER_ONLY_INPUT='"coreutils" "curl" "gawk" "git" "gnugrep" "gnused" "jq" "nodejs_22"'
+[ "$(grep -cF "$CHECKER_ONLY_INPUT" "$SCRATCH/home/dev-tools.nix")" -eq 1 ] \
   || fail 'the mutation fixture no longer targets exactly the checker closure'
-sed -i -E "s|$CHECKER_ONLY_INPUT|      curl\n      gnutar|" "$SCRATCH/home/dev-tools.nix"
+python3 - "$SCRATCH/home/dev-tools.nix" "$CHECKER_ONLY_INPUT" <<'MUTATE'
+import sys
+path, anchor = sys.argv[1], sys.argv[2]
+text = open(path).read()
+open(path, 'w').write(text.replace(anchor, anchor + ' "gnutar"', 1))
+MUTATE
 git -C "$SCRATCH" init -q
 git -C "$SCRATCH" add -A
 git -C "$SCRATCH" -c user.email=tests@example.invalid -c user.name=tests commit -qm 'packaging mutation'
@@ -259,5 +264,50 @@ for wrapper in dev-tools-check-updates dev-tools-install-pinned claude-spend-pin
   done <<<"$(printf '%s' "$path_line" | tr ':' '\n')"
 done
 pass 'every runtime input of every packaged wrapper has a pin inventory row'
+
+# ------------------------- the generated closure manifest is the measurement
+
+# home/dev-tools.nix owns one closure-input attrset; the manifest it generates is
+# what the checker measures closure-only packages with, so it has to name exactly
+# those packages at exactly the store paths the wrappers carry.
+# Reached the way the checker reaches it: the path its own wrapper exports. The
+# manifest is a generated artifact with an owned schema, so reading it back is
+# reading the contract the checker consumes.
+BUILT_CHECKER=$(nix build --no-link --print-out-paths --impure --expr "
+  let config = (builtins.getFlake \"$ROOT\").$CONFIG;
+  in builtins.head (builtins.filter (p: (p.name or \"\") == \"dev-tools-check-updates\") config.home.packages)") \
+  || fail 'the packaged checker did not build'
+MANIFEST_PATH=$(grep -m1 '^export DEV_TOOLS_CLOSURE_FILE=' "$BUILT_CHECKER/bin/dev-tools-check-updates" | cut -d= -f2) \
+  || fail 'the packaged checker does not export a closure measurement manifest'
+[ -r "$MANIFEST_PATH" ] || fail "the exported closure manifest is not readable: $MANIFEST_PATH"
+MANIFEST=$(cat "$MANIFEST_PATH")
+printf '%s' "$MANIFEST" | jq -e 'type == "array" and length > 0' >/dev/null \
+  || fail 'the closure manifest is not a non-empty array'
+while IFS= read -r manifest_name; do
+  [ -n "$manifest_name" ] || continue
+  manifest_path=$(printf '%s' "$MANIFEST" | jq -r --arg n "$manifest_name" '.[] | select(.name == $n) | .store_path')
+  evaluated=$(nix eval --raw "$ROOT#homeConfigurations.\"sungin@ct110\".pkgs" \
+    --apply "pkgs: (builtins.getAttr \"$manifest_name\" pkgs).outPath") \
+    || fail "the closure manifest names $manifest_name, which the pinned nixpkgs does not have"
+  [ "$manifest_path" = "$evaluated" ] \
+    || fail "the closure manifest points $manifest_name at $manifest_path instead of $evaluated"
+  printf '%s\n' "$PINNED_PATHS" | grep -Fqx "$manifest_path" \
+    || fail "the closure manifest names $manifest_name but no NIX_PACKAGE_PINS row does"
+done <<<"$(printf '%s' "$MANIFEST" | jq -r '.[].name')"
+
+# Nothing a wrapper carries may be missing from it, or the audit has no way to
+# measure that package without falling back to the ambient PATH.
+for wrapper in dev-tools-check-updates dev-tools-install-pinned claude-spend-pinned dev-tools-apply-updates; do
+  text=$(wrapper_text "$wrapper") || fail "the generation does not ship exactly one $wrapper"
+  path_line=$(grep -m1 '^export PATH=' <<<"$text") || fail "$wrapper declares no runtime closure"
+  while IFS= read -r entry; do
+    case "$entry" in /nix/store/*) : ;; *) continue ;; esac
+    store_path=${entry%/bin}
+    case "$store_path" in *-dev-tools-check-updates|*-dev-tools-versions.sh) continue ;; esac
+    printf '%s' "$MANIFEST" | jq -e --arg p "$store_path" 'any(.[]; .store_path == $p)' >/dev/null \
+      || fail "$wrapper carries ${store_path##*/} but the closure manifest does not name it"
+  done <<<"$(printf '%s' "${path_line#export PATH=\"}" | tr ':' '\n')"
+done
+pass 'the generated closure manifest names every wrapper input at its exact store path'
 
 printf '\nall dev-tools nix packaging tests passed\n'

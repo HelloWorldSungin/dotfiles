@@ -121,6 +121,11 @@ if [ "\$1" = view ]; then
   done
   if [ -f "\$TEST_REGISTRY/\$package@\$version" ]; then
     jq -cn --arg v "\$version" --arg i "\$(cat "\$TEST_REGISTRY/\$package@\$version")" '{version:\$v,"dist.integrity":\$i}'
+    # Retires the version after this answer, so the tier preflight sees it and
+    # the per-tool re-verification that follows does not.
+    if [ "\${TEST_RETIRE_AFTER_VIEW:-}" = "\$package@\$version" ]; then
+      rm -f "\$TEST_REGISTRY/\$package@\$version"
+    fi
     exit 0
   fi
   exit 1
@@ -200,6 +205,7 @@ run_tool() {
     TEST_PRE_LOG="$PRE_LOG" TEST_LIFECYCLE_LOG="$LIFECYCLE_LOG" TEST_REGISTRY="$REGISTRY" \
     TEST_BREAK_RECEIPT_DIR="${TEST_BREAK_RECEIPT_DIR:-}" \
     TEST_QUOTA_CURRENT="${TEST_QUOTA_CURRENT:-}" \
+    TEST_RETIRE_AFTER_VIEW="${TEST_RETIRE_AFTER_VIEW:-}" \
     DEV_TOOLS_APPLY_PRIOR_ARTIFACT_DIR="${TEST_ARTIFACT_DIR:-}" \
     TEST_RECEIPT_DIR="${TEST_RECEIPT_DIR:-$RECEIPTS}" TEST_BAD_INSTALL="${TEST_BAD_INSTALL:-0}" \
     TEST_BREAK_RECEIPT="${TEST_BREAK_RECEIPT:-}" \
@@ -951,5 +957,50 @@ printf '%s\n' "$human" | grep -Fq '(unusable; the receipt could not be written t
 printf '%s\n' "$human" | grep -Fq 'npm_global is refused for that reason, not for its own state' \
   || fail 'human dry-run did not tie the refused tier to the unusable receipt'
 pass 'a receipt location the apply could not write is refused by the preview too, in both output modes'
+
+# --------------------------------- an unusable receipt claims only its own tiers
+
+# The receipt is unwritable and the npm tier is refused for a different reason
+# entirely, so the receipt line must not claim credit for that refusal.
+# Firstmate is already at its pin, so it never reaches the receipt gate; only the
+# npm tier refuses, and for missing prior evidence rather than for the receipt.
+git -C "$CHECKOUT" reset -q --hard "$TARGET_COMMIT"
+fake_install "$QUOTA_COMMAND" "$QUOTA_PRIOR"
+fake_install "$GH_COMMAND" "$GH_VERSION"
+unpublish "quota-axi@$QUOTA_PRIOR"
+rm -rf "$RECEIPTS"; mkdir -p "$RECEIPTS"
+set +e
+human=$(TEST_RECEIPT_DIR="$BLOCKER/receipts" run_tool --dry-run)
+json=$(TEST_RECEIPT_DIR="$BLOCKER/receipts" run_tool --dry-run --json)
+set -e
+publish "quota-axi@$QUOTA_PRIOR" "$QUOTA_PRIOR_INTEGRITY"
+[ "$(printf '%s' "$json" | jq -r '.tiers.firstmate.status')" = up_to_date ] \
+  || fail 'the fixture did not leave Firstmate outside the receipt gate'
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.status')" = refused ] \
+  || fail 'the fixture did not refuse the npm tier for its own reason'
+printf '%s\n' "$human" | grep -Fq '(unusable; the receipt could not be written there)' \
+  || fail 'the unusable receipt was not reported'
+printf '%s\n' "$human" | grep -Fq 'is refused for that reason, not for its own state' \
+  && fail 'the receipt claimed a refusal that was caused by something else'
+pass 'an unusable receipt only claims the tiers it actually refused'
+
+# --------------------------------- a reversal reports its own refusal reason
+
+# The prior version is retired between the tier preflight and the per-tool
+# re-verification, so the reason the operator sees has to be the real one.
+reset_to_prior
+: >"$NPM_LOG"
+json=$(run_tool --json)
+RETIRE_RECEIPT=$(printf '%s' "$json" | jq -r '.receipt.path')
+converged || fail 'the fixture apply did not converge'
+set +e
+json=$(TEST_RETIRE_AFTER_VIEW="quota-axi@$QUOTA_PRIOR" run_rollback "$RETIRE_RECEIPT" --attended --json)
+rc=$?
+set -e
+publish "quota-axi@$QUOTA_PRIOR" "$QUOTA_PRIOR_INTEGRITY"
+[ "$rc" -ne 0 ] || fail 'a prior version retired mid-rollback exited successfully'
+[ "$(tool_detail "$json" quota-axi)" = "the recorded prior version $QUOTA_PRIOR is no longer available" ] \
+  || fail "the reversal substituted a reason for the one its own preflight produced: $(tool_detail "$json" quota-axi)"
+pass 'a reversal reports the refusal reason its own re-verification produced'
 
 printf '\nall dev-tools-apply-updates receipt and rollback tests passed\n'
