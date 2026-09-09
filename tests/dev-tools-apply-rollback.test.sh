@@ -139,6 +139,9 @@ if [ "\$1" = install ]; then
     mkdir -p "\$NPM_CONFIG_PREFIX/bin"
     printf '#!$BASH_BIN\nprintf "%s %s\\\\n"\n' "\$command_name" "\$reported" >"\$NPM_CONFIG_PREFIX/bin/\$command_name"
     chmod +x "\$NPM_CONFIG_PREFIX/bin/\$command_name"
+    # The install succeeded; now make the receipt unwritable so the settle that
+    # follows this real mutation fails the way a full filesystem would.
+    if [ "\${TEST_BREAK_RECEIPT:-}" = "\$package" ]; then rm -rf "\$TEST_RECEIPT_DIR"; : >"\$TEST_RECEIPT_DIR"; fi
     exit 0
   done
 fi
@@ -181,6 +184,7 @@ run_tool() {
     TEST_PINS="$PINS" TEST_PREFIX="$PREFIX" TEST_FIRSTMATE="$CHECKOUT" TEST_NPM_LOG="$NPM_LOG" \
     TEST_PRE_LOG="$PRE_LOG" TEST_LIFECYCLE_LOG="$LIFECYCLE_LOG" TEST_REGISTRY="$REGISTRY" \
     TEST_RECEIPT_DIR="${TEST_RECEIPT_DIR:-$RECEIPTS}" TEST_BAD_INSTALL="${TEST_BAD_INSTALL:-0}" \
+    TEST_BREAK_RECEIPT="${TEST_BREAK_RECEIPT:-}" \
     "$APPLY" "$@"
 }
 run_rollback() { run_tool --rollback "$1" "${@:2}"; }
@@ -270,6 +274,8 @@ done
   || fail 'the preflight did not report the observed state'
 converged || fail 'the rollback preview mutated a tool'
 no_install_ran || fail 'the rollback preview installed a package'
+[ "$(jq -r '.tiers.npm_global.status' "$RECEIPT")" = applied ] \
+  || fail 'a check-only rollback relabelled a tier that nothing happened to'
 pass 'an unattended rollback reconciles state at the recorded target and performs nothing'
 
 # --------------------------------- an in-flight lane refuses both tiers
@@ -392,6 +398,8 @@ settled=$(jq -ce '.tools[] | select(.name=="quota-axi")' "$RECEIPT")
 [ "$(printf '%s' "$settled" | jq -r '.prior')" = "$QUOTA_PRIOR" ] || fail 'the receipt rewrote the recorded prior'
 [ "$(printf '%s' "$settled" | jq -r '.target')" = "$QUOTA_VERSION" ] || fail 'the receipt rewrote the recorded target'
 [ "$(printf '%s' "$settled" | jq -r '.prior_evidence.integrity')" = "$QUOTA_PRIOR_INTEGRITY" ] || fail 'the receipt rewrote the recorded evidence'
+[ "$(jq -r '.tiers.firstmate.status' "$RECEIPT")" = rolled_back ] || fail 'the receipt kept an apply-era Firstmate tier status after the reversal'
+[ "$(jq -r '.tiers.npm_global.status' "$RECEIPT")" = rolled_back ] || fail 'the receipt kept an apply-era npm tier status after the reversal'
 pass 'an attended rollback restores exactly the recorded prior state and appends the outcome'
 
 # --------------------------------- a settled receipt has nothing left to do
@@ -420,6 +428,8 @@ no_install_ran || fail 'retrying an interrupted rollback installed a package'
   || fail 'the retry did not settle the reconciliation'
 [ "$(jq -r '.tools[] | select(.name=="quota-axi") | .prior' "$INTERRUPTED")" = "$QUOTA_PRIOR" ] \
   || fail 'the retry rewrote the recorded prior'
+[ "$(jq -r '.tiers.npm_global.status' "$INTERRUPTED")" = reconciled_at_prior ] \
+  || fail 'the receipt kept an apply-era tier status after reconciliation'
 pass 'retrying a rollback whose settle was interrupted reconciles instead of mutating'
 
 # --------------------------------- a crash before the mutation is reconciled
@@ -581,5 +591,43 @@ printf '{"schema_version":99,"tools":[]}\n' >"$TMP_ROOT/foreign.json"
 assert_receipt_refused 'a foreign receipt document' "$TMP_ROOT/foreign.json"
 assert_receipt_refused 'an absent receipt' "$TMP_ROOT/does-not-exist.json"
 pass 'a missing, unparseable, or foreign receipt is refused before any rollback'
+
+# --------------------------------- an unrecordable outcome is reported
+
+# The stub destroys the receipt directory during `npm install -g`, so the
+# mutation succeeds but the settle that follows it cannot be written - the same
+# shape as a full disk or a directory that lost write permission mid-run.
+reset_to_prior() {
+  git -C "$CHECKOUT" reset -q --hard "$PRIOR_COMMIT"
+  fake_install "$QUOTA_COMMAND" "$QUOTA_PRIOR"
+  fake_install "$GH_COMMAND" "$GH_PRIOR"
+  rm -rf "$RECEIPTS"
+  mkdir -p "$RECEIPTS"
+}
+
+reset_to_prior
+set +e
+json=$(TEST_BREAK_RECEIPT=quota-axi run_tool --json)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail 'an unrecordable outcome exited successfully'
+[ "$(printf '%s' "$json" | jq -r '.receipt.status')" = incomplete ] || fail 'an unrecordable outcome was not reported as incomplete'
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.status')" = applied ] \
+  || fail 'the test fixture did not actually converge the tool it failed to record'
+[ "$(tool_version "$QUOTA_COMMAND")" = "$QUOTA_VERSION" ] || fail 'the fixture did not really mutate the tool'
+
+reset_to_prior
+set +e
+human=$(TEST_BREAK_RECEIPT=quota-axi run_tool 2>"$TMP_ROOT/incomplete.err")
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail 'an unrecordable outcome exited successfully in human mode'
+printf '%s\n' "$human" | grep -Eq 'receipt: .* \(incomplete\)' || fail 'human output did not report the incomplete receipt'
+printf '%s\n' "$human" | grep -Fq 'rollback: attended only, never automatic, never restarts a service' \
+  || fail 'human output dropped the rollback preconditions for an incomplete receipt'
+grep -q 'receipt is incomplete' "$TMP_ROOT/incomplete.err" || fail 'human output did not warn about the incomplete receipt'
+rm -f "$RECEIPTS"
+mkdir -p "$RECEIPTS"
+pass 'an outcome that cannot be recorded is reported as incomplete and exits non-zero'
 
 printf '\nall dev-tools-apply-updates receipt and rollback tests passed\n'

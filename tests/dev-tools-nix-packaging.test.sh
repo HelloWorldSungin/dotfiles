@@ -79,7 +79,7 @@ esac
 assert_single_checker 'the login shell startup invocation' "$RC" "$CHECKER"
 
 UPDATER=$(updater_wrapper "$ROOT")
-UPDATER_PATH_EXPORT=$(printf '%s\n' "$UPDATER" | grep -m1 '^export PATH=') \
+UPDATER_PATH_EXPORT=$(grep -m1 '^export PATH=' <<<"$UPDATER") \
   || fail 'the packaged updater declares no runtime closure'
 assert_single_checker "the guarded updater's runtime closure" "$UPDATER_PATH_EXPORT" "$CHECKER"
 pass 'the interactive checker, timer, login shell, and updater share one derivation'
@@ -105,8 +105,9 @@ MUTATED_CHECKER=$(interactive_checker "$SCRATCH") \
 [ "$MUTATED_CHECKER" != "$CHECKER" ] || fail 'the mutation fixture did not change the checker derivation'
 assert_single_checker 'the mutated weekly timer command' "$(timer_command "$SCRATCH")" "$MUTATED_CHECKER"
 assert_single_checker 'the mutated login shell startup invocation' "$(login_shell_rc "$SCRATCH")" "$MUTATED_CHECKER"
+MUTATED_UPDATER=$(updater_wrapper "$SCRATCH")
 assert_single_checker "the mutated updater's runtime closure" \
-  "$(updater_wrapper "$SCRATCH" | grep -m1 '^export PATH=')" "$MUTATED_CHECKER"
+  "$(grep -m1 '^export PATH=' <<<"$MUTATED_UPDATER")" "$MUTATED_CHECKER"
 pass 'changing the shared definition moves every consumer to the same new derivation'
 
 # ------------------------------- the packaged updater is hermetic

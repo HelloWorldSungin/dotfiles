@@ -15,7 +15,9 @@
 # under $DEV_TOOLS_APPLY_RECEIPT_DIR. It records each affected tool, its exact
 # prior commit or version, its exact target, the independently verified remote
 # or registry evidence for both, and per-tool and per-tier completion status. A
-# receipt that cannot be written refuses the mutation it would have covered.
+# receipt that cannot be written refuses the mutation it would have covered, and
+# one that could not record every outcome is reported as incomplete and exits
+# non-zero even when the tools themselves converged.
 # Partial apply is expected and recorded: each tool carries its own completion
 # status, so a run that converges one package and refuses another leaves an
 # accurate per-tool record while the tier reports the worst case. Dry-run names
@@ -40,10 +42,12 @@
 # Reversal is then `git reset --hard <prior commit>` - never a force, and never
 # a discard of local changes - and an npm reinstall of only the exact recorded
 # prior version, each re-confirming state and evidence immediately beforehand.
-# Reconciliation appends the observed state and outcome to the receipt; recorded
-# prior, target, and evidence are never rewritten to match the machine. A
-# reversal whose receipt append fails is reported as a stale receipt and exits
-# non-zero, so stale evidence is never mistaken for completion.
+# Reconciliation appends the observed state and outcome to the receipt and
+# re-derives each tier's completion from its own tool entries, so no apply-era
+# tier status outlives the tools it described; recorded prior, target, and
+# evidence are never rewritten to match the machine. A reversal whose receipt
+# append fails is reported as a stale receipt and exits non-zero, so stale
+# evidence is never mistaken for completion.
 #
 # Usage: dev-tools-apply-updates [--dry-run] [--json]
 #        dev-tools-apply-updates --rollback <receipt> [--attended] [--json]
@@ -121,6 +125,7 @@ tier_json() {
 # subshell copy.
 TIER=
 set_tier() { TIER=$(tier_json "$@"); }
+RECEIPT_TOUCHED=0
 PLAN='[]'
 UNRECONCILABLE_TIERS=' '
 
@@ -378,9 +383,24 @@ apply_npm() {
 
 receipt_reconcile() {
   local entry=$1 observed=$2 reconciliation=$3 status=$4
+  RECEIPT_TOUCHED=1
   receipt_put "$(printf '%s' "$entry" | jq -c --arg o "$observed" --arg r "$reconciliation" --arg s "$status" \
     --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '. + {status:$s,observed:$o,reconciliation:$r,reconciled_at:$at}')" || RECEIPT_STALE=1
+}
+
+# Per-tier completion is derived from the receipt's own settled tool entries, so
+# a tier is only ever relabelled by what actually happened to the tools in it.
+# The worst outcome wins, which keeps a partly reversed tier honest.
+receipt_settle_tiers() {
+  RECEIPT_DOC=$(printf '%s' "$RECEIPT_DOC" | jq -c '
+    def rank: {"rollback_failed":0,"failed":1,"pending":2,"applied":3,"reconciled_at_prior":4,"rolled_back":5}[.] // 3;
+    reduce ["firstmate","npm_global"][] as $tier (.;
+      ((.tools // []) | map(select(.tier == $tier))) as $entries
+      | if ($entries | length) == 0 then .
+        else .tiers[$tier].status = ($entries | min_by(.status | rank) | .status)
+        end)') || { RECEIPT_STALE=1; return; }
+  receipt_replace || RECEIPT_STALE=1
 }
 
 observe_firstmate() {
@@ -574,6 +594,7 @@ rollback_main() {
       '{tier:$t,name:$n,prior:$prior,target:$target,observed:$o} + .')
     results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]')
   done <<<"$(printf '%s' "$PLAN" | jq -c '.[]')"
+  [ "$RECEIPT_TOUCHED" -eq 0 ] || receipt_settle_tiers
   if [ "$RECEIPT_STALE" -eq 1 ]; then receipt_state=stale; bad=1; else receipt_state=settled; fi
   RESULT=$(jq -cn --argjson attended "$ATTENDED" --arg path "$ROLLBACK_RECEIPT" --arg status "$WG_STATUS" \
     --argjson count "$WG_COUNT" --arg detail "$WG_DETAIL" --argjson tools "$results" \
@@ -637,12 +658,17 @@ else
   printf '%s' "$RESULT" | jq -r '"worker guard: " + .worker_guard.status, (.tiers | to_entries[] | .key + ": " + .value.status + " - " + .value.detail)'
   case "$(receipt_status)" in
     written|incomplete)
-      printf '%s' "$RESULT" | jq -r '"receipt: " + .receipt.path,
+      printf '%s' "$RESULT" | jq -r '"receipt: " + .receipt.path + " (" + .receipt.status + ")",
         "rollback: attended only, never automatic, never restarts a service - " + .receipt.rollback.command,
         (.receipt.rollback | to_entries[] | select(.key == "preflight" or .key == "firstmate" or .key == "npm_global") | .key as $scope | .value[] | "  " + $scope + ": " + .)'
       ;;
     planned) printf '%s' "$RESULT" | jq -r '"receipt: " + .receipt.path + " (planned; nothing written)"' ;;
   esac
+  [ "$(receipt_status)" = incomplete ] &&
+    printf 'receipt is incomplete: %s could not record every outcome, so a converged tool above may be missing from it; the rollback preconditions above still apply, and rerunning once the receipt is writable re-records it\n' "$RECEIPT_PATH" >&2
 fi
 
-printf '%s' "$RESULT" | jq -e '[.tiers[] | select(.status == "failed" or .status == "refused")] | length == 0' >/dev/null || exit 1
+EXIT_CODE=0
+printf '%s' "$RESULT" | jq -e '[.tiers[] | select(.status == "failed" or .status == "refused")] | length == 0' >/dev/null || EXIT_CODE=1
+[ "$(receipt_status)" = incomplete ] && EXIT_CODE=1
+exit "$EXIT_CODE"

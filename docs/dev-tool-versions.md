@@ -183,7 +183,10 @@ It records each affected tool, its exact prior commit or version, its exact
 target, the independently verified remote or registry evidence for both, and
 per-tool and per-tier completion status. A receipt that cannot be written
 refuses the mutation it would have covered, so nothing is ever changed without a
-record. Dry-run names the receipt it would write and writes nothing.
+record, and a receipt that could not record every outcome is reported as
+`receipt.status: incomplete` in both output modes and exits non-zero even when
+the tools themselves converged. Dry-run names the receipt it would write and
+writes nothing.
 
 Partial apply is expected and recorded rather than hidden. Each tool carries its
 own completion status, so a run that converges one package and fails or refuses
@@ -234,8 +237,10 @@ the receipt records. Each re-confirms observed state, the worker lane, and the
 prior artifact evidence immediately before mutating.
 
 Reconciliation appends the observed state and the outcome to the receipt, in
-place and mode 0600; the receipt's parent directory is the operator's and its
-mode is never changed. The recorded prior, target, and evidence fields are never
+place and mode 0600, and re-derives each tier's completion status from its own
+tool entries so no apply-era tier status outlives the tools it described; a
+partly reversed tier reports the worst outcome among them. The receipt's parent
+directory is the operator's and its mode is never changed. The recorded prior, target, and evidence fields are never
 rewritten to match the machine. A reversal whose append fails is reported as
 `receipt.status: stale` and exits non-zero even though the machine state was
 restored, so stale evidence is never mistaken for completion. Herdr, the shared

@@ -268,4 +268,13 @@ fi
 case "$packaged_help" in *'MUST NEVER install, update, invoke, reload, stop, or restart'*) : ;; *) fail 'the packaged --help omits the runtime-hosting safety boundary' ;; esac
 pass 'the packaged --help prints only the operator contract'
 
+# `tests/*.test.sh` is this repository's only test-discovery convention - there is
+# no runner script - so every match has to be directly invocable. A suite that
+# lost its executable bit is skipped or dies with exit 126 while the rest pass.
+for suite in "$ROOT"/tests/*.test.sh; do
+  [ -x "$suite" ] || fail "$(basename "$suite") is not directly executable, so tests/*.test.sh discovery cannot run it"
+  head -1 "$suite" | grep -q '^#!' || fail "$(basename "$suite") has no interpreter line for direct invocation"
+done
+pass 'every test suite in tests/ can be invoked directly'
+
 printf '\nall dev-tools-apply-updates tests passed\n'
