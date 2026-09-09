@@ -174,7 +174,8 @@ Bootstrap invokes it after the exact Nix and Home Manager bootstrap.
 Both scopes refuse while any Firstmate worker lane exists and recheck that guard
 immediately before mutation; a lane found by that recheck is reported in the
 result's `worker_guard`, not only in the tier it deferred. Dry-run performs no
-install, merge, or fetch.
+install, merge, or fetch. Herdr, no-mistakes, GBrain, Nix, agent harnesses, and
+Baby Menu are never apply targets.
 
 Every real mutation is preceded by a mode-0600 receipt written atomically under
 `$DEV_TOOLS_APPLY_RECEIPT_DIR` (by default `$XDG_STATE_HOME/dev-tools-apply-updates`).
@@ -199,18 +200,37 @@ dev-tools-apply-updates --rollback <receipt>              # check preconditions 
 dev-tools-apply-updates --rollback <receipt> --attended   # perform the reversal
 ```
 
-Only tools the receipt records as `applied` are eligible. Firstmate reversal
-requires no in-flight worker lane, a checkout on `main` that is clean and still
-at the recorded applied commit, and the recorded prior commit verified as that
-commit's ancestor; it is then `git reset --hard <prior commit>` - never a force,
-and never a discard of local changes. npm reversal reinstalls only the exact
-prior version the receipt records, after independently re-verifying that
-version's registry identity and integrity, and refuses a prior version that is
-unavailable or whose integrity has changed. Herdr, the shared no-mistakes
-daemon, GBrain, and every other runtime-hosting tool remain outside both
-directions.
-Herdr, no-mistakes, GBrain, Nix, agent harnesses, and Baby Menu are never apply
-targets.
+The recorded status is never trusted on its own. One preflight runs first and
+observes every tool the receipt records as `applied` or `pending`, reconciling
+each against the record before anything is touched:
+
+- observed state equal to the recorded prior: the mutation did not take effect
+  or has already been reversed. Nothing is mutated and the entry is settled as
+  `reconciled_at_prior`, which is also what makes an interrupted rollback safe
+  to rerun.
+- observed state equal to the recorded target: the mutation took effect and the
+  entry is eligible for reversal.
+- anything else - a third version, a moved commit, an absent or unreadable tool
+  - is unreconcilable. That entry and every other entry in its tier are refused
+  before any tool in that tier is changed, rather than overwriting drift the
+  receipt never recorded.
+
+A `pending` entry left behind by a crash between the receipt write and the
+mutation is reconciled by the same rule instead of being assumed untouched.
+
+Both tiers then require no in-flight Firstmate worker lane - npm reversal is the
+same live-tool mutation class as the apply direction and takes the same guard.
+Firstmate additionally requires a checkout on `main` that is clean and the
+recorded prior commit verified as an ancestor of the applied commit; it is then
+`git reset --hard <prior commit>` - never a force, and never a discard of local
+changes. npm reinstalls only the exact prior version the receipt records, after
+independently re-verifying that version's registry identity and integrity, and
+refuses a prior version that is unavailable or whose integrity has changed.
+
+Reconciliation appends the observed state and the outcome to the receipt. The
+recorded prior, target, and evidence fields are never rewritten to match the
+machine. Herdr, the shared no-mistakes daemon, GBrain, and every other
+runtime-hosting tool remain outside both directions.
 
 ## Attended runtime upgrade sequence
 

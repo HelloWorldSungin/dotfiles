@@ -24,12 +24,23 @@
 # Rollback is attended, never automatic, and never restarts a service:
 #   dev-tools-apply-updates --rollback <receipt>              # check only
 #   dev-tools-apply-updates --rollback <receipt> --attended   # perform
-# Firstmate reversal requires no in-flight worker lane, a clean main still at
-# the recorded applied commit, and the recorded prior commit verified as that
-# commit's ancestor; it is then `git reset --hard <prior commit>` - never a
-# force, and never a discard of local changes. npm reversal reinstalls only the
-# exact recorded prior version, after independently re-verifying that version's
-# registry identity and integrity, and refuses an unavailable or changed one.
+# It never trusts the recorded status alone. One preflight first observes every
+# affected tool and reconciles it against the receipt, before anything is
+# touched: state equal to the recorded prior needs no mutation and is settled
+# as reconciled; state equal to the recorded target is eligible; anything else -
+# a third version, a moved commit, an absent or unreadable tool - is
+# unreconcilable and refuses that whole tier. A `pending` entry left by a crash
+# is reconciled the same way rather than assumed untouched, which also makes an
+# interrupted rollback safe to rerun.
+# Both tiers then require no in-flight worker lane. Firstmate additionally needs
+# a clean `main` still at the recorded applied commit and the recorded prior
+# commit verified as that commit's ancestor; it is then
+# `git reset --hard <prior commit>` - never a force, and never a discard of
+# local changes. npm reinstalls only the exact recorded prior version, after
+# independently re-verifying that version's registry identity and integrity,
+# and refuses an unavailable or changed one. Reconciliation appends the observed
+# state and outcome to the receipt; recorded prior, target, and evidence are
+# never rewritten to match the machine.
 #
 # Usage: dev-tools-apply-updates [--dry-run] [--json]
 #        dev-tools-apply-updates --rollback <receipt> [--attended] [--json]
@@ -57,6 +68,7 @@ NETWORK_TIMEOUT=${DEV_TOOLS_UPDATE_NETWORK_TIMEOUT_SECONDS:-15}
 MODE=human
 DRY_RUN=0
 ATTENDED=0
+ROLLBACK_MODE=0
 ROLLBACK_RECEIPT=
 
 usage() { sed -n '/^# dev-tools-apply-updates - /,/^set -u$/s/^# \{0,1\}//p' "$0"; }
@@ -66,13 +78,14 @@ while [ "$#" -gt 0 ]; do
     --json) MODE=json ;;
     --dry-run|-n) DRY_RUN=1 ;;
     --attended) ATTENDED=1 ;;
-    --rollback) shift; [ "$#" -gt 0 ] || die '--rollback needs a receipt path'; ROLLBACK_RECEIPT=$1 ;;
+    --rollback) shift; ROLLBACK_MODE=1; ROLLBACK_RECEIPT=${1:-} ;;
     --help|-h) usage; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
   shift
 done
-if [ -n "$ROLLBACK_RECEIPT" ]; then
+if [ "$ROLLBACK_MODE" -eq 1 ]; then
+  [ -n "$ROLLBACK_RECEIPT" ] || die '--rollback needs a receipt path'
   [ "$DRY_RUN" -eq 0 ] || die '--dry-run does not apply to --rollback; omit --attended to check without performing'
 elif [ "$ATTENDED" -eq 1 ]; then
   die '--attended only applies to --rollback'
@@ -105,6 +118,8 @@ tier_json() {
 # subshell copy.
 TIER=
 set_tier() { TIER=$(tier_json "$@"); }
+PLAN='[]'
+UNRECONCILABLE_TIERS=' '
 
 detect_workers() {
   local meta count=0
@@ -134,13 +149,20 @@ RECEIPT_DOC=$(jq -cn --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg path "
     attended_only: true,
     restarts_services: false,
     command: "dev-tools-apply-updates --rollback \($path) --attended",
+    preflight: [
+      "every affected tool is observed and reconciled before any of them is touched",
+      "state equal to the recorded prior needs no mutation and is settled as reconciled",
+      "state equal to the recorded target is eligible for reversal",
+      "any other state - a third version, a moved commit, an absent or unreadable tool - refuses that whole tier"
+    ],
     firstmate: [
       "no Firstmate worker lane may be in flight",
-      "the checkout must be on main, clean, and still at the recorded applied commit",
+      "the checkout must be on main and clean",
       "the recorded prior commit must verify as an ancestor of the applied commit",
       "the reversal is `git reset --hard <prior commit>`; never a force, never a discard of local changes"
     ],
     npm_global: [
+      "no Firstmate worker lane may be in flight",
       "only the exact prior version recorded here is reinstalled",
       "the registry identity and integrity of that version are independently re-verified first",
       "an unavailable prior version, or one whose integrity changed, is refused"
@@ -341,6 +363,24 @@ apply_npm() {
 
 # ----------------------------------------------------------------- rollback
 
+receipt_reconcile() {
+  local entry=$1 observed=$2 reconciliation=$3 status=$4
+  receipt_put "$(printf '%s' "$entry" | jq -c --arg o "$observed" --arg r "$reconciliation" --arg s "$status" \
+    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '. + {status:$s,observed:$o,reconciliation:$r,reconciled_at:$at}')" || RECEIPT_STALE=1
+}
+
+observe_firstmate() {
+  [ -d "$FIRSTMATE_PATH/.git" ] || return 0
+  $GIT_BIN -C "$FIRSTMATE_PATH" rev-parse HEAD 2>/dev/null || true
+}
+
+observe_npm() {
+  local command_name=$1
+  [ -n "$command_name" ] && [ -x "$NPM_PREFIX/bin/$command_name" ] || return 0
+  env NO_UPDATE_NOTIFIER=1 "$NPM_PREFIX/bin/$command_name" --version 2>/dev/null | grep -Eo '[0-9]+(\.[0-9]+){2,3}' | head -1 || true
+}
+
 rollback_firstmate() {
   local entry=$1 prior target branch head
   prior=$(printf '%s' "$entry" | jq -r '.prior')
@@ -348,7 +388,6 @@ rollback_firstmate() {
   printf '%s\n' "$prior" | grep -Eq '^[0-9a-f]{40}$' || { set_tier refused 'the receipt does not record a usable prior commit'; return; }
   detect_workers
   [ "$WG_STATUS" = clear ] || { set_tier refused 'a Firstmate worker lane is in flight'; return; }
-  [ -d "$FIRSTMATE_PATH/.git" ] || { set_tier refused 'Firstmate checkout unavailable'; return; }
   branch=$($GIT_BIN -C "$FIRSTMATE_PATH" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
   [ "$branch" = main ] || { set_tier refused "Firstmate must be on main, found '${branch:-detached}'"; return; }
   if ! $GIT_BIN -C "$FIRSTMATE_PATH" diff --quiet --ignore-submodules -- 2>/dev/null ||
@@ -356,28 +395,35 @@ rollback_firstmate() {
       set_tier refused 'the checkout has local changes; refusing to discard them'
       return
   fi
-  head=$($GIT_BIN -C "$FIRSTMATE_PATH" rev-parse HEAD 2>/dev/null || printf unknown)
-  [ "$head" = "$target" ] || { set_tier refused 'the checkout is no longer at the recorded applied commit'; return; }
   $GIT_BIN -C "$FIRSTMATE_PATH" merge-base --is-ancestor "$prior" "$target" 2>/dev/null ||
     { set_tier refused 'the recorded prior commit is not an ancestor of the applied commit'; return; }
   if [ "$ATTENDED" -eq 0 ]; then set_tier ready "an attended git reset --hard $prior would restore the recorded prior commit"; return; fi
+  head=$(observe_firstmate)
+  [ "$head" = "$target" ] || { set_tier refused 'the checkout left the recorded applied commit during the preflight'; return; }
   if run_timed "$TIMEOUT_SECONDS" "$GIT_BIN" -C "$FIRSTMATE_PATH" reset --hard "$prior" >/dev/null 2>&1 &&
-     [ "$($GIT_BIN -C "$FIRSTMATE_PATH" rev-parse HEAD 2>/dev/null || true)" = "$prior" ]; then
+     [ "$(observe_firstmate)" = "$prior" ]; then
+    receipt_reconcile "$entry" "$prior" at_target rolled_back
     set_tier rolled_back "main is back at the recorded prior commit $prior"
   else
+    receipt_reconcile "$entry" "$(observe_firstmate)" at_target rollback_failed
     set_tier failed 'git reset --hard did not restore the recorded prior commit'
   fi
 }
 
+# The same live-tool mutation class as the apply direction, so it takes the same
+# worker guard. The observed-state precondition is settled by the preflight in
+# rollback_main and re-checked here immediately before the install.
 rollback_npm() {
-  local entry=$1 name command_name package prior recorded registry_json version integrity installed
-  name=$(printf '%s' "$entry" | jq -r '.name')
+  local entry=$1 command_name package prior target recorded registry_json version integrity installed
   command_name=$(printf '%s' "$entry" | jq -r '.command // ""')
   package=$(printf '%s' "$entry" | jq -r '.package // ""')
   prior=$(printf '%s' "$entry" | jq -r '.prior')
+  target=$(printf '%s' "$entry" | jq -r '.target')
   recorded=$(printf '%s' "$entry" | jq -r '.prior_evidence.integrity // ""')
   [ -n "$command_name" ] && [ -n "$package" ] || { set_tier refused 'the receipt does not record the package to reinstall'; return; }
   printf '%s\n' "$prior" | grep -Eq '^[0-9]+(\.[0-9]+){2,3}$' || { set_tier refused 'the receipt does not record a usable prior version'; return; }
+  detect_workers
+  [ "$WG_STATUS" = clear ] || { set_tier refused 'a Firstmate worker lane is in flight'; return; }
   [ -n "$recorded" ] || { set_tier refused 'no registry evidence was captured for the prior version'; return; }
   registry_json=$(run_timed "$NETWORK_TIMEOUT" "$NPM_BIN" view "$package@$prior" version dist.integrity --json 2>/dev/null || true)
   version=$(printf '%s' "$registry_json" | jq -r '.version // ""' 2>/dev/null || true)
@@ -385,41 +431,107 @@ rollback_npm() {
   [ "$version" = "$prior" ] || { set_tier refused "the recorded prior version $prior is no longer available"; return; }
   [ "$integrity" = "$recorded" ] || { set_tier refused "the registry integrity for $prior changed since the receipt was written"; return; }
   if [ "$ATTENDED" -eq 0 ]; then set_tier ready "attended reinstall of $package@$prior would restore the recorded prior version"; return; fi
+  [ "$(observe_npm "$command_name")" = "$target" ] || { set_tier refused 'the installed version left the recorded applied version during the preflight'; return; }
   if run_timed "$TIMEOUT_SECONDS" env NPM_CONFIG_PREFIX="$NPM_PREFIX" "$NPM_BIN" install -g "$package@$prior" >/dev/null 2>&1; then
-    installed=$(env NO_UPDATE_NOTIFIER=1 "$NPM_PREFIX/bin/$command_name" --version 2>/dev/null | grep -Eo '[0-9]+(\.[0-9]+){2,3}' | head -1 || true)
-    if [ "$installed" = "$prior" ]; then set_tier rolled_back "reinstalled $package@$prior"
-    else set_tier failed "reinstalled command did not report the recorded prior version $prior"
+    installed=$(observe_npm "$command_name")
+    if [ "$installed" = "$prior" ]; then
+      receipt_reconcile "$entry" "$prior" at_target rolled_back
+      set_tier rolled_back "reinstalled $package@$prior"
+    else
+      receipt_reconcile "$entry" "$installed" at_target rollback_failed
+      set_tier failed "reinstalled command did not report the recorded prior version $prior"
     fi
-  else set_tier failed "npm install failed for $package@$prior"
+  else
+    receipt_reconcile "$entry" "$(observe_npm "$command_name")" at_target rollback_failed
+    set_tier failed "npm install failed for $package@$prior"
   fi
 }
 
-rollback_main() {
-  local doc entries entry tier name results='[]' item bad=0
-  [ -f "$ROLLBACK_RECEIPT" ] || die "receipt unavailable: $ROLLBACK_RECEIPT"
-  doc=$(jq -ce '.' "$ROLLBACK_RECEIPT" 2>/dev/null) || die "receipt is not readable JSON: $ROLLBACK_RECEIPT"
-  printf '%s' "$doc" | jq -e '.schema_version == 1 and .tool == "dev-tools-apply-updates" and (.tools|type=="array")' >/dev/null 2>&1 ||
-    die "receipt is not a dev-tools-apply-updates receipt: $ROLLBACK_RECEIPT"
-  detect_workers
-  entries=$(printf '%s' "$doc" | jq -c '.tools[]')
+# One preflight for the whole receipt: observe every affected tool and reconcile
+# it against the record before any tool is touched, so an unreconcilable state
+# stops its entire tier rather than being discovered halfway through it.
+rollback_preflight() {
+  local doc=$1 entry tier name status observed prior target phase
+  PLAN='[]'
+  UNRECONCILABLE_TIERS=' '
   while IFS= read -r entry; do
     [ -n "$entry" ] || continue
     tier=$(printf '%s' "$entry" | jq -r '.tier')
     name=$(printf '%s' "$entry" | jq -r '.name')
-    if [ "$(printf '%s' "$entry" | jq -r '.status')" != applied ]; then
-      set_tier skipped 'the receipt records no applied mutation for this tool'
-    else
-      case "$tier" in
-        firstmate) rollback_firstmate "$entry" ;;
-        npm_global) rollback_npm "$entry" ;;
-        *) set_tier refused 'the receipt names a tier this command never mutates' ;;
-      esac
+    status=$(printf '%s' "$entry" | jq -r '.status')
+    observed=
+    case "$status" in
+      applied|pending)
+        case "$tier" in
+          firstmate) observed=$(observe_firstmate) ;;
+          npm_global) observed=$(observe_npm "$(printf '%s' "$entry" | jq -r '.command // ""')") ;;
+          *) phase=foreign ;;
+        esac ;;
+      *) phase=settled ;;
+    esac
+    if [ "${phase:-}" != foreign ] && [ "${phase:-}" != settled ]; then
+      prior=$(printf '%s' "$entry" | jq -r '.prior')
+      target=$(printf '%s' "$entry" | jq -r '.target')
+      if [ -n "$observed" ] && [ "$observed" = "$prior" ]; then phase=at_prior
+      elif [ -n "$observed" ] && [ "$observed" = "$target" ]; then phase=at_target
+      else
+        phase=unreconcilable
+        case "$UNRECONCILABLE_TIERS" in *" $tier "*) : ;; *) UNRECONCILABLE_TIERS="$UNRECONCILABLE_TIERS$tier " ;; esac
+      fi
     fi
-    item=$(printf '%s' "$TIER" | jq -c --arg t "$tier" --arg n "$name" \
-      --arg prior "$(printf '%s' "$entry" | jq -r '.prior')" --arg target "$(printf '%s' "$entry" | jq -r '.target')" \
-      '{tier:$t,name:$n,prior:$prior,target:$target} + .')
+    PLAN=$(jq -cn --argjson plan "$PLAN" --argjson entry "$entry" --arg tier "$tier" --arg name "$name" \
+      --arg phase "$phase" --arg observed "$observed" \
+      '$plan + [{tier:$tier,name:$name,phase:$phase,observed:$observed,entry:$entry}]')
+    phase=
+  done <<<"$(printf '%s' "$doc" | jq -c '.tools[]')"
+}
+
+rollback_main() {
+  local doc plan_row entry tier name phase observed results='[]' item bad=0
+  [ -f "$ROLLBACK_RECEIPT" ] || die "receipt unavailable: $ROLLBACK_RECEIPT"
+  doc=$(jq -ce '.' "$ROLLBACK_RECEIPT" 2>/dev/null) || die "receipt is not readable JSON: $ROLLBACK_RECEIPT"
+  printf '%s' "$doc" | jq -e '.schema_version == 1 and .tool == "dev-tools-apply-updates" and (.tools|type=="array")' >/dev/null 2>&1 ||
+    die "receipt is not a dev-tools-apply-updates receipt: $ROLLBACK_RECEIPT"
+  RECEIPT_DIR=$(dirname "$ROLLBACK_RECEIPT")
+  RECEIPT_PATH=$ROLLBACK_RECEIPT
+  RECEIPT_DOC=$doc
+  detect_workers
+  rollback_preflight "$doc"
+  while IFS= read -r plan_row; do
+    [ -n "$plan_row" ] || continue
+    tier=$(printf '%s' "$plan_row" | jq -r '.tier')
+    name=$(printf '%s' "$plan_row" | jq -r '.name')
+    phase=$(printf '%s' "$plan_row" | jq -r '.phase')
+    observed=$(printf '%s' "$plan_row" | jq -r '.observed')
+    entry=$(printf '%s' "$plan_row" | jq -c '.entry')
+    case "$phase" in
+      settled) set_tier skipped 'the receipt records no reversible mutation for this tool' ;;
+      foreign) set_tier refused 'the receipt names a tier this command never mutates' ;;
+      unreconcilable)
+        if [ -z "$observed" ]; then set_tier refused 'the current state of this tool is absent or unreadable'
+        else set_tier refused "the current state $observed matches neither the recorded prior nor the recorded target"
+        fi ;;
+      *)
+        case "$UNRECONCILABLE_TIERS" in
+          *" $tier "*) set_tier refused 'another tool in this tier has an unreconcilable state; refusing the whole tier' ;;
+          *)
+            if [ "$phase" = at_prior ]; then
+              receipt_reconcile "$entry" "$observed" at_prior reconciled_at_prior
+              set_tier reconciled "already at the recorded prior $observed; no rollback needed"
+            else
+              case "$tier" in
+                firstmate) rollback_firstmate "$entry" ;;
+                npm_global) rollback_npm "$entry" ;;
+              esac
+            fi ;;
+        esac ;;
+    esac
+    item=$(printf '%s' "$TIER" | jq -c --arg t "$tier" --arg n "$name" --arg o "$observed" \
+      --arg prior "$(printf '%s' "$entry" | jq -r '.prior // ""')" \
+      --arg target "$(printf '%s' "$entry" | jq -r '.target // ""')" \
+      '{tier:$t,name:$n,prior:$prior,target:$target,observed:$o} + .')
     results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]')
-  done <<<"$entries"
+  done <<<"$(printf '%s' "$PLAN" | jq -c '.[]')"
   RESULT=$(jq -cn --argjson attended "$ATTENDED" --arg path "$ROLLBACK_RECEIPT" --arg status "$WG_STATUS" \
     --argjson count "$WG_COUNT" --arg detail "$WG_DETAIL" --argjson tools "$results" \
     --argjson preconditions "$(printf '%s' "$doc" | jq -c '.rollback')" \
@@ -440,7 +552,7 @@ rollback_main() {
 # --------------------------------------------------------------------- main
 
 if ! command -v jq >/dev/null 2>&1; then die 'jq is required'; fi
-if [ -n "$ROLLBACK_RECEIPT" ]; then rollback_main; exit $?; fi
+if [ "$ROLLBACK_MODE" -eq 1 ]; then rollback_main; exit $?; fi
 
 detect_workers
 if [ "$WG_STATUS" = active ]; then
@@ -480,7 +592,7 @@ else
     written|incomplete)
       printf '%s' "$RESULT" | jq -r '"receipt: " + .receipt.path,
         "rollback: attended only, never automatic, never restarts a service - " + .receipt.rollback.command,
-        (.receipt.rollback | to_entries[] | select(.key == "firstmate" or .key == "npm_global") | .key as $tier | .value[] | "  " + $tier + ": " + .)'
+        (.receipt.rollback | to_entries[] | select(.key == "preflight" or .key == "firstmate" or .key == "npm_global") | .key as $scope | .value[] | "  " + $scope + ": " + .)'
       ;;
     planned) printf '%s' "$RESULT" | jq -r '"receipt: " + .receipt.path + " (planned; nothing written)"' ;;
   esac
