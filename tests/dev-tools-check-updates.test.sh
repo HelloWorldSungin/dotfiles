@@ -51,6 +51,8 @@ case "$package" in
 esac
 [ "$package" = "${TEST_NPM_PRERELEASE_PACKAGE:-}" ] && version=9.0.0-beta.1
 [ -n "$version" ] || exit 1
+# A retired dist-tag: the registry answers successfully with no value at all.
+if [ "$field" = dist-tags.stable ] && [ "$package" = "${TEST_NPM_NO_STABLE_TAG:-}" ]; then exit 0; fi
 if [ "$field" = dist-tags.stable ] || [ "$field" = version ]; then jq -cn --arg v "$version" '$v'; else exit 1; fi
 SH
 
@@ -283,6 +285,7 @@ run_checker() {
     TEST_PINS="$PINS" TEST_CALL_LOG="$CALL_LOG" \
     TEST_FAIL_NPM="${TEST_FAIL_NPM:-0}" TEST_FAIL_CURL="${TEST_FAIL_CURL:-0}" \
     TEST_NPM_PRERELEASE_PACKAGE="${TEST_NPM_PRERELEASE_PACKAGE:-}" TEST_PRERELEASE_REPO="${TEST_PRERELEASE_REPO:-}" \
+    TEST_NPM_NO_STABLE_TAG="${TEST_NPM_NO_STABLE_TAG:-}" \
     TEST_HERDR_LATEST_VERSION="${TEST_HERDR_LATEST_VERSION:-}" TEST_ANTIGRAVITY_LATEST_VERSION="${TEST_ANTIGRAVITY_LATEST_VERSION:-}" \
     TEST_CHROME_ARGS="${TEST_CHROME_ARGS:---no-sandbox --disable-dev-shm-usage --disable-gpu}" "$CHECKER" "$@"
 }
@@ -363,6 +366,26 @@ json=$(run_checker --json --force --no-cache)
 unset TEST_HERDR_LATEST_VERSION TEST_ANTIGRAVITY_LATEST_VERSION
 pass 'newer stable publisher manifests remain visible as pin drift'
 
+# A publisher that goes backwards - a yanked release - is still drift, but the
+# audit compares strings, not order, so it must not claim a direction it never
+# established and walk the operator into an attended downgrade.
+TEST_HERDR_LATEST_VERSION=0.8.9
+TEST_ANTIGRAVITY_LATEST_VERSION=1.0.0
+json=$(run_checker --json --force --no-cache)
+for row in 'herdr|0.8.9' 'antigravity|1.0.0'; do
+  IFS='|' read -r tool observed <<<"$row"
+  entry=$(printf '%s' "$json" | jq -ce --arg n "$tool" '.tools[] | select(.name == $n)')
+  [ "$(printf '%s' "$entry" | jq -r '[.latest_stable,.status] | join("|")')" = "$observed|pin_outdated" ] \
+    || fail "a withdrawn publisher release was not reported as drift for $tool"
+  if printf '%s' "$entry" | jq -e '.detail | test("newer")' >/dev/null; then
+    fail "$tool claimed the publisher manifest was newer than a pin it never ordered: $(printf '%s' "$entry" | jq -r '.detail')"
+  fi
+  printf '%s' "$entry" | jq -e '.detail | test("differs from the recorded")' >/dev/null \
+    || fail "$tool did not report the publisher manifest as differing from its pin"
+done
+unset TEST_HERDR_LATEST_VERSION TEST_ANTIGRAVITY_LATEST_VERSION
+pass 'a publisher release below the pin is reported as drift without asserting a direction'
+
 DRIFTED_LOCK="$FIXTURE/drifted-flake.lock"
 jq '.nodes.nixpkgs.locked.rev = "0000000000000000000000000000000000000000"' "$ROOT/flake.lock" >"$DRIFTED_LOCK"
 TEST_FLAKE_LOCK_FILE=$DRIFTED_LOCK
@@ -373,9 +396,29 @@ pass 'flake input declarations are checked against the exact lock revisions'
 
 TEST_FAIL_NPM=1
 json=$(run_checker --json --force --no-cache)
-[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="quota-axi") | .status')" = unknown ] || fail 'unknown registry source was treated as current'
+quota=$(printf '%s' "$json" | jq -ce '.tools[] | select(.name=="quota-axi")')
+[ "$(printf '%s' "$quota" | jq -r '.status')" = unknown ] || fail 'unknown registry source was treated as current'
+printf '%s' "$quota" | jq -e '.detail | test("registry lookup failed")' >/dev/null \
+  || fail 'a failing registry call was not reported as a lookup failure'
 unset TEST_FAIL_NPM
 pass 'unknown publication sources remain explicitly unknown'
+
+# A registry that answers with no `stable` dist-tag at all is a different cause
+# from a registry that could not be reached, and the row says which it was.
+TEST_NPM_NO_STABLE_TAG=@anthropic-ai/claude-code
+json=$(run_checker --json --force --no-cache)
+claude_entry=$(printf '%s' "$json" | jq -ce '.tools[] | select(.name=="claude")')
+[ "$(printf '%s' "$claude_entry" | jq -r '[.latest_stable,.status] | join("|")')" = 'unknown|unknown' ] \
+  || fail 'a retired stable dist-tag was not refused as unknown'
+printf '%s' "$claude_entry" | jq -e '.detail | test("publishes no usable version")' >/dev/null \
+  || fail "a retired stable dist-tag was not reported as an empty channel: $(printf '%s' "$claude_entry" | jq -r '.detail')"
+if printf '%s' "$claude_entry" | jq -e '.detail | test("lookup failed")' >/dev/null; then
+  fail 'a successful registry answer was reported as a registry lookup failure'
+fi
+grep -Fq 'npm view @anthropic-ai/claude-code dist-tags.stable --json' "$CALL_LOG" \
+  || fail 'the retired-dist-tag case never reached the stable channel'
+unset TEST_NPM_NO_STABLE_TAG
+pass 'a stable channel that publishes nothing is refused as an empty channel, not a lookup failure'
 
 health=$(run_checker --health --json)
 [ "$(printf '%s' "$health" | jq -r '.checks.chrome_devtools_headless.status')" = healthy ] || fail 'healthy browser flags failed'

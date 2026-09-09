@@ -107,6 +107,9 @@ printf '%s\n' "\$*" >>"\$TEST_NPM_LOG"
 # shellcheck source=/dev/null
 source "\$TEST_PINS"
 if [ "\$1" = view ]; then
+  # The registry lookups of the tier preflight are the window between the
+  # checkout being proved clean and the hard reset that follows it.
+  if [ -n "\${TEST_DIRTY_CHECKOUT:-}" ]; then printf 'wip\n' >>"\$TEST_DIRTY_CHECKOUT"; fi
   spec=\$2
   package=\${spec%@*}
   version=\${spec##*@}
@@ -204,7 +207,7 @@ run_tool() {
     TEST_PINS="$PINS" TEST_PREFIX="$PREFIX" TEST_FIRSTMATE="$CHECKOUT" TEST_NPM_LOG="$NPM_LOG" \
     TEST_PRE_LOG="$PRE_LOG" TEST_LIFECYCLE_LOG="$LIFECYCLE_LOG" TEST_REGISTRY="$REGISTRY" \
     TEST_BREAK_RECEIPT_DIR="${TEST_BREAK_RECEIPT_DIR:-}" \
-    TEST_QUOTA_CURRENT="${TEST_QUOTA_CURRENT:-}" \
+    TEST_QUOTA_CURRENT="${TEST_QUOTA_CURRENT:-}" TEST_DIRTY_CHECKOUT="${TEST_DIRTY_CHECKOUT:-}" \
     TEST_RETIRE_AFTER_VIEW="${TEST_RETIRE_AFTER_VIEW:-}" \
     DEV_TOOLS_APPLY_PRIOR_ARTIFACT_DIR="${TEST_ARTIFACT_DIR:-}" \
     TEST_RECEIPT_DIR="${TEST_RECEIPT_DIR:-$RECEIPTS}" TEST_BAD_INSTALL="${TEST_BAD_INSTALL:-0}" \
@@ -426,6 +429,32 @@ no_install_ran || fail 'a recorded command name outside the npm prefix reached a
 [ "$(tool_version "$QUOTA_COMMAND")" = "$QUOTA_VERSION" ] || fail 'the refused escape still changed the tool'
 git -C "$CHECKOUT" reset -q --hard "$TARGET_COMMIT"
 pass 'a recorded command name that leaves the npm prefix is never read as installed state'
+
+# --------------------------------- the hard reset re-proves the whole preflight
+
+# The preflight proves the checkout clean, then spends bounded registry time on
+# every npm entry before any mutation runs. Work that lands in the checkout inside
+# that window must stop the reset, not be discarded by it.
+: >"$NPM_LOG"
+WORK=$(work_receipt dirty-window)
+TEST_DIRTY_CHECKOUT="$CHECKOUT/version"
+set +e
+json=$(run_rollback "$WORK" --attended --json)
+rc=$?
+set -e
+unset TEST_DIRTY_CHECKOUT
+[ "$rc" -ne 0 ] || fail 'a checkout dirtied inside the mutation window exited successfully'
+[ "$(tool_status "$json" firstmate)" = refused ] \
+  || fail "a checkout dirtied inside the mutation window was still hard reset: $(tool_status "$json" firstmate)"
+[ "$(tool_detail "$json" firstmate)" = 'the checkout has local changes; refusing to discard them' ] \
+  || fail "the refused reset did not name the local changes: $(tool_detail "$json" firstmate)"
+[ "$(head_commit)" = "$TARGET_COMMIT" ] || fail 'a refused Firstmate reversal moved the checkout anyway'
+grep -Fqx wip "$CHECKOUT/version" || fail 'the reversal discarded the local change it refused to make'
+git -C "$CHECKOUT" checkout -q -- version
+git -C "$CHECKOUT" reset -q --hard "$TARGET_COMMIT"
+fake_install "$QUOTA_COMMAND" "$QUOTA_VERSION"
+fake_install "$GH_COMMAND" "$GH_VERSION"
+pass 'the attended hard reset re-proves the clean checkout it was authorised against'
 
 # --------------------------------- unavailable or changed prior evidence refuses
 

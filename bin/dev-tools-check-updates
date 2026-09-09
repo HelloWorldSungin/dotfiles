@@ -180,7 +180,7 @@ latest_npm() {
   else
     return 3
   fi
-  version=$(printf '%s' "$output" | jq -er 'if type == "string" then . else empty end' 2>/dev/null) || return 1
+  version=$(printf '%s' "$output" | jq -er 'if type == "string" then . else empty end' 2>/dev/null) || return 4
   stable_version "$version" || return 2
   printf '%s\n' "$version"
 }
@@ -193,6 +193,7 @@ check_npm_tool() {
     0) : ;;
     2) latest=unknown; detail="npm $channel channel resolved to a prerelease" ;;
     3) latest=unknown; detail='unknown npm stable channel refused' ;;
+    4) latest=unknown; detail="the npm registry answered but the $channel channel publishes no usable version" ;;
     *) latest=unknown; detail='npm registry lookup failed' ;;
   esac
   [ "$guarded" = yes ] && policy='guarded-exact' || policy='report-only'
@@ -249,7 +250,7 @@ check_herdr() {
   elif [ "$latest" = "$HERDR_VERSION" ] && [ "$manifest_sha" != "$expected_sha" ]; then
     latest=unknown; detail='Herdr stable manifest checksum differs from the recorded pin'
   elif [ "$latest" != "$HERDR_VERSION" ]; then
-    detail='publisher stable manifest is newer than the recorded attended-only pin'
+    detail='publisher stable manifest differs from the recorded attended-only pin'
   fi
   tool_json herdr herdr-stable-manifest "$current" "$HERDR_VERSION" "$latest" exact-manifest-binary attended-only "$detail"
 }
@@ -288,7 +289,7 @@ check_antigravity() {
        { [ "$manifest_url" != "$expected_url" ] || [ "$manifest_sha" != "$expected_sha" ]; }; then
       latest=unknown; detail='publisher production manifest asset or checksum differs from the recorded pin'
     elif [ "$latest" != unknown ] && [ "$latest" != "$ANTIGRAVITY_VERSION" ]; then
-      detail='publisher production manifest is newer than the recorded pin'
+      detail='publisher production manifest differs from the recorded pin'
     fi
   fi
   tool_json antigravity google-production-manifest "$current" "$ANTIGRAVITY_VERSION" "$latest" exact-manifest-asset report-only "$detail"

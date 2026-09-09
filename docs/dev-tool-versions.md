@@ -330,8 +330,12 @@ and the tier never ends up half reverted.
 
 Reversal is then `git reset --hard <prior commit>` - never a force, and never a
 discard of local changes - and an npm reinstall of only the exact prior version
-the receipt records. Each re-confirms observed state, the worker lane, and the
-prior artifact evidence immediately before mutating.
+the receipt records. Each re-proves its whole tier precondition immediately before
+mutating, not only at preflight time: observed state, the worker lane, the branch
+and clean checkout with verified ancestry for Firstmate, and the recorded prior
+artifact evidence for npm. Bounded registry time separates the preflight from the
+mutation, so work that lands in the checkout inside that window stops the reset
+instead of being discarded by it.
 
 An attended reversal that changes nothing - every tool refused, or nothing left
 to reverse - reports `receipt.status: unchanged`, exactly like the check-only

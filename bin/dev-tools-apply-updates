@@ -724,13 +724,15 @@ preflight_npm_refusal() {
 }
 
 rollback_firstmate() {
-  local entry=$1 prior target
+  local entry=$1 prior target refusal
   prior=$(printf '%s' "$entry" | jq -r '.prior')
   target=$(printf '%s' "$entry" | jq -r '.target')
   if [ "$ATTENDED" -eq 0 ]; then set_tier ready "an attended git reset --hard $prior would restore the recorded prior commit"; return; fi
   detect_workers
   [ "$WG_STATUS" = clear ] || { set_tier refused 'a Firstmate worker lane appeared during the preflight'; return; }
   [ "$(observe_firstmate)" = "$target" ] || { set_tier refused 'the checkout left the recorded applied commit during the preflight'; return; }
+  refusal=$(preflight_firstmate_refusal "$entry")
+  [ -z "$refusal" ] || { set_tier refused "$refusal"; return; }
   if run_timed "$TIMEOUT_SECONDS" "$GIT_BIN" -C "$FIRSTMATE_PATH" reset --hard "$prior" >/dev/null 2>&1 &&
      [ "$(observe_firstmate)" = "$prior" ]; then
     receipt_reconcile "$entry" "$prior" at_target rolled_back
