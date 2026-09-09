@@ -211,11 +211,23 @@ record, and a receipt that could not record every outcome is reported as
 the tools themselves converged. Dry-run names the receipt it would write and
 writes nothing.
 
-An npm tool whose currently installed version cannot be re-verified against the
-registry is refused rather than installed. Without that evidence the receipt
-could not describe a reversal, and a recorded mutation with no way back is worse
-than a refused one; the other allowlisted packages are unaffected and stay
-reversible.
+An npm tool's reversal path is proven before anything is decided, by the preview
+and the apply alike. The installed version must be re-verifiable against the
+registry; without that evidence the receipt could not describe a reversal, and a
+recorded mutation with no way back is worse than a refused one. The other
+allowlisted packages are unaffected and stay reversible.
+
+A version that is absent from the registry - a locally built global install, or
+one whose version was unpublished - would otherwise refuse forever. The single
+recovery inside this updater is to supply that artifact yourself: put the exact
+tarball at `$DEV_TOOLS_APPLY_PRIOR_ARTIFACT_DIR/<package>-<version>.tgz`
+(`npm pack` names it that way). Its checksum becomes the recorded prior
+evidence, and a reversal reinstalls that file after re-verifying the checksum,
+refusing if it has moved or changed. There is deliberately no flag that records
+a mutation without evidence: an override would trade a refusal you can act on
+for a receipt that cannot reverse anything. If you would rather not keep the
+artifact, install a published version of that tool by hand first - that step is
+outside this tool's receipt contract, and the next run then converges normally.
 
 Partial apply is expected and recorded rather than hidden. Each tool carries its
 own completion status, so a run that converges one package and fails or refuses

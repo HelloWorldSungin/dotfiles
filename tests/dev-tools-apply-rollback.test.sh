@@ -128,8 +128,14 @@ if [ "\$1" = install ]; then
   if ls "\$TEST_RECEIPT_DIR"/apply-*.json >/dev/null 2>&1; then printf 'npm-install receipt=yes\n' >>"\$TEST_PRE_LOG"
   else printf 'npm-install receipt=no\n' >>"\$TEST_PRE_LOG"; fi
   spec=\$3
-  package=\${spec%@*}
-  version=\${spec##*@}
+  if [ -f "\$spec" ]; then
+    base=\${spec##*/}; base=\${base%.tgz}
+    version=\${base##*-}
+    package=\${base%-*}
+  else
+    package=\${spec%@*}
+    version=\${spec##*@}
+  fi
   for row in "\${NPM_TOOL_PINS[@]}"; do
     IFS='|' read -r _name command_name candidate pinned _integrity guarded _channel <<<"\$row"
     [ "\$guarded" = yes ] || continue
@@ -192,6 +198,7 @@ run_tool() {
     TEST_PINS="$PINS" TEST_PREFIX="$PREFIX" TEST_FIRSTMATE="$CHECKOUT" TEST_NPM_LOG="$NPM_LOG" \
     TEST_PRE_LOG="$PRE_LOG" TEST_LIFECYCLE_LOG="$LIFECYCLE_LOG" TEST_REGISTRY="$REGISTRY" \
     TEST_BREAK_RECEIPT_DIR="${TEST_BREAK_RECEIPT_DIR:-}" \
+    DEV_TOOLS_APPLY_PRIOR_ARTIFACT_DIR="${TEST_ARTIFACT_DIR:-}" \
     TEST_RECEIPT_DIR="${TEST_RECEIPT_DIR:-$RECEIPTS}" TEST_BAD_INSTALL="${TEST_BAD_INSTALL:-0}" \
     TEST_BREAK_RECEIPT="${TEST_BREAK_RECEIPT:-}" \
     "$APPLY" "$@"
@@ -724,6 +731,75 @@ json=$(TEST_RECEIPT_DIR="$CREATED_DIR" run_tool --json)
 [ "$(file_mode "$CREATED_DIR")" = 700 ] || fail "a directory the run created is not private: $(file_mode "$CREATED_DIR")"
 pass 'the apply secures only a directory it creates and refuses an unusable location'
 
+# --------------------------------- the preview refuses what the apply refuses
+
+# The reversal-path gate has to run before the preview reports, or the operator
+# is told `would_apply` for a mutation the very next run refuses.
+reset_to_prior
+unpublish "quota-axi@$QUOTA_PRIOR"
+set +e
+dry=$(run_tool --dry-run --json)
+dry_rc=$?
+json=$(run_tool --json)
+apply_rc=$?
+set -e
+publish "quota-axi@$QUOTA_PRIOR" "$QUOTA_PRIOR_INTEGRITY"
+[ "$dry_rc" -eq "$apply_rc" ] || fail "the preview exited $dry_rc but the apply exited $apply_rc"
+[ "$(package_status "$dry" quota-axi)" = "$(package_status "$json" quota-axi)" ] \
+  || fail "the preview said $(package_status "$dry" quota-axi) but the apply said $(package_status "$json" quota-axi)"
+[ "$(package_detail "$dry" quota-axi)" = "$(package_detail "$json" quota-axi)" ] \
+  || fail 'the preview and the apply gave different reasons for the same unrecordable mutation'
+pass 'a mutation with no reversal path is refused identically by the preview and the apply'
+
+# --------------------------------- an operator-supplied artifact restores it
+
+# The installed version is not in the registry, so the operator supplies exactly
+# that artifact; its checksum becomes the recorded evidence and the file is what
+# a reversal reinstalls.
+ARTIFACTS="$TMP_ROOT/artifacts"
+mkdir -p "$ARTIFACTS"
+printf 'quota-axi %s tarball\n' "$QUOTA_PRIOR" >"$ARTIFACTS/quota-axi-$QUOTA_PRIOR.tgz"
+reset_to_prior
+unpublish "quota-axi@$QUOTA_PRIOR"
+TEST_ARTIFACT_DIR="$ARTIFACTS"
+set +e
+json=$(run_tool --json)
+rc=$?
+set -e
+[ "$rc" -eq 0 ] || fail "an operator-supplied artifact did not unblock the mutation (exit $rc): $(package_detail "$json" quota-axi)"
+[ "$(package_status "$json" quota-axi)" = applied ] || fail 'an operator-supplied artifact did not unblock the mutation'
+ARTIFACT_RECEIPT=$(printf '%s' "$json" | jq -r '.receipt.path')
+entry=$(jq -ce '.tools[] | select(.name=="quota-axi")' "$ARTIFACT_RECEIPT")
+[ "$(printf '%s' "$entry" | jq -r '.prior_evidence.kind')" = operator-artifact ] || fail 'the receipt did not record the artifact evidence'
+[ "$(printf '%s' "$entry" | jq -r '.prior_evidence.path')" = "$ARTIFACTS/quota-axi-$QUOTA_PRIOR.tgz" ] \
+  || fail 'the receipt did not record the artifact path'
+RECORDED_SUM=$(printf '%s' "$entry" | jq -r '.prior_evidence.checksum')
+[ "$RECORDED_SUM" = "sha256-$(sha256sum "$ARTIFACTS/quota-axi-$QUOTA_PRIOR.tgz" | cut -d' ' -f1)" ] \
+  || fail 'the receipt did not record the artifact checksum'
+
+# A changed artifact is refused, exactly like changed registry evidence.
+printf 'tampered\n' >>"$ARTIFACTS/quota-axi-$QUOTA_PRIOR.tgz"
+set +e
+json=$(run_rollback "$ARTIFACT_RECEIPT" --attended --json)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail 'a changed prior artifact exited successfully'
+[ "$(tool_detail "$json" quota-axi)" = "the recorded prior artifact $ARTIFACTS/quota-axi-$QUOTA_PRIOR.tgz changed since the receipt was written" ] \
+  || fail "a changed prior artifact was not refused: $(tool_detail "$json" quota-axi)"
+[ "$(tool_version "$QUOTA_COMMAND")" = "$QUOTA_VERSION" ] || fail 'a changed prior artifact was still reinstalled'
+
+# Restored to what the receipt recorded, the reversal installs from that file.
+printf 'quota-axi %s tarball\n' "$QUOTA_PRIOR" >"$ARTIFACTS/quota-axi-$QUOTA_PRIOR.tgz"
+: >"$NPM_LOG"
+json=$(run_rollback "$ARTIFACT_RECEIPT" --attended --json)
+[ "$(tool_status "$json" quota-axi)" = rolled_back ] || fail 'an operator-supplied artifact could not be reversed'
+grep -Fq "install -g $ARTIFACTS/quota-axi-$QUOTA_PRIOR.tgz" "$NPM_LOG" \
+  || fail 'the reversal did not reinstall the recorded artifact file'
+[ "$(tool_version "$QUOTA_COMMAND")" = "$QUOTA_PRIOR" ] || fail 'the reversal did not restore the prior version'
+unset TEST_ARTIFACT_DIR
+publish "quota-axi@$QUOTA_PRIOR" "$QUOTA_PRIOR_INTEGRITY"
+pass 'an operator-supplied artifact is the recovery: recorded, re-verified, and reinstalled'
+
 # --------------------------------- an unrecordable reversal path refuses
 
 # The installed version is gone from the registry, so no prior evidence can be
@@ -739,7 +815,7 @@ publish "quota-axi@$QUOTA_PRIOR" "$QUOTA_PRIOR_INTEGRITY"
 [ "$rc" -ne 0 ] || fail 'a mutation with no reversal path exited successfully'
 [ "$(package_status "$json" quota-axi)" = refused ] || fail 'a mutation with no reversal path was not refused'
 case "$(package_detail "$json" quota-axi)" in
-  "could not verify registry evidence for the installed version $QUOTA_PRIOR;"*) : ;;
+  "could not verify the installed version $QUOTA_PRIOR against the registry or an operator-supplied artifact;"*) : ;;
   *) fail "an unrecordable mutation was refused for the wrong reason: $(package_detail "$json" quota-axi)" ;;
 esac
 ! grep -Fq "install -g quota-axi@$QUOTA_VERSION" "$NPM_LOG" || fail 'a package with no reversal path was still installed'
@@ -757,5 +833,28 @@ json=$(run_rollback "$PARTIAL_RECEIPT" --attended --json)
 [ "$(tool_status "$json" gh-axi)" = rolled_back ] || fail 'the receipt from a partly refused apply was not reversible'
 [ "$(tool_version "$GH_COMMAND")" = "$GH_PRIOR" ] || fail 'the sibling package was not restored'
 pass 'an npm mutation whose reversal path cannot be recorded is refused, and its siblings stay reversible'
+
+# --------------------------------- an unguarded allowlisted name says so
+
+# The hard allowlist and the guarded manifest rows are meant to agree; when a
+# manifest edit desynchronises them the tier refuses, and the package that
+# caused it has to be findable in the emitted list.
+UNGUARDED_PINS="$TMP_ROOT/unguarded-pins.sh"
+sed '/lavish-axi/s/|yes|/|no|/' "$PINS" >"$UNGUARDED_PINS"
+[ "$(grep -c 'lavish-axi.*|no|' "$UNGUARDED_PINS")" -eq 1 ] || fail 'the unguarded-pin fixture did not flip exactly one row'
+reset_to_prior
+SAFE_PINS=$PINS
+PINS=$UNGUARDED_PINS
+set +e
+json=$(run_tool --json)
+rc=$?
+set -e
+PINS=$SAFE_PINS
+[ "$rc" -ne 0 ] || fail 'a desynchronised allowlist exited successfully'
+[ "$(package_status "$json" lavish-axi)" = refused ] \
+  || fail "an allowlisted name with no guarded pin was not reported as refused: $(package_status "$json" lavish-axi)"
+[ "$(printf '%s' "$json" | jq -r '[.tiers.npm_global.packages[] | select(.status=="refused")] | length')" -ge 1 ] \
+  || fail 'the tier refused but no package in the list carries the refusal'
+pass 'an allowlisted name with no guarded pin reports its own refusal'
 
 printf '\nall dev-tools-apply-updates receipt and rollback tests passed\n'

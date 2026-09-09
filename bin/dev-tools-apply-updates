@@ -21,10 +21,16 @@
 # receipt that cannot be written refuses the mutation it would have covered, and
 # one that could not record every outcome is reported as incomplete and exits
 # non-zero even when the tools themselves converged.
-# An npm tool whose currently installed version cannot be re-verified against the
-# registry is refused rather than installed: without that evidence the receipt
-# could not describe a reversal, and a recorded mutation that cannot be undone is
-# worse than a refused one. The packages around it are unaffected.
+# An npm tool's reversal path is proven before anything is decided, in the
+# preview and in the apply alike: the installed version must be re-verifiable
+# against the registry, or - when it is not published there, which is how a
+# locally built or unpublished global install presents - the operator must place
+# that exact artifact in $DEV_TOOLS_APPLY_PRIOR_ARTIFACT_DIR as
+# <package>-<version>.tgz, whose checksum is then the recorded evidence and
+# whose file is what a reversal reinstalls. Without one of the two the tool is
+# refused rather than installed: a recorded mutation that cannot be undone is
+# worse than a refused one, and there is deliberately no override that skips the
+# requirement. The packages around it are unaffected.
 # Partial apply is expected and recorded: each tool carries its own completion
 # status, so a run that converges one package and refuses another leaves an
 # accurate per-tool record while the tier reports the worst case. Dry-run names
@@ -89,6 +95,8 @@ STATE_DIR=${DEV_TOOLS_FIRSTMATE_STATE_DIR:-$FIRSTMATE_PATH/state}
 GIT_BIN=${DEV_TOOLS_UPDATE_GIT_BIN:-git}
 NPM_BIN=${DEV_TOOLS_UPDATE_NPM_BIN:-npm}
 NPM_PREFIX=${DEV_TOOLS_UPDATE_NPM_PREFIX:-${HOME:-.}/.npm-global}
+PRIOR_ARTIFACT_DIR=${DEV_TOOLS_APPLY_PRIOR_ARTIFACT_DIR:-}
+SHA256_BIN=${DEV_TOOLS_APPLY_SHA256_BIN:-$(command -v sha256sum >/dev/null 2>&1 && printf sha256sum || printf 'shasum -a 256')}
 RECEIPT_DIR=${DEV_TOOLS_APPLY_RECEIPT_DIR:-${XDG_STATE_HOME:-${HOME:-.}/.local/state}/dev-tools-apply-updates}
 TIMEOUT_SECONDS=${DEV_TOOLS_APPLY_TIMEOUT_SECONDS:-120}
 NETWORK_TIMEOUT=${DEV_TOOLS_UPDATE_NETWORK_TIMEOUT_SECONDS:-15}
@@ -341,6 +349,45 @@ firstmate_dry_run_probe() {
   DRY_DETAIL=$CMP_DETAIL
 }
 
+# The reversal path for an npm tool: the registry entry for the installed
+# version, or - when that version is not published, which is how a locally built
+# or unpublished global install presents - an operator-supplied artifact for
+# exactly that version. Prints the evidence object, or nothing when neither
+# exists. There is deliberately no override that records a mutation without one.
+npm_prior_evidence() {
+  local package=$1 version=$2 registry_json registry_version registry_integrity artifact checksum
+  registry_json=$(run_timed "$NETWORK_TIMEOUT" "$NPM_BIN" view "$package@$version" version dist.integrity --json 2>/dev/null || true)
+  registry_version=$(printf '%s' "$registry_json" | jq -r '.version // ""' 2>/dev/null || true)
+  registry_integrity=$(printf '%s' "$registry_json" | jq -r '."dist.integrity" // .dist.integrity // ""' 2>/dev/null || true)
+  if [ "$registry_version" = "$version" ] && [ -n "$registry_integrity" ]; then
+    jq -cn --arg pkg "$package" --arg v "$version" --arg i "$registry_integrity" \
+      '{kind:"npm-registry",package:$pkg,version:$v,integrity:$i,available:true}'
+    return
+  fi
+  artifact=$(npm_prior_artifact "$package" "$version")
+  [ -n "$artifact" ] || return 0
+  checksum=$(file_checksum "$artifact") || return 0
+  [ -n "$checksum" ] || return 0
+  jq -cn --arg pkg "$package" --arg v "$version" --arg p "$artifact" --arg c "$checksum" \
+    '{kind:"operator-artifact",package:$pkg,version:$v,path:$p,checksum:$c,integrity:"",available:true}'
+}
+
+npm_prior_artifact() {
+  local package=$1 version=$2 candidate
+  [ -n "$PRIOR_ARTIFACT_DIR" ] && [ -d "$PRIOR_ARTIFACT_DIR" ] || return 0
+  for candidate in "$PRIOR_ARTIFACT_DIR/$package-$version.tgz" "$PRIOR_ARTIFACT_DIR/$package@$version.tgz"; do
+    [ -f "$candidate" ] && [ -r "$candidate" ] || continue
+    printf '%s' "$candidate"
+    return 0
+  done
+}
+
+file_checksum() {
+  local out
+  out=$($SHA256_BIN "$1" 2>/dev/null) || return 1
+  printf 'sha256-%s' "${out%% *}"
+}
+
 apply_firstmate() {
   local detection=$1 row current pinned latest branch remote_head fetched_remote fetch_out prior entry
   row=$(printf '%s' "$detection" | jq -ce '.tools[] | select(.name == "firstmate")' 2>/dev/null || true)
@@ -399,11 +446,11 @@ apply_firstmate() {
 
 apply_npm() {
   local detection=$1 results='[]' name spec command_name package pinned integrity registry_json verified_version verified_integrity
-  local current installed item any=0 failed=0 refused=0 deferred=0 prior_json prior_version prior_integrity entry
+  local current installed item any=0 failed=0 refused=0 deferred=0 prior_evidence entry
   for name in $(printf '%s' "$ALLOWLIST_NPM_JSON" | jq -r '.[]'); do
     spec=$(pin_for_npm "$name" || true)
     if [ -z "$spec" ]; then
-      item=$(tier_json skipped 'allowlisted name has no guarded repository pin' "$(jq -cn --arg n "$name" '{name:$n}')")
+      item=$(tier_json refused 'allowlisted name has no guarded repository pin' "$(jq -cn --arg n "$name" '{name:$n}')")
       results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
     fi
     IFS='|' read -r command_name package pinned integrity <<<"$spec"
@@ -433,6 +480,15 @@ apply_npm() {
       item=$(tier_json refused 'exact registry version or integrity could not be re-verified' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')")
       results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
     fi
+    # The reversal path is proven before the preview reports and before the
+    # install runs, so both directions answer the same question: without evidence
+    # for the installed version the mutation would be irreversible, and it is
+    # refused rather than recorded with an empty way back.
+    prior_evidence=$(npm_prior_evidence "$package" "$current")
+    if [ -z "$prior_evidence" ]; then
+      item=$(tier_json refused "could not verify the installed version $current against the registry or an operator-supplied artifact; refusing a mutation it could not reverse" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg c "$current" '{name:$n,pinned:$p,prior:$c}')")
+      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
+    fi
     if [ "$DRY_RUN" -eq 1 ]; then
       item=$(tier_json would_apply "would install $package@$pinned" "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')")
       results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); continue
@@ -442,22 +498,10 @@ apply_npm() {
       item=$(tier_json deferred 'workers appeared during re-verification' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')"); deferred=1
       results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); continue
     fi
-    # The prior version's own registry evidence is captured before the install so
-    # rollback can tell an unavailable prior artifact from a changed one. Without
-    # it the install would be irreversible, so the mutation is refused instead of
-    # recorded with an empty reversal path.
-    prior_json=$(run_timed "$NETWORK_TIMEOUT" "$NPM_BIN" view "$package@$current" version dist.integrity --json 2>/dev/null || true)
-    prior_version=$(printf '%s' "$prior_json" | jq -r '.version // ""' 2>/dev/null || true)
-    prior_integrity=$(printf '%s' "$prior_json" | jq -r '."dist.integrity" // .dist.integrity // ""' 2>/dev/null || true)
-    [ "$prior_version" = "$current" ] || prior_integrity=
-    if [ -z "$prior_integrity" ]; then
-      item=$(tier_json refused "could not verify registry evidence for the installed version $current; refusing a mutation it could not reverse" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg c "$current" '{name:$n,pinned:$p,prior:$c}')")
-      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
-    fi
     entry=$(jq -cn --arg n "$name" --arg cmd "$command_name" --arg pkg "$package" --arg prior "$current" \
-      --arg target "$pinned" --arg pi "$prior_integrity" --arg ti "$verified_integrity" \
+      --arg target "$pinned" --argjson pe "$prior_evidence" --arg ti "$verified_integrity" \
       '{tier:"npm_global",name:$n,command:$cmd,package:$pkg,prior:$prior,target:$target,
-        prior_evidence:{kind:"npm-registry",package:$pkg,version:$prior,integrity:$pi,available:true},
+        prior_evidence:$pe,
         target_evidence:{kind:"npm-registry",package:$pkg,version:$target,integrity:$ti},
         status:"pending"}')
     if ! receipt_put "$entry"; then
@@ -542,19 +586,33 @@ preflight_firstmate_refusal() {
 }
 
 preflight_npm_refusal() {
-  local entry=$1 command_name package prior recorded registry_json version integrity
+  local entry=$1 command_name package prior kind recorded artifact registry_json version integrity
   command_name=$(printf '%s' "$entry" | jq -r '.command // ""')
   package=$(printf '%s' "$entry" | jq -r '.package // ""')
   prior=$(printf '%s' "$entry" | jq -r '.prior')
-  recorded=$(printf '%s' "$entry" | jq -r '.prior_evidence.integrity // ""')
+  kind=$(printf '%s' "$entry" | jq -r '.prior_evidence.kind // ""')
   [ -n "$command_name" ] && [ -n "$package" ] || { printf 'the receipt does not record the package to reinstall'; return; }
   printf '%s\n' "$prior" | grep -Eq '^[0-9]+(\.[0-9]+){2,3}$' || { printf 'the receipt does not record a usable prior version'; return; }
-  [ -n "$recorded" ] || { printf 'no registry evidence was captured for the prior version'; return; }
-  registry_json=$(run_timed "$NETWORK_TIMEOUT" "$NPM_BIN" view "$package@$prior" version dist.integrity --json 2>/dev/null || true)
-  version=$(printf '%s' "$registry_json" | jq -r '.version // ""' 2>/dev/null || true)
-  integrity=$(printf '%s' "$registry_json" | jq -r '."dist.integrity" // .dist.integrity // ""' 2>/dev/null || true)
-  [ "$version" = "$prior" ] || { printf 'the recorded prior version %s is no longer available' "$prior"; return; }
-  [ "$integrity" = "$recorded" ] || printf 'the registry integrity for %s changed since the receipt was written' "$prior"
+  case "$kind" in
+    npm-registry)
+      recorded=$(printf '%s' "$entry" | jq -r '.prior_evidence.integrity // ""')
+      [ -n "$recorded" ] || { printf 'no registry evidence was captured for the prior version'; return; }
+      registry_json=$(run_timed "$NETWORK_TIMEOUT" "$NPM_BIN" view "$package@$prior" version dist.integrity --json 2>/dev/null || true)
+      version=$(printf '%s' "$registry_json" | jq -r '.version // ""' 2>/dev/null || true)
+      integrity=$(printf '%s' "$registry_json" | jq -r '."dist.integrity" // .dist.integrity // ""' 2>/dev/null || true)
+      [ "$version" = "$prior" ] || { printf 'the recorded prior version %s is no longer available' "$prior"; return; }
+      [ "$integrity" = "$recorded" ] || printf 'the registry integrity for %s changed since the receipt was written' "$prior"
+      ;;
+    operator-artifact)
+      recorded=$(printf '%s' "$entry" | jq -r '.prior_evidence.checksum // ""')
+      artifact=$(printf '%s' "$entry" | jq -r '.prior_evidence.path // ""')
+      [ -n "$recorded" ] && [ -n "$artifact" ] || { printf 'no artifact evidence was captured for the prior version'; return; }
+      [ -f "$artifact" ] && [ -r "$artifact" ] || { printf 'the recorded prior artifact %s is no longer readable' "$artifact"; return; }
+      [ "$(file_checksum "$artifact" || true)" = "$recorded" ] ||
+        printf 'the recorded prior artifact %s changed since the receipt was written' "$artifact"
+      ;;
+    *) printf 'no usable evidence was captured for the prior version' ;;
+  esac
 }
 
 rollback_firstmate() {
@@ -576,29 +634,33 @@ rollback_firstmate() {
 }
 
 rollback_npm() {
-  local entry=$1 command_name package prior target recorded installed
+  local entry=$1 command_name package prior target source installed
   command_name=$(printf '%s' "$entry" | jq -r '.command // ""')
   package=$(printf '%s' "$entry" | jq -r '.package // ""')
   prior=$(printf '%s' "$entry" | jq -r '.prior')
   target=$(printf '%s' "$entry" | jq -r '.target')
-  recorded=$(printf '%s' "$entry" | jq -r '.prior_evidence.integrity // ""')
-  if [ "$ATTENDED" -eq 0 ]; then set_tier ready "attended reinstall of $package@$prior would restore the recorded prior version"; return; fi
+  if [ "$(printf '%s' "$entry" | jq -r '.prior_evidence.kind // ""')" = operator-artifact ]; then
+    source=$(printf '%s' "$entry" | jq -r '.prior_evidence.path // ""')
+  else
+    source="$package@$prior"
+  fi
+  if [ "$ATTENDED" -eq 0 ]; then set_tier ready "attended reinstall of $package@$prior from $source would restore the recorded prior version"; return; fi
   detect_workers
   [ "$WG_STATUS" = clear ] || { set_tier refused 'a Firstmate worker lane appeared during the preflight'; return; }
   [ "$(observe_npm "$command_name")" = "$target" ] || { set_tier refused 'the installed version left the recorded applied version during the preflight'; return; }
   [ -z "$(preflight_npm_refusal "$entry")" ] || { set_tier refused 'the prior artifact evidence changed during the preflight'; return; }
-  if run_timed "$TIMEOUT_SECONDS" env NPM_CONFIG_PREFIX="$NPM_PREFIX" "$NPM_BIN" install -g "$package@$prior" >/dev/null 2>&1; then
+  if run_timed "$TIMEOUT_SECONDS" env NPM_CONFIG_PREFIX="$NPM_PREFIX" "$NPM_BIN" install -g "$source" >/dev/null 2>&1; then
     installed=$(observe_npm "$command_name")
     if [ "$installed" = "$prior" ]; then
       receipt_reconcile "$entry" "$prior" at_target rolled_back
-      set_tier rolled_back "reinstalled $package@$prior"
+      set_tier rolled_back "reinstalled $package@$prior from $source"
     else
       receipt_reconcile "$entry" "$installed" at_target rollback_failed
       set_tier failed "reinstalled command did not report the recorded prior version $prior"
     fi
   else
     receipt_reconcile "$entry" "$(observe_npm "$command_name")" at_target rollback_failed
-    set_tier failed "npm install failed for $package@$prior"
+    set_tier failed "npm install failed for $source"
   fi
 }
 
