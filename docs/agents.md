@@ -55,31 +55,44 @@ re-copy the file when you want a newer version. It expects each vault repo to
 carry its own `vault/_meta/` OKF tooling (they already do); the skill is pure
 instructions.
 
-## GPT-5.6 long context (Sol and Terra)
+## GPT long context (Sol, Terra and Astra)
 
-Both harnesses default GPT-5.6 to a 272,000-token window; each is opted in
+Both harnesses default these models to a 272,000-token window; each is opted in
 separately, and the two ceilings are **not** the same.
 
 | Harness | Mechanism | Effective window |
 |---------|-----------|------------------|
-| pi | `pi/models.json` → `~/.pi/agent/models.json`, `providers.openai-codex.modelOverrides` | **1,050,000** for `gpt-5.6-sol` and `gpt-5.6-terra` |
-| codex | global `model_context_window` in `~/.codex/config.toml` | **872,000** for `gpt-5.6-sol`, `gpt-5.6-terra` and `gpt-5.6-luna`; models with a lower `max_context_window` keep their own ceiling |
+| pi | `pi/models.json` → `~/.pi/agent/models.json`, `providers.openai-codex.modelOverrides` | **1,050,000** for `gpt-5.6-sol`, `gpt-5.6-terra` and `gpt-6-astra` |
+| codex | global `model_context_window` in `~/.codex/config.toml` | **872,000** for `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` and `gpt-6-astra`; models with a lower `max_context_window` keep their own ceiling |
 
-Pi gets OpenAI's full 1.05M long-context window. Codex does not: its
-0.153.4 catalog advertises `max_context_window = 872000` for Sol, Terra and
-Luna, and `models-manager` applies `configured.min(max_context_window)`, so a
-larger configured value is silently clamped. 872,000 is therefore the real
-effective ceiling for those models and the value this repo commits - do not
-read Codex as being at parity with pi.
+Pi's 1,050,000 is a *local* override: it governs pi's own context accounting and
+model listing. Codex is different - its 0.153.4 catalog advertises
+`max_context_window = 872000` for Sol, Terra, Luna and Astra, and
+`models-manager` applies `configured.min(max_context_window)`, so a larger
+configured value is silently clamped. 872,000 is what Codex advertises and
+enforces for Astra, and it is the value this repo commits. Do not read Codex as
+being at parity with pi, and do not read pi's override as evidence that the
+upstream service accepts more than Codex's advertised ceiling.
 
 Codex's key is global rather than per-model, and it is the only mechanism Codex
-supports, so it is offered to the whole catalog. The same clamp bounds it
-per model: it lifts every model advertising `max_context_window = 872000` (Sol,
-Terra and Luna, plus `gpt-6-astra`, `gpt-reserve` and `codex-auto-review`),
-while `gpt-5.5` settles at its own 272,000 and `gpt-5.3-codex-spark` at 128,000.
-Pi's overrides are per-model, so Luna stays at 272,000 there.
+supports, so it is offered to the whole catalog and needs **no change at all** to
+cover Astra. The same clamp bounds it per model: in the 0.153.4 catalog it
+reaches the full 872,000 on `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`,
+`gpt-5.6-luna`, `gpt-daybreak-blue-latest` and `codex-auto-review`. Models
+advertising less keep their own lower ceiling (`gpt-daybreak-red-latest`
+372,000; `gpt-5.5`, `gpt-5.4-mini` and `gpt-5.2` 272,000), and `gpt-5.4`, which
+advertises 1,000,000, is held to the configured 872,000. Pi's overrides are
+per-model, so Luna stays at 272,000 there.
 
-Requests above 272K total input tokens bill at GPT-5.6's long-context rates for
+To re-verify against an upgraded Codex, read the catalog the installed binary
+embeds rather than trusting this list:
+
+```
+strings "$(dirname "$(readlink -f "$(command -v codex)")")"/../node_modules/@openai/codex-linux-x64/vendor/*/bin/codex \
+  | grep -E '^      "(slug|max_context_window)"'
+```
+
+Requests above 272K total input tokens bill at the model's long-context rates for
 the whole request. Neither override changes the selected model or effort.
 
 **Activation:** run `bash ~/dotfiles/rebuild.sh`. `~/.pi/agent/models.json` is a
