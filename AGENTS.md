@@ -30,6 +30,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Firstmate worker lane is in flight (a `state/*.meta` file, mirroring
   `firstmate/bin/fm-supervision-lib.sh`), and is packaged on PATH with no timer.
   Its `--help` is authoritative; the self-test sits beside the checker's in `tests/`.
+- `~/.codex/config.toml` is machine-maintained (project trust, hook approvals,
+  TUI state) and must never be replaced or symlinked to a repo file. Home Manager
+  owns exactly one key in it, `model_context_window`, through the atomic
+  idempotent merge in `bin/codex-set-context-window`; `docs/agents.md` records the
+  GPT-5.6 long-context values and why pi (1,050,000) and Codex (872,000) differ.
 - Nix flakes only read git-tracked files: `git add` any new `bin/`/`home/` file
   before `nix build ...activationPackage`, or evaluation fails with "not tracked
   by Git".
