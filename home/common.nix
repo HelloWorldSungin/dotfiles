@@ -84,10 +84,11 @@ in
   home.file.".pi/agent/extensions/fusion-harness".source = link "pi/extensions/fusion-harness";
 
   # ------------------------------------------------- pi model overrides
-  # Opts GPT-5.6 Sol and Terra into OpenAI's 1,050,000-token long-context
-  # window. `modelOverrides` patches the two built-in models in place, so the
-  # rest of the openai-codex catalog (Luna included) keeps its 272,000 default
-  # and every built-in model's pricing metadata is preserved. See docs/agents.md.
+  # Opts GPT-5.6 Sol, GPT-5.6 Terra and GPT-6 Astra into OpenAI's 1,050,000-token
+  # long-context window. `modelOverrides` patches the three built-in models in
+  # place, so the rest of the openai-codex catalog (Luna included) keeps its
+  # 272,000 default and every built-in model's pricing metadata is preserved.
+  # See docs/agents.md.
   home.file.".pi/agent/models.json".source = link "pi/models.json";
 
   # --------------------------------------------------- codex context window

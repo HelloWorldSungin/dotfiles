@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Behavior tests for the GPT-5.6 long-context configuration:
-#   - pi/models.json: the exact two openai-codex modelOverrides.
+# Behavior tests for the GPT long-context configuration (GPT-5.6 Sol/Terra and
+# GPT-6 Astra):
+#   - pi/models.json: the exact three openai-codex modelOverrides.
 #   - bin/codex-set-context-window: the narrowly scoped, atomic, idempotent
 #     merge of the single owned key into a machine-maintained config.toml.
 # No test touches the real ~/.codex or ~/.pi; every case uses a temp file.
@@ -35,18 +36,19 @@ assert_eq "$(jq -r '.providers | keys | join(",")' "$MODELS_JSON")" \
 pass "pi/models.json configures only the openai-codex provider"
 
 assert_eq "$(jq -r '.providers["openai-codex"].modelOverrides | keys | sort | join(",")' "$MODELS_JSON")" \
-  "gpt-5.6-sol,gpt-5.6-terra" "modelOverrides covers exactly Sol and Terra"
-pass "modelOverrides covers exactly Sol and Terra"
+  "gpt-5.6-sol,gpt-5.6-terra,gpt-6-astra" "modelOverrides covers exactly Sol, Terra and Astra"
+pass "modelOverrides covers exactly Sol, Terra and Astra"
 
-for model in gpt-5.6-sol gpt-5.6-terra; do
+for model in gpt-5.6-sol gpt-5.6-terra gpt-6-astra; do
   assert_eq "$(jq -r --arg m "$model" '.providers["openai-codex"].modelOverrides[$m].contextWindow' "$MODELS_JSON")" \
     "1050000" "$model contextWindow is 1050000"
   assert_eq "$(jq -r --arg m "$model" '.providers["openai-codex"].modelOverrides[$m] | keys | join(",")' "$MODELS_JSON")" \
     "contextWindow" "$model overrides only contextWindow"
 done
-pass "Sol and Terra each override only contextWindow, to 1050000"
+pass "Sol, Terra and Astra each override only contextWindow, to 1050000"
 
-# The overrides must not touch model selection, effort, or Luna.
+# The overrides must not touch model selection, effort, or any unrelated model
+# such as Luna.
 has_default_model_or_effort() {
   jq -e '[.. | objects | has("model") or has("reasoningEffort")] | any' "$1" >/dev/null 2>&1
 }
@@ -66,8 +68,8 @@ pass "the default model/effort guard fires on a root model and on a nested effor
 ! has_default_model_or_effort "$MODELS_JSON" \
   || fail "pi/models.json must not set a default model or effort"
 
-# Luna, and anything else, is left alone: the provider object carries only the
-# two overrides already pinned above.
+# Luna, and every other unrelated model, is left alone: the provider object
+# carries only the three overrides already pinned above.
 assert_eq "$(jq -r '.providers["openai-codex"] | keys | join(",")' "$MODELS_JSON")" \
   "modelOverrides" "the openai-codex provider carries nothing but modelOverrides"
 pass "pi/models.json changes no default model, effort, or Luna"
@@ -166,13 +168,69 @@ pass "a missing config.toml is created with only the owned key"
 # The value an activation actually writes is the script's own default: nothing
 # sets CODEX_MODEL_CONTEXT_WINDOW on the rebuild path, and every assertion above
 # pins it. `env -u` keeps that hermetic while covering the committed value -
-# Codex's advertised maximum for Sol, Terra and Luna.
+# Codex's advertised maximum for Sol, Terra, Luna and Astra.
 cfg4="$TMP_ROOT/committed-default/config.toml"
 env -u CODEX_MODEL_CONTEXT_WINDOW CODEX_CONFIG_FILE="$cfg4" "$MERGE" \
   || fail "merge failed with CODEX_MODEL_CONTEXT_WINDOW unset"
 assert_eq "$(cat "$cfg4")" "model_context_window = 872000" \
   "an activation with an empty environment must write Codex's 872000 maximum"
 pass "the committed default is 872000, Codex's advertised maximum"
+
+# Astra is covered by that one global key and nothing else. Run the merge over a
+# config that already selects Astra - the case where a per-model window would be
+# most tempting to write - and assert the merge adds only the top-level key.
+per_model_window() {
+  # A context window scoped to a model: either a `[...]` table whose header
+  # names a model, carrying a window key, or a dotted key like
+  # `models.gpt-6-astra.context_window`.
+  python3 - "$1" <<'PY_INNER'
+import re, sys
+table = None
+for raw in open(sys.argv[1]):
+    line = raw.strip()
+    m = re.match(r'^\[+([^\]]+)\]+$', line)
+    if m:
+        table = m.group(1)
+        continue
+    key = line.split('=')[0].strip() if '=' in line else ''
+    if not key.endswith('context_window'):
+        continue
+    scope = f"{table}.{key}" if table else key
+    if table or '.' in key:
+        print(scope)
+        sys.exit(0)
+sys.exit(1)
+PY_INNER
+}
+
+# Negative control: the detector must actually fire on both shapes.
+probe_toml="$TMP_ROOT/per-model-probe.toml"
+for probe_body in \
+  'model_context_window = 872000
+[models.gpt-6-astra]
+context_window = 1050000' \
+  'models.gpt-6-astra.context_window = 1050000'
+do
+  printf '%s\n' "$probe_body" > "$probe_toml"
+  per_model_window "$probe_toml" >/dev/null \
+    || fail "the per-model-window detector is inert on: $probe_body"
+done
+pass "the per-model-window detector fires on a scoped table and a dotted key"
+
+cfg5="$TMP_ROOT/astra-selected/config.toml"
+mkdir -p "$(dirname "$cfg5")"
+printf 'model = "gpt-6-astra"\nmodel_reasoning_effort = "xhigh"\n\n[tui]\ntheme = "dark"\n' > "$cfg5"
+run_merge "$cfg5" || fail "merge failed on an Astra-selected config"
+
+assert_eq "$(grep -c 'context_window' "$cfg5")" "1" \
+  "Astra's context window is configured exactly once"
+! per_model_window "$cfg5" \
+  || fail "the merge must not write a per-model Astra context window"
+grep -qx 'model_context_window = 872000' "$cfg5" \
+  || fail "the global key must cover the selected Astra model"
+grep -qx 'model = "gpt-6-astra"' "$cfg5" \
+  || fail "selecting Astra must survive the merge"
+pass "Astra is covered by the single global key, with no per-model mechanism"
 
 # The merge must never touch model selection or effort.
 grep -qx 'model = "gpt-5.6-sol"' "$cfg" || fail "the selected model was altered"
@@ -204,4 +262,4 @@ else
   printf 'skip - tomllib unavailable, syntax check skipped\n'
 fi
 
-printf '\nall gpt-5.6 long-context tests passed\n'
+printf '\nall GPT long-context tests passed\n'
