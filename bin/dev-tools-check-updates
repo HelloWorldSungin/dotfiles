@@ -23,6 +23,7 @@ CLOSURE_REASON=
 CACHE_HOME=${XDG_CACHE_HOME:-${HOME:-.}/.cache}
 CACHE_PATH=${DEV_TOOLS_UPDATE_CACHE_PATH:-$CACHE_HOME/dev-tools-update-checker/cache.json}
 CACHE_TTL=${DEV_TOOLS_UPDATE_CACHE_TTL_SECONDS:-14400}
+CACHE_UNUSABLE_REASON=
 # The weekly timer is the only thing that refreshes the cache, so the login line
 # accepts a week plus a day of grace and calls anything older stale.
 STARTUP_MAX_AGE=691200
@@ -524,15 +525,29 @@ collect() {
 }
 
 cache_valid() { [ -f "$CACHE_PATH" ] && jq -e '.schema_version == 4 and (.tools|type=="array")' "$CACHE_PATH" >/dev/null 2>&1; }
+# Sets CACHE_UNUSABLE_REASON to the check that rejected the cache, so a caller
+# reports the ground it actually established rather than assuming age.
 cache_within() {
+  local max=$1 window=$2 checked age
+  CACHE_UNUSABLE_REASON='no readable cached audit is bound'
   cache_valid || return 1
-  local max=$1 checked age
   checked=$(jq -r '.checked_at_epoch' "$CACHE_PATH")
-  case "$checked" in ''|*[!0-9]*) return 1 ;; esac
-  age=$((NOW - checked)); [ "$age" -ge 0 ] && [ "$age" -lt "$max" ]
+  case "$checked" in
+    ''|*[!0-9]*) CACHE_UNUSABLE_REASON='the cached audit carries no usable timestamp'; return 1 ;;
+  esac
+  age=$((NOW - checked))
+  if [ "$age" -lt 0 ]; then
+    CACHE_UNUSABLE_REASON='the cached audit is stamped in the future, so this clock cannot age it'
+    return 1
+  fi
+  if [ "$age" -ge "$max" ]; then
+    CACHE_UNUSABLE_REASON="the cached audit is older than $window"
+    return 1
+  fi
+  CACHE_UNUSABLE_REASON=
 }
-cache_fresh() { cache_within "$CACHE_TTL"; }
-cache_startup_usable() { cache_within "$STARTUP_MAX_AGE"; }
+cache_fresh() { cache_within "$CACHE_TTL" 'its freshness window'; }
+cache_startup_usable() { cache_within "$STARTUP_MAX_AGE" 'eight days'; }
 write_cache() {
   [ "$NO_CACHE" -eq 0 ] || return 0
   local parent tmp
@@ -569,7 +584,7 @@ render_startup() {
   if cache_startup_usable; then
     update_line=$(jq -r '[.tools[] | select(.status != "up_to_date") | .name + " " + .status] | if length > 0 then "dev-tools: " + join("; ") else empty end' "$CACHE_PATH")
   elif cache_valid; then
-    update_line='dev-tools: the cached audit is older than eight days, so no tool state is claimed; run dev-tools-check-updates'
+    update_line="dev-tools: $CACHE_UNUSABLE_REASON, so no tool state is claimed; run dev-tools-check-updates"
   fi
   health=$(health_result)
   if [ "$(printf '%s' "$health" | jq -r '.checks.chrome_devtools_headless.status')" != healthy ]; then

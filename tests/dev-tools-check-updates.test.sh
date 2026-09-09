@@ -534,20 +534,28 @@ for now in $((CACHED_AT + EIGHT_DAYS)) $((CACHED_AT + EIGHT_DAYS + 86400)); do
     || fail 'the login banner did not say the cached audit was stale'
 done
 
-# A cache stamped in the future is skew, not freshness, and binds nothing.
+# A cache stamped in the future is clock skew, not age, and the line says so
+# instead of claiming a staleness this clock never established.
 startup=$(TEST_NOW_EPOCH=$((CACHED_AT - 1)) run_checker --startup)
 if printf '%s\n' "$startup" | grep -Fq 'npm:example'; then fail 'a future-stamped cache was claimed as current'; fi
-printf '%s\n' "$startup" | grep -Fq 'older than eight days' || fail 'a future-stamped cache was not reported unusable'
+printf '%s\n' "$startup" | grep -Fq 'stamped in the future' \
+  || fail "a future-stamped cache was reported as an age problem: $startup"
+if printf '%s\n' "$startup" | grep -Fq 'older than eight days'; then
+  fail 'a future-stamped cache asserted an age the clock could not establish'
+fi
 
+# A timestamp that is not an integer is the third ground, and it is named too.
 jq -cn '{schema_version:4,checked_at_epoch:"recently",tools:[
   {name:"npm:example",current:"1.0.0",pinned:"1.1.0",latest_stable:"1.1.0",status:"drifted"}]}' >"$FIXTURE/cache.json"
 startup=$(run_checker --startup)
 if printf '%s\n' "$startup" | grep -Fq 'npm:example'; then fail 'a cache with no usable timestamp was claimed as current'; fi
+printf '%s\n' "$startup" | grep -Fq 'carries no usable timestamp' \
+  || fail "a cache with no usable timestamp was reported as an age problem: $startup"
 
 # Nothing bound at all says nothing: there is no audit to be stale about.
 printf 'not a cache\n' >"$FIXTURE/cache.json"
 [ -z "$(run_checker --startup)" ] || fail 'an unreadable cache produced a login claim'
 rm -f "$FIXTURE/cache.json"
-pass 'the login banner reports tool state for eight days after a check and nothing older'
+pass 'the login banner reports tool state for eight days, and names the ground it refuses on'
 
 printf '\nall dev-tools-check-updates tests passed\n'

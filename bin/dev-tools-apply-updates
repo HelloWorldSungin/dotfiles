@@ -640,7 +640,7 @@ observe_firstmate() {
 # only an exact version a reversal could reinstall. NPM_OBSERVED carries that
 # version; when it is empty NPM_OBSERVE_REASON says which of those failed.
 observe_npm() {
-  local command_name=$1 path output token
+  local command_name=$1 path output token rc
   NPM_OBSERVED=
   NPM_OBSERVE_REASON=
   case "$command_name" in
@@ -655,7 +655,12 @@ observe_npm() {
     return 0
   fi
   output=$(run_timed "$NETWORK_TIMEOUT" env NO_UPDATE_NOTIFIER=1 "$path" --version 2>&1) || {
-    NPM_OBSERVE_REASON="$command_name in the npm prefix did not report a version within ${NETWORK_TIMEOUT}s"
+    rc=$?
+    if [ "$rc" -eq 124 ]; then
+      NPM_OBSERVE_REASON="$command_name in the npm prefix did not answer within ${NETWORK_TIMEOUT}s"
+    else
+      NPM_OBSERVE_REASON="$command_name in the npm prefix exited $rc without reporting a version"
+    fi
     return 0
   }
   token=$(printf '%s\n' "$output" | grep -Eo "$NPM_OBSERVED_TOKEN_RE" | head -1 || true)
@@ -751,6 +756,10 @@ rollback_npm() {
   detect_workers
   [ "$WG_STATUS" = clear ] || { set_tier refused 'a Firstmate worker lane appeared during the preflight'; return; }
   observe_npm "$command_name"
+  if [ -z "$NPM_OBSERVED" ]; then
+    set_tier refused "$NPM_OBSERVE_REASON, so the recorded applied version cannot be confirmed"
+    return
+  fi
   [ "$NPM_OBSERVED" = "$target" ] || { set_tier refused 'the installed version left the recorded applied version during the preflight'; return; }
   refusal=$(preflight_npm_refusal "$entry")
   [ -z "$refusal" ] || { set_tier refused "$refusal"; return; }
@@ -762,7 +771,7 @@ rollback_npm() {
       set_tier rolled_back "reinstalled $package@$prior from $source"
     else
       receipt_reconcile "$entry" "$installed" at_target rollback_failed
-      set_tier failed "reinstalled command did not report the recorded prior version $prior"
+      set_tier failed "reinstalled command did not report the recorded prior version $prior${NPM_OBSERVE_REASON:+; $NPM_OBSERVE_REASON}"
     fi
   else
     observe_npm "$command_name"
@@ -777,7 +786,7 @@ rollback_npm() {
 # artifact - before any tool is touched. A single unreconcilable or unverifiable
 # entry stops its whole tier instead of being discovered halfway through it.
 rollback_preflight() {
-  local doc=$1 entry tier name status observed prior target phase refusal
+  local doc=$1 entry tier name status observed prior target phase refusal unreadable
   PLAN='[]'
   UNRECONCILABLE_TIERS=' '
   while IFS= read -r entry; do
@@ -799,18 +808,20 @@ rollback_preflight() {
       esac
     fi
     if [ -z "$phase" ]; then
+      unreadable='the current state of this tool is absent or unreadable'
       case "$tier" in
         firstmate) observed=$(observe_firstmate) ;;
         npm_global)
           observe_npm "$(printf '%s' "$entry" | jq -r '.command // ""')"
           observed=$NPM_OBSERVED
+          [ -n "$observed" ] || unreadable=${NPM_OBSERVE_REASON:-$unreadable}
           ;;
       esac
       prior=$(printf '%s' "$entry" | jq -r '.prior')
       target=$(printf '%s' "$entry" | jq -r '.target')
       if [ -n "$observed" ] && [ "$observed" = "$prior" ]; then phase=at_prior
       elif [ -n "$observed" ] && [ "$observed" = "$target" ]; then phase=at_target
-      elif [ -z "$observed" ]; then phase=unreconcilable; refusal='the current state of this tool is absent or unreadable'
+      elif [ -z "$observed" ]; then phase=unreconcilable; refusal=$unreadable
       else phase=unreconcilable; refusal="the current state $observed matches neither the recorded prior nor the recorded target"
       fi
     fi

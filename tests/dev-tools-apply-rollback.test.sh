@@ -373,13 +373,34 @@ json=$(run_rollback "$WORK" --attended --json)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail 'an absent tool exited successfully'
-[ "$(tool_detail "$json" gh-axi)" = 'the current state of this tool is absent or unreadable' ] \
-  || fail 'an absent tool was not reported as unreadable'
+[ "$(tool_detail "$json" gh-axi)" = "the npm prefix $PREFIX carries no installed $GH_COMMAND" ] \
+  || fail "an absent tool was not reported as absent from the prefix: $(tool_detail "$json" gh-axi)"
 [ "$(tool_status "$json" quota-axi)" = refused ] || fail 'the sibling package was mutated despite an absent tool'
 no_install_ran || fail 'an absent tool still triggered an install'
 mv "$TMP_ROOT/gh-axi.saved" "$PREFIX/bin/$GH_COMMAND"
 git -C "$CHECKOUT" reset -q --hard "$TARGET_COMMIT"
 pass 'an absent or unreadable tool refuses its tier rather than overwriting it'
+
+# --------------------------------- an unreinstallable state names its own cause
+
+# The observer distinguishes absent, unreadable, unresponsive, and present-but-not
+# reinstallable. The preflight reports the one it established rather than telling
+# the operator to look for a file that is right there.
+: >"$NPM_LOG"
+fake_install "$QUOTA_COMMAND" 0.1.42-rc1
+WORK=$(work_receipt unreinstallable)
+set +e
+json=$(run_rollback "$WORK" --attended --json)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail 'a prerelease installed version exited successfully'
+[ "$(tool_status "$json" quota-axi)" = refused ] || fail 'a prerelease installed version was reversed anyway'
+[ "$(tool_detail "$json" quota-axi)" = "$QUOTA_COMMAND in the npm prefix reports 0.1.42-rc1, which is not an exact version a reversal could reinstall" ] \
+  || fail "an unreinstallable installed version was reported as something else: $(tool_detail "$json" quota-axi)"
+no_install_ran || fail 'an unreinstallable installed version still triggered an install'
+fake_install "$QUOTA_COMMAND" "$QUOTA_VERSION"
+git -C "$CHECKOUT" reset -q --hard "$TARGET_COMMIT"
+pass 'a present but unreinstallable installed version refuses with its own reason'
 
 # --------------------------------- a command name that leaves the prefix refuses
 

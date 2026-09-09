@@ -173,9 +173,10 @@ The login shell runs `dev-tools-check-updates --startup`, which only reads the
 cache the weekly timer refreshes; it never checks a source itself. The timer is
 the only thing that refreshes that cache, so the login line reports tool state
 for eight days after a check - the weekly cadence plus a day of grace - and
-anything older, stamped in the future, or carrying no usable timestamp says the
-cached audit is stale instead of being replayed as current. The four-hour
-freshness window still governs the audit itself, which refreshes when it is run.
+anything older, stamped in the future, or carrying no usable timestamp says which
+of those it was - never an age this clock could not establish - instead of being
+replayed as current. The four-hour freshness window still governs the audit
+itself, which refreshes when it is run.
 
 `dev-tools-check-updates --json --force --no-cache` is the read-only audit. It
 reports every executable and plugin as installed, pinned, and latest stable,
@@ -248,8 +249,10 @@ reversal reinstalls into, not from the checker's PATH lookup - one bounded read 
 the executable that prefix owns, taking its output and errors together under the
 same timeout detection uses, accepted only as an exact version a reinstall could
 restore, and never a name that walks out of the prefix. Nothing installed there,
-an executable that reports no usable version, and one that does not answer in time
-are three different refusals that each say which they were. The observed version
+an executable that reports no usable version, one that exits without reporting a
+version, one that does not answer inside the bound, and one whose version could
+never be reinstalled are different refusals that each say which they were, on the
+reversal path as well as the apply path. The observed version
 must also be re-verifiable against the registry; without that evidence the receipt could not
 describe a reversal, and a recorded mutation with no way back is worse than a
 refused one. A package the prefix does not carry, or one whose prefix version
@@ -311,8 +314,9 @@ One preflight does all of it before anything is touched:
   to rerun.
 - observed state equal to the recorded target: the mutation took effect and the
   entry is eligible for reversal.
-- anything else - a third version, a moved commit, an absent or unreadable tool
-  - is unreconcilable, rather than drift to overwrite.
+- anything else - a third version, a moved commit, a tool the prefix does not
+  carry or cannot be read from - is unreconcilable, rather than drift to
+  overwrite, and the refusal names which of those it observed.
 
 The same preflight then proves each eligible tier is actually reversible: no
 in-flight Firstmate worker lane (npm reversal is the same live-tool mutation

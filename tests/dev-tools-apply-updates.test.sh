@@ -307,6 +307,26 @@ case "$detail" in
 esac
 if grep -Fq 'install -g' "$NPM_LOG"; then fail 'a package with an unreadable prior version was installed anyway'; fi
 
+# A command that fails fast is not a hang, and the refusal reports the status it
+# actually exited with instead of a bound that was never reached.
+: >"$NPM_LOG"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'exit 126\n'
+} >"$PREFIX/bin/$QUOTA_COMMAND"
+chmod +x "$PREFIX/bin/$QUOTA_COMMAND"
+set +e
+json=$(run_apply --json)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail 'a failing installed command exited successfully'
+detail=$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .detail')
+case "$detail" in
+  *'exited 126 without reporting a version'*) : ;;
+  *) fail "a failing installed command was refused for the wrong reason: $detail" ;;
+esac
+if grep -Fq 'install -g' "$NPM_LOG"; then fail 'a package whose prior version could not be read was installed anyway'; fi
+
 # The observation is bounded, so a command that never answers cannot hang a run.
 : >"$NPM_LOG"
 {
@@ -327,13 +347,13 @@ unset TEST_QUOTA_CURRENT
 [ "$rc" -ne 0 ] || fail 'an unresponsive installed command exited successfully'
 detail=$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .detail')
 case "$detail" in
-  *'did not report a version within 1s'*) : ;;
+  *'did not answer within 1s'*) : ;;
   *) fail "an unresponsive installed command was refused for the wrong reason: $detail" ;;
 esac
 [ "$elapsed" -lt 20 ] || fail "the observation was not bounded: the run took ${elapsed}s"
 if grep -Fq 'install -g' "$NPM_LOG"; then fail 'a package whose prior version could not be read was installed anyway'; fi
 seed_quota_prior
-pass 'an unreadable or unresponsive prefix command is refused with its own reason, under a bound'
+pass 'an unreadable, failing, or unresponsive prefix command each gets its own reason, under a bound'
 
 : >"$NPM_LOG"
 TEST_BAD_PACKAGE=quota-axi
