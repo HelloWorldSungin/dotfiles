@@ -35,7 +35,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   re-verifies exact artifacts, refuses when any
   Firstmate worker lane is in flight (a `state/*.meta` file, mirroring
   `firstmate/bin/fm-supervision-lib.sh`), and is packaged on PATH with no timer.
-  Its `--help` is authoritative; the self-test sits beside the checker's in `tests/`.
+  Every real mutation is preceded by a mode-0600 receipt under
+  `$DEV_TOOLS_APPLY_RECEIPT_DIR`; reversal is `--rollback <receipt> --attended`
+  and is never automatic. Its `--help` is authoritative; the self-tests sit
+  beside the checker's in `tests/`.
 - `~/.codex/config.toml` is machine-maintained (project trust, hook approvals,
   TUI state) and must never be replaced or symlinked to a repo file. Home Manager
   owns exactly one key in it, `model_context_window`, through the atomic

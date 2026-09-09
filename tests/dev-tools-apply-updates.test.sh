@@ -171,7 +171,7 @@ json=$(env HOME="$TMP_ROOT/home" PATH="$FAKEBIN:/usr/bin:/bin" DEV_TOOLS_PINS_FI
   DEV_TOOLS_UPDATE_NPM_BIN="$FAKEBIN/npm" DEV_TOOLS_UPDATE_NPM_PREFIX="$PREFIX" DEV_TOOLS_UPDATE_GIT_BIN="$(command -v git)" \
   TEST_PINS="$PINS" TEST_PREFIX="$PREFIX" TEST_FIRSTMATE="$CHECKOUT" TEST_NPM_LOG="$NPM_LOG" TEST_CHECKER_LOG="$CHECKER_LOG" \
   TEST_LIFECYCLE_LOG="$LIFECYCLE_LOG" "$PACKAGED_BIN/dev-tools-apply-updates" --dry-run --json)
-[ "$(printf '%s' "$json" | jq -r '.schema_version')" = 2 ] || fail 'packaged apply could not resolve the checker from PATH'
+[ "$(printf '%s' "$json" | jq -r '.schema_version')" = 3 ] || fail 'packaged apply could not resolve the checker from PATH'
 grep -Fq -- '--json --force --no-cache' "$CHECKER_LOG" || fail 'packaged apply did not invoke the PATH checker'
 pass 'Nix-packaged apply resolves its checker runtime dependency'
 

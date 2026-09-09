@@ -175,6 +175,40 @@ Both scopes refuse while any Firstmate worker lane exists and recheck that guard
 immediately before mutation; a lane found by that recheck is reported in the
 result's `worker_guard`, not only in the tier it deferred. Dry-run performs no
 install, merge, or fetch.
+
+Every real mutation is preceded by a mode-0600 receipt written atomically under
+`$DEV_TOOLS_APPLY_RECEIPT_DIR` (by default `$XDG_STATE_HOME/dev-tools-apply-updates`).
+It records each affected tool, its exact prior commit or version, its exact
+target, the independently verified remote or registry evidence for both, and
+per-tool and per-tier completion status. A receipt that cannot be written
+refuses the mutation it would have covered, so nothing is ever changed without a
+record. Dry-run names the receipt it would write and writes nothing.
+
+Partial apply is expected and recorded rather than hidden. Each tool carries its
+own completion status, so a run that converges one package and fails or refuses
+another leaves an accurate per-tool record while the tier reports the worst
+case. After an apply or a partial failure the command prints the receipt path
+and the exact rollback preconditions.
+
+## Rollback
+
+Rollback is attended, never automatic, and never restarts a service:
+
+```sh
+dev-tools-apply-updates --rollback <receipt>              # check preconditions only
+dev-tools-apply-updates --rollback <receipt> --attended   # perform the reversal
+```
+
+Only tools the receipt records as `applied` are eligible. Firstmate reversal
+requires no in-flight worker lane, a checkout on `main` that is clean and still
+at the recorded applied commit, and the recorded prior commit verified as that
+commit's ancestor; it is then `git reset --hard <prior commit>` - never a force,
+and never a discard of local changes. npm reversal reinstalls only the exact
+prior version the receipt records, after independently re-verifying that
+version's registry identity and integrity, and refuses a prior version that is
+unavailable or whose integrity has changed. Herdr, the shared no-mistakes
+daemon, GBrain, and every other runtime-hosting tool remain outside both
+directions.
 Herdr, no-mistakes, GBrain, Nix, agent harnesses, and Baby Menu are never apply
 targets.
 
@@ -185,6 +219,8 @@ targets.
    clear. Record the checker output and take any tool-specific backup first.
 3. Preview the two safe scopes with `dev-tools-apply-updates --dry-run`, then run
    the guarded apply if its independently verified exact versions are correct.
+   Keep the receipt path it prints; reversing either tier is attended and starts
+   from `dev-tools-apply-updates --rollback <receipt>`.
 4. Upgrade no-mistakes separately in an attended window. Confirm there is no
    active shared-daemon work before touching its binary or daemon, then validate
    the installed version against the pin.
