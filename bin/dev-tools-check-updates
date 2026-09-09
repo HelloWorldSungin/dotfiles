@@ -369,12 +369,21 @@ check_nix_input() {
 check_nix_package() {
   local package=$1 command_name=$2 pinned=$3 evidence=$4 current path resolved store_name detail
   detail='latest stable is defined by the exact locked Nixpkgs revision'
-  if [ "$evidence" = closure ]; then
-    closure_measure "$package" "$command_name"
-    tool_json "nix:$package" nixpkgs-locked-closure "$CLOSURE_VERSION" "$pinned" "$pinned" exact-nix-derivation rebuild-only "$detail; $CLOSURE_REASON"
-    return
-  fi
-  detail="$detail; measured from the user environment command"
+  case "$evidence" in
+    closure)
+      closure_measure "$package" "$command_name"
+      tool_json "nix:$package" nixpkgs-locked-closure "$CLOSURE_VERSION" "$pinned" "$pinned" exact-nix-derivation rebuild-only "$detail; $CLOSURE_REASON"
+      return
+      ;;
+    user-env)
+      detail="$detail; measured from the user environment command"
+      ;;
+    *)
+      tool_json "nix:$package" nixpkgs-locked-unclassed unknown "$pinned" "$pinned" exact-nix-derivation rebuild-only \
+        "$detail; the pin row carries no recognised evidence class, so no measurement source is authorised"
+      return
+      ;;
+  esac
   current=$(installed_command_version "$command_name" || printf unknown)
   if [ "$package" = unzip ] && [ "$current" = 6.00 ]; then
     current=6.0
@@ -552,8 +561,10 @@ render_health_human() {
 
 render_startup() {
   local update_line='' health health_line=''
-  if cache_valid; then
+  if cache_fresh; then
     update_line=$(jq -r '[.tools[] | select(.status != "up_to_date") | .name + " " + .status] | if length > 0 then "dev-tools: " + join("; ") else empty end' "$CACHE_PATH")
+  elif cache_valid; then
+    update_line='dev-tools: the cached audit is outside its freshness window, so no tool state is claimed; run dev-tools-check-updates'
   fi
   health=$(health_result)
   if [ "$(printf '%s' "$health" | jq -r '.checks.chrome_devtools_headless.status')" != healthy ]; then

@@ -148,6 +148,11 @@ git clone -q "file://$REMOTE" "$CHECKOUT"
 STUBS="$TMP_ROOT/stubs"; PREFIX="$TMP_ROOT/npm-prefix"; STATE="$TMP_ROOT/state"
 mkdir -p "$STUBS" "$PREFIX/bin" "$STATE" "$TMP_ROOT/home"
 
+# The prior state a receipt records is read from the npm prefix a reversal
+# reinstalls into, so the detected version has to really be installed there.
+printf '#!%s\nprintf "%s 0.0.1\\n"\n' "$BASH_BIN" "$QUOTA_COMMAND" >"$PREFIX/bin/$QUOTA_COMMAND"
+chmod +x "$PREFIX/bin/$QUOTA_COMMAND"
+
 DETECTION=$(jq -cn --arg pin "$FIRSTMATE_REV" --arg head "$(git -C "$CHECKOUT" rev-parse HEAD)" \
   --arg quota "$QUOTA_VERSION" \
   '{schema_version:4,tools:[

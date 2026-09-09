@@ -490,7 +490,7 @@ apply_firstmate() {
 
 apply_npm() {
   local detection=$1 results='[]' name spec command_name package pinned integrity registry_json verified_version verified_integrity
-  local current installed item any=0 failed=0 refused=0 deferred=0 prior_evidence entry
+  local current observed installed item any=0 failed=0 refused=0 deferred=0 prior_evidence entry
   for name in $(printf '%s' "$ALLOWLIST_NPM_JSON" | jq -r '.[]'); do
     spec=$(pin_for_npm "$name" || true)
     if [ -z "$spec" ]; then
@@ -532,9 +532,22 @@ apply_npm() {
       item=$(tier_json refused "the installed version $current has no shape a reversal could restore; refusing a mutation it could not reverse" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg c "$current" '{name:$n,pinned:$p,prior:$c}')")
       results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
     fi
-    prior_evidence=$(npm_prior_evidence "$package" "$current")
+    # A reversal writes into $NPM_PREFIX and reads its result back from there, so
+    # the prior state the receipt records is read from the same place. Detection is
+    # delegated to the checker, which resolves through PATH; when the two disagree
+    # the receipt would name a version reinstalling could not restore.
+    observed=$(observe_npm "$command_name")
+    if [ -z "$observed" ]; then
+      item=$(tier_json refused "the npm prefix $NPM_PREFIX carries no installed $command_name to reverse to; refusing a mutation it could not reverse" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg c "$current" '{name:$n,pinned:$p,detected:$c}')")
+      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
+    fi
+    if [ "$observed" != "$current" ]; then
+      item=$(tier_json refused "detection read $current but the npm prefix carries $observed; refusing a mutation whose reversal target is unclear" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg c "$current" --arg o "$observed" '{name:$n,pinned:$p,detected:$c,observed:$o}')")
+      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
+    fi
+    prior_evidence=$(npm_prior_evidence "$package" "$observed")
     if [ -z "$prior_evidence" ]; then
-      item=$(tier_json refused "could not verify the installed version $current against the registry or an operator-supplied artifact; refusing a mutation it could not reverse" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg c "$current" '{name:$n,pinned:$p,prior:$c}')")
+      item=$(tier_json refused "could not verify the installed version $observed against the registry or an operator-supplied artifact; refusing a mutation it could not reverse" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg c "$observed" '{name:$n,pinned:$p,prior:$c}')")
       results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
     fi
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -550,7 +563,7 @@ apply_npm() {
       item=$(tier_json deferred 'workers appeared during re-verification' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')"); deferred=1
       results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); continue
     fi
-    entry=$(jq -cn --arg n "$name" --arg cmd "$command_name" --arg pkg "$package" --arg prior "$current" \
+    entry=$(jq -cn --arg n "$name" --arg cmd "$command_name" --arg pkg "$package" --arg prior "$observed" \
       --arg target "$pinned" --argjson pe "$prior_evidence" --arg ti "$verified_integrity" \
       '{tier:"npm_global",name:$n,command:$cmd,package:$pkg,prior:$prior,target:$target,
         prior_evidence:$pe,

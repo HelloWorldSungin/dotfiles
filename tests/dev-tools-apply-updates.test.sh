@@ -32,10 +32,12 @@ printf '\nFIRSTMATE_REV=%s\n' "$PINNED_HEAD" >>"$PINS"
 # shellcheck disable=SC1091
 source "$PINS"
 for row in "${NPM_TOOL_PINS[@]}"; do
-  IFS='|' read -r name _command _package version _integrity _guarded _channel <<<"$row"
-  [ "$name" = quota-axi ] && QUOTA_AXI_VERSION=$version
+  IFS='|' read -r name command_name _package version _integrity _guarded _channel <<<"$row"
+  [ "$name" = quota-axi ] && QUOTA_AXI_VERSION=$version && QUOTA_COMMAND=$command_name
 done
 : "${QUOTA_AXI_VERSION:?quota-axi pin missing}"
+: "${QUOTA_COMMAND:?quota-axi command missing}"
+QUOTA_PRIOR=0.0.1
 
 FAKEBIN="$TMP_ROOT/fakebin"
 PREFIX="$TMP_ROOT/npm-prefix"
@@ -58,8 +60,14 @@ tools=$(jq -cn --arg current "$(git -C "$TEST_FIRSTMATE" rev-parse HEAD)" --arg 
 for row in "${NPM_TOOL_PINS[@]}"; do
   IFS='|' read -r name command_name _package pinned _integrity guarded _channel <<<"$row"
   [ "$guarded" = yes ] || continue
-  current=$pinned
-  if [ "$name" = quota-axi ] && [ ! -x "$TEST_PREFIX/bin/$command_name" ]; then current=0.0.1; fi
+  # The installed version comes from the npm prefix, which is where the apply
+  # tier writes and where a reversal would read it back from.
+  current=unknown
+  if [ -x "$TEST_PREFIX/bin/$command_name" ]; then
+    current=$(env NO_UPDATE_NOTIFIER=1 "$TEST_PREFIX/bin/$command_name" --version 2>/dev/null | grep -Eo '[0-9]+(\.[0-9]+){1,3}' | head -1)
+  fi
+  [ -n "$current" ] || current=unknown
+  [ "$name" = quota-axi ] && [ -n "${TEST_QUOTA_CURRENT:-}" ] && current=$TEST_QUOTA_CURRENT
   latest=$pinned
   [ "$name" = quota-axi ] && [ -n "${TEST_STALE_CHECKER_LATEST:-}" ] && latest=$TEST_STALE_CHECKER_LATEST
   item=$(jq -cn --arg name "$name" --arg current "$current" --arg pinned "$pinned" --arg latest "$latest" \
@@ -129,14 +137,24 @@ exit 99
 SH
 chmod +x "$FAKEBIN"/*
 
-# Five packages begin current. quota-axi is the single drifted package.
+# Five packages begin current. quota-axi begins at an earlier installed version,
+# so it is the single drifted package and its prior state is really in the prefix.
+seed_prefix() { # command version
+  printf '#!/usr/bin/env bash\nprintf "%s %s\\n"\n' "$1" "$2" >"$PREFIX/bin/$1"
+  chmod +x "$PREFIX/bin/$1"
+}
+seed_quota_prior() { seed_prefix "$QUOTA_COMMAND" "$QUOTA_PRIOR"; }
+quota_version() {
+  [ -x "$PREFIX/bin/$QUOTA_COMMAND" ] || return 0
+  env NO_UPDATE_NOTIFIER=1 "$PREFIX/bin/$QUOTA_COMMAND" --version 2>/dev/null | grep -Eo '[0-9]+(\.[0-9]+){1,3}' | head -1
+}
 for row in "${NPM_TOOL_PINS[@]}"; do
   IFS='|' read -r name command_name _package pinned _integrity guarded _channel <<<"$row"
   [ "$guarded" = yes ] || continue
   [ "$name" = quota-axi ] && continue
-  printf '#!/usr/bin/env bash\nprintf "%s %s\\n"\n' "$command_name" "$pinned" >"$PREFIX/bin/$command_name"
-  chmod +x "$PREFIX/bin/$command_name"
+  seed_prefix "$command_name" "$pinned"
 done
+seed_quota_prior
 
 run_apply() {
   env HOME="$TMP_ROOT/home" PATH="$FAKEBIN:/usr/bin:/bin" DEV_TOOLS_PINS_FILE="$PINS" \
@@ -146,6 +164,7 @@ run_apply() {
     TEST_PINS="$PINS" TEST_PREFIX="$PREFIX" TEST_FIRSTMATE="$CHECKOUT" TEST_NPM_LOG="$NPM_LOG" TEST_CHECKER_LOG="$CHECKER_LOG" \
     TEST_LIFECYCLE_LOG="$LIFECYCLE_LOG" TEST_BAD_PACKAGE="${TEST_BAD_PACKAGE:-}" TEST_INVALID_CHECKER="${TEST_INVALID_CHECKER:-0}" \
     TEST_STALE_CHECKER_LATEST="${TEST_STALE_CHECKER_LATEST:-}" TEST_WORKER_APPEARS="${TEST_WORKER_APPEARS:-}" \
+    TEST_QUOTA_CURRENT="${TEST_QUOTA_CURRENT:-}" \
     "$APPLY" "$@"
 }
 
@@ -182,14 +201,59 @@ json=$(env HOME="$TMP_ROOT/home" PATH="$FAKEBIN:/usr/bin:/bin" DEV_TOOLS_PINS_FI
 grep -Fq -- '--json --force --no-cache' "$CHECKER_LOG" || fail 'packaged apply did not invoke the PATH checker'
 pass 'Nix-packaged apply resolves its checker runtime dependency'
 
-rm -f "$PREFIX/bin/quota-axi"
+seed_quota_prior
 : >"$NPM_LOG"
 json=$(run_apply --dry-run --json)
 [ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')" = would_apply ] || fail 'dry-run did not preview exact convergence'
 grep -Fq "view quota-axi@$QUOTA_AXI_VERSION version dist.integrity --json" "$NPM_LOG" || fail 'dry-run did not re-verify the exact artifact'
 ! grep -Fq 'install -g' "$NPM_LOG" || fail 'dry-run installed a package'
-[ ! -e "$PREFIX/bin/quota-axi" ] || fail 'dry-run created the tool command'
+[ "$(quota_version)" = "$QUOTA_PRIOR" ] || fail 'dry-run changed the installed tool version'
 pass 'dry-run re-verifies but performs no mutation'
+
+# ---- the recorded prior comes from the npm prefix a reversal would write into
+
+# Detection resolves through PATH, the reversal writes into $NPM_PREFIX. When the
+# prefix carries nothing there is no prior state to reverse to, so the mutation is
+# refused rather than recorded against a version reinstalling could not restore.
+: >"$NPM_LOG"
+rm -f "$PREFIX/bin/$QUOTA_COMMAND"
+TEST_QUOTA_CURRENT=$QUOTA_PRIOR
+set +e
+json=$(run_apply --json)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail 'a package absent from the npm prefix exited successfully'
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')" = refused ] \
+  || fail 'a package absent from the npm prefix was not refused'
+printf '%s' "$json" | jq -e '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .detail | test("carries no installed")' >/dev/null \
+  || fail 'the refusal did not name the npm prefix as the missing prior state'
+if grep -Fq 'install -g' "$NPM_LOG"; then fail 'a package with no reversible prior state was installed anyway'; fi
+set +e
+dry=$(run_apply --dry-run --json)
+set -e
+[ "$(printf '%s' "$dry" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')" = refused ] \
+  || fail 'the preview promised a mutation the apply path refuses'
+unset TEST_QUOTA_CURRENT
+seed_quota_prior
+pass 'a package the npm prefix does not carry is refused in both preview and apply'
+
+# Detection and the prefix disagreeing means the receipt would record a prior the
+# reversal would never restore, so that mutation is refused too.
+: >"$NPM_LOG"
+TEST_QUOTA_CURRENT=0.2.0
+set +e
+json=$(run_apply --json)
+rc=$?
+set -e
+unset TEST_QUOTA_CURRENT
+[ "$rc" -ne 0 ] || fail 'a detection and prefix disagreement exited successfully'
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')" = refused ] \
+  || fail 'a detection and prefix disagreement was not refused'
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .observed')" = "$QUOTA_PRIOR" ] \
+  || fail 'the refusal did not report the version the npm prefix actually carries'
+if grep -Fq 'install -g' "$NPM_LOG"; then fail 'a mutation ran while the prior state was ambiguous'; fi
+[ "$(quota_version)" = "$QUOTA_PRIOR" ] || fail 'the refused package was changed anyway'
+pass 'detection disagreeing with the npm prefix refuses the mutation'
 
 : >"$NPM_LOG"
 TEST_BAD_PACKAGE=quota-axi
@@ -229,7 +293,7 @@ pass 'active Firstmate lanes defer every mutation before detection'
 # A lane that only appears inside the re-verification window must be visible in
 # the emitted guard, not just in the tier that deferred because of it.
 : >"$NPM_LOG"; : >"$CHECKER_LOG"
-rm -f "$PREFIX/bin/quota-axi"
+seed_quota_prior
 TEST_WORKER_APPEARS="$STATE/appeared.meta"
 set +e
 json=$(run_apply --json)
@@ -237,7 +301,7 @@ set -e
 unset TEST_WORKER_APPEARS
 [ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .detail')" = 'workers appeared during re-verification' ] \
   || fail 'a lane appearing during re-verification did not defer the mutation'
-[ ! -e "$PREFIX/bin/quota-axi" ] || fail 'a lane appearing during re-verification still installed the package'
+[ "$(quota_version)" = "$QUOTA_PRIOR" ] || fail 'a lane appearing during re-verification still installed the package'
 [ "$(printf '%s' "$json" | jq -r '.worker_guard.status')" = active ] \
   || fail 'the result reported a clear worker guard while a tier deferred on an active lane'
 [ "$(printf '%s' "$json" | jq -r '.worker_guard.in_flight')" = 1 ] || fail 'the result did not count the lane that deferred the mutation'

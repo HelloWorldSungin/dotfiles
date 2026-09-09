@@ -89,7 +89,9 @@ deprecated 25.11 channel. The lock file carries the content hashes.
 The table includes user-facing packages and runtime inputs of the
 repository-owned tool scripts. Every row carries an evidence class that says
 where its installed version may be read from, and `home/dev-tools.nix` owns the
-matching split.
+matching split. The class is a closed set: a row that carries neither `user-env`
+nor `closure` authorises no measurement source at all and reports `unknown`,
+rather than quietly reading whatever the ambient PATH offers.
 
 `user-env` rows are in the user environment, so the command the operator runs is
 the pinned one and is measured through PATH. `closure` rows - coreutils, curl,
@@ -167,6 +169,12 @@ its complete runtime closure declared. The interactive checker, the weekly
 timer, the login-shell startup check, and the updater's checker dependency are
 therefore one derivation rather than four copies that happen to agree.
 
+The login shell runs `dev-tools-check-updates --startup`, which only reads the
+cache the weekly timer refreshes; it never checks a source itself. It reports
+tool state only from a cache inside the same freshness window every other cached
+read uses, and otherwise says the cached audit is stale instead of replaying it
+as current.
+
 `dev-tools-check-updates --json --force --no-cache` is the read-only audit. It
 reports every executable and plugin as installed, pinned, and latest stable,
 reports Nix input and package pins, and names intentionally unmanaged tools.
@@ -233,9 +241,13 @@ the tools themselves converged. Dry-run names the receipt it would write and
 writes nothing.
 
 An npm tool's reversal path is proven before anything is decided, by the preview
-and the apply alike. The installed version must be re-verifiable against the
-registry; without that evidence the receipt could not describe a reversal, and a
-recorded mutation with no way back is worse than a refused one. The other
+and the apply alike. The prior version is read from the same npm prefix a
+reversal reinstalls into, not from the checker's PATH lookup, and it must be
+re-verifiable against the registry; without that evidence the receipt could not
+describe a reversal, and a recorded mutation with no way back is worse than a
+refused one. A package the prefix does not carry, or one whose prefix version
+disagrees with what detection read from PATH, is refused for the same reason: the
+receipt would name a prior state reinstalling could not restore. The other
 allowlisted packages are unaffected and stay reversible.
 
 A version that is absent from the registry - a locally built global install, or

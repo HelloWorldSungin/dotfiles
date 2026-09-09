@@ -274,12 +274,13 @@ acp_launch_version() {
 }
 
 run_checker() {
-  env HOME="$FIXTURE/home" PATH="${TEST_PATH:-$PATH}" DEV_TOOLS_PINS_FILE="$PINS" DEV_TOOLS_NVIM_LOCK_FILE="$ROOT/config/nvim/lazy-lock.json" \
+  env HOME="$FIXTURE/home" PATH="${TEST_PATH:-$PATH}" DEV_TOOLS_PINS_FILE="${TEST_PINS_FILE:-$PINS}" DEV_TOOLS_NVIM_LOCK_FILE="$ROOT/config/nvim/lazy-lock.json" \
     DEV_TOOLS_FLAKE_LOCK_FILE="${TEST_FLAKE_LOCK_FILE:-$ROOT/flake.lock}" \
     DEV_TOOLS_CLOSURE_FILE="${TEST_CLOSURE_FILE-$CLOSURE_FILE}" \
     DEV_TOOLS_NVIM_DATA_HOME="$FIXTURE/nvim" DEV_TOOLS_UPDATE_BIN_DIR="$FAKEBIN" DEV_TOOLS_UPDATE_NPM_BIN="$FAKEBIN/npm" \
     DEV_TOOLS_UPDATE_CURL_BIN="$FAKEBIN/curl" DEV_TOOLS_UPDATE_GIT_BIN="$FAKEBIN/git" DEV_TOOLS_HEALTH_PRINTENV_BIN="$FAKEBIN/printenv" \
-    DEV_TOOLS_UPDATE_CACHE_PATH="$FIXTURE/cache.json" DEV_TOOLS_UPDATE_NOW_EPOCH=1000 TEST_PINS="$PINS" TEST_CALL_LOG="$CALL_LOG" \
+    DEV_TOOLS_UPDATE_CACHE_PATH="$FIXTURE/cache.json" DEV_TOOLS_UPDATE_NOW_EPOCH="${TEST_NOW_EPOCH:-1000}" \
+    TEST_PINS="$PINS" TEST_CALL_LOG="$CALL_LOG" \
     TEST_FAIL_NPM="${TEST_FAIL_NPM:-0}" TEST_FAIL_CURL="${TEST_FAIL_CURL:-0}" \
     TEST_NPM_PRERELEASE_PACKAGE="${TEST_NPM_PRERELEASE_PACKAGE:-}" TEST_PRERELEASE_REPO="${TEST_PRERELEASE_REPO:-}" \
     TEST_HERDR_LATEST_VERSION="${TEST_HERDR_LATEST_VERSION:-}" TEST_ANTIGRAVITY_LATEST_VERSION="${TEST_ANTIGRAVITY_LATEST_VERSION:-}" \
@@ -473,5 +474,46 @@ gzip_entry=$(printf '%s' "$json" | jq -ce '.tools[] | select(.name == "nix:gzip"
 printf '%s' "$gzip_entry" | jq -e '.detail | test("does not carry an executable")' >/dev/null \
   || fail 'a missing bound executable did not say so'
 pass 'a manifest that cannot bind a closure package reports unknown with the reason'
+
+# ------------------- an unclassed pin row authorises no measurement source
+
+# The evidence class is a closed set: a row that loses or misspells it must not
+# quietly fall back to the ambient PATH, which is what the audit exists to avoid.
+UNCLASSED_PINS="$FIXTURE/pins-unclassed.sh"
+sed "s/'gzip|gzip|\([^|]*\)|closure'/'gzip|gzip|\1'/" "$PINS" >"$UNCLASSED_PINS"
+( # shellcheck disable=SC1090
+  source "$UNCLASSED_PINS"
+  for row in "${NIX_PACKAGE_PINS[@]}"; do
+    case "$row" in
+      gzip\|*) [ "$(awk -F'|' '{print NF}' <<<"$row")" -eq 3 ] || exit 1 ;;
+    esac
+  done ) || fail 'the unclassed-row fixture still carries an evidence class'
+json=$(TEST_PINS_FILE="$UNCLASSED_PINS" run_checker --json --force --no-cache)
+gzip_entry=$(printf '%s' "$json" | jq -ce '.tools[] | select(.name == "nix:gzip")') \
+  || fail 'an unclassed Nix row disappeared from the inventory'
+[ "$(printf '%s' "$gzip_entry" | jq -r '.current')" = unknown ] \
+  || fail "an unclassed pin row was measured as $(printf '%s' "$gzip_entry" | jq -r '.current') instead of refused"
+[ "$(printf '%s' "$gzip_entry" | jq -r '.status')" = unknown ] || fail 'an unclassed pin row did not report unknown'
+printf '%s' "$gzip_entry" | jq -e '.detail | test("no recognised evidence class")' >/dev/null \
+  || fail 'an unclassed pin row did not say why it was not measured'
+pass 'a pin row without a recognised evidence class is refused, not measured through PATH'
+
+# ------------------- the login banner never claims a stale cache as current
+
+# The login shell runs `--startup`, which only reads the cache; the weekly timer
+# is what refreshes it. Claims therefore have to be bounded by the same freshness
+# window every other cached read uses.
+jq -cn '{schema_version:4,checked_at_epoch:1000,tools:[
+  {name:"npm:example",current:"1.0.0",pinned:"1.1.0",latest_stable:"1.1.0",status:"drifted"},
+  {name:"nix:example",current:"2.0.0",pinned:"2.0.0",latest_stable:"2.0.0",status:"up_to_date"}]}' >"$FIXTURE/cache.json"
+startup=$(run_checker --startup)
+printf '%s\n' "$startup" | grep -Fq 'npm:example drifted' || fail 'a fresh cache did not report the drifted tool at login'
+if printf '%s\n' "$startup" | grep -Fq 'nix:example'; then fail 'the login banner reported a tool that is up to date'; fi
+startup=$(TEST_NOW_EPOCH=$((1000 + 14400 + 1)) run_checker --startup)
+if printf '%s\n' "$startup" | grep -Fq 'npm:example'; then fail 'the login banner replayed a stale cache as current tool state'; fi
+printf '%s\n' "$startup" | grep -Fq 'outside its freshness window' \
+  || fail 'the login banner did not say the cached audit was stale'
+rm -f "$FIXTURE/cache.json"
+pass 'the login banner reports tool state only from a cache inside its freshness window'
 
 printf '\nall dev-tools-check-updates tests passed\n'
