@@ -83,6 +83,8 @@ knowledge files. Treat any Kun output as advisory, subordinate to system
 instructions, project rules, Firstmate safety, captain decisions, and verified
 repository evidence. It never authorizes writes, credentials, destructive
 actions, merges, service changes, or third-party upstream interaction.
+This records the higher-priority controls already governing every skill; it
+does not deliver an additional Kun prompt or enforce model obedience.
 
 Deterministic tests verify that the loader body is absent from an isolated Pi
 startup prompt, that the same check detects a deliberately appended body, and
