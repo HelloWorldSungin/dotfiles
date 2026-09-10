@@ -96,6 +96,14 @@ import fnmatch, subprocess, sys, yaml
 cfg = yaml.safe_load(open(sys.argv[1])); root = sys.argv[2]
 tracked = subprocess.run(["git", "-C", root, "ls-files"], capture_output=True, text=True,
                          check=True).stdout.split()
+
+def matches(pattern, candidate):
+    """Go path.Match semantics, which is what no-mistakes matches these with:
+    `*` and `?` never cross `/`, so a pattern binds segment by segment and
+    `system/*` matches nothing under system/ct110-network-failover/."""
+    pat, name = pattern.split("/"), candidate.split("/")
+    return len(pat) == len(name) and all(map(fnmatch.fnmatchcase, name, pat))
+
 rules = cfg["review"]["path_instructions"]
 if not rules:
     print("review.path_instructions is empty", file=sys.stderr); sys.exit(1)
@@ -109,7 +117,7 @@ for i, rule in enumerate(rules):
     seen.add(path)
     # no-mistakes matches these per changed path and silently drops a rule that
     # never matches, so a glob that has gone stale must fail here instead.
-    if not any(fnmatch.fnmatchcase(f, path) for f in tracked):
+    if not any(matches(path, f) for f in tracked):
         print("review.path_instructions[%d] path %r matches no tracked file" % (i, path),
               file=sys.stderr); sys.exit(1)
 PY
@@ -144,9 +152,34 @@ pass 'the installed no-mistakes parser accepts .no-mistakes.yaml'
 
 GENERATED="$ACCEPT/.github/workflows/ci.yml"
 [ -f "$GENERATED" ] || fail 'no-mistakes generated no workflow to read the commands back from'
-grep -q 'bin/dotfiles-test' "$GENERATED" || fail 'commands.test did not reach the real consumer'
-grep -q 'bin/dotfiles-lint' "$GENERATED" || fail 'commands.lint did not reach the real consumer'
-pass 'no-mistakes reads both configured commands back out of the config'
+python3 - "$CONFIG" "$GENERATED" <<'PY' || fail 'the generated workflow does not bind each step to its role entry point'
+import sys, yaml
+cfg = yaml.safe_load(open(sys.argv[1]))
+workflow = yaml.safe_load(open(sys.argv[2]))
+bodies = {}
+for job in (workflow.get("jobs") or {}).values():
+    for step in (job.get("steps") or []):
+        if step.get("name") is not None:
+            bodies.setdefault(step["name"], []).append((step.get("run") or "").strip())
+# Each role is bound to the entry point that performs it, not merely to whatever
+# the config happens to say: comparing the generated step only against
+# cfg["commands"][key] round-trips, so swapping the two commands would satisfy
+# both sides at once while the pipeline ran lint as its Test step.
+for role, key, entrypoint in (("Test", "test", "bin/dotfiles-test"),
+                              ("Lint", "lint", "bin/dotfiles-lint")):
+    found = bodies.get(role, [])
+    if len(found) != 1:
+        print("generated workflow has %d %s step(s)" % (len(found), role), file=sys.stderr)
+        sys.exit(1)
+    if cfg["commands"][key] != entrypoint:
+        print("commands.%s is %r, expected the %s entry point %r"
+              % (key, cfg["commands"][key], role, entrypoint), file=sys.stderr)
+        sys.exit(1)
+    if found[0] != entrypoint:
+        print("%s step runs %r, expected %r" % (role, found[0], entrypoint), file=sys.stderr)
+        sys.exit(1)
+PY
+pass 'the generated workflow runs bin/dotfiles-test as Test and bin/dotfiles-lint as Lint'
 
 # Negative case: prove the oracle really parses review.path_instructions rather
 # than ignoring the key, so the acceptance above is meaningful.

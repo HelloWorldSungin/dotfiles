@@ -25,7 +25,7 @@ fi
 
 # Bound a hung suite without masking a slow one: the slowest suite measured on
 # CT110 is under 30s, so 600s only ever fires on a genuine hang.
-SUITE_TIMEOUT_SECONDS=${DOTFILES_TEST_TIMEOUT_SECONDS:-600}
+SUITE_TIMEOUT_SECONDS=600
 run_suite() {
   if command -v timeout >/dev/null 2>&1; then
     timeout "$SUITE_TIMEOUT_SECONDS" bash "$1"

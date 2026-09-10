@@ -11,27 +11,67 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
 
+# A service environment inherits neither ~/.nix-profile/bin nor the Nix daemon
+# profile. This is the same sourcing bootstrap.sh and rebuild.sh use, so there
+# is one idiom for putting Nix on PATH.
+if ! command -v nix >/dev/null 2>&1 &&
+  [ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
+  # shellcheck disable=SC1091
+  . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+fi
+
 command -v shellcheck >/dev/null 2>&1 || {
   echo 'dotfiles-lint: missing lint dependency: shellcheck' >&2
   exit 1
 }
 printf 'dotfiles-lint: %s\n' "$(shellcheck --version | sed -n 's/^version: /ShellCheck /p')"
 
-# Every tracked *.sh file, plus tracked bin/ entries whose shebang says shell.
-# Reading the shebang is what keeps bin/register-nerd-font.ps1 and any future
-# non-shell helper out without maintaining a second hand-written list.
-mapfile -t files < <(
-  {
-    git ls-files -- '*.sh'
-    while IFS= read -r candidate; do
-      [ -f "$candidate" ] || continue
-      head -n 1 -- "$candidate" | grep -qE '^#!.*(bash|sh)$' && printf '%s\n' "$candidate"
-    done < <(git ls-files -- bin)
-  } | sort -u
-)
+# The shell a tracked file declares, or nothing when it declares none. This is
+# the single definition of "shell file" the entry point works from: it reads
+# through `env`, its options and its VAR=value prefixes, and it reads the
+# interpreter word rather than the whole line, so `#!/bin/bash -e` resolves to
+# bash and `#!/usr/bin/env zsh` resolves to zsh (which ShellCheck cannot parse).
+declared_shell() { # declared_shell <file>
+  local first
+  local -a words
+  IFS= read -r first <"$1" 2>/dev/null || return 0
+  [ "${first#\#!}" != "$first" ] || return 0
+  read -r -a words <<<"${first#\#!}"
+  while [ ${#words[@]} -gt 0 ]; do
+    case ${words[0]} in
+      */env | env | -* | *=*) words=("${words[@]:1}") ;;
+      *)
+        printf '%s\n' "${words[0]##*/}"
+        return 0
+        ;;
+    esac
+  done
+}
+
+files=()
+skipped=()
+while IFS= read -r candidate; do
+  [ -f "$candidate" ] || continue
+  shell=$(declared_shell "$candidate")
+  case $shell in
+    sh | bash | dash | ksh) files+=("$candidate") ;;
+    '')
+      # No shebang, so nothing claims this is a shell script. A *.sh name still
+      # claims it, so report that combination instead of dropping it silently.
+      case $candidate in
+        *.sh) skipped+=("$candidate (no shebang)") ;;
+      esac
+      ;;
+    *) skipped+=("$candidate (#!$shell)") ;;
+  esac
+done < <(git ls-files)
 
 [ ${#files[@]} -gt 0 ] || { echo 'dotfiles-lint: no shell files found' >&2; exit 1; }
 printf 'dotfiles-lint: checking %d shell file(s)\n' "${#files[@]}"
+if [ ${#skipped[@]} -gt 0 ]; then
+  printf 'dotfiles-lint: not a shell script, skipped %d file(s):\n' "${#skipped[@]}"
+  printf '  %s\n' "${skipped[@]}"
+fi
 
 if shellcheck -x -- "${files[@]}"; then
   printf 'dotfiles-lint: no findings\n'
