@@ -61,8 +61,8 @@ loader from [`kunchenguid/kun`](https://github.com/kunchenguid/kun), installed
 declaratively through the same three Home Manager paths as vault: Claude,
 Pi, and generic (`~/.agents`) workers. It is not listed in `AGENTS.md`, startup
 prompts, automatic worker instructions, or Firstmate's always-loaded skills. It
-activates only when a user invokes `/kun` or explicitly asks how Kun thinks,
-builds, or solves problems.
+activates only when a user invokes `/kun` (`/skill:kun` in Pi) or explicitly
+asks how Kun thinks, builds, or solves problems.
 
 The installed loader is bound to upstream commit
 [`911dac0971673ad8b220e4ddfc13fc53e7abd5d6`](https://github.com/kunchenguid/kun/tree/911dac0971673ad8b220e4ddfc13fc53e7abd5d6),
@@ -86,12 +86,14 @@ actions, merges, service changes, or third-party upstream interaction.
 This records the higher-priority controls already governing every skill; it
 does not deliver an additional Kun prompt or enforce model obedience.
 
-Deterministic tests verify that the loader body is absent from an isolated Pi
-startup prompt, that the same check detects a deliberately appended body, and
-that explicit invocation delivers the official refusal instruction into the
-expanded agent prompt. They do not run a model or inspect global `AGENTS.md`, so
-they do not prove model obedience when both upstream origins are unreachable or
-guard arbitrary future global-instruction changes.
+`tests/kun-skill.test.sh` verifies the loader hash, that all three Home Manager
+paths resolve to that one loader, that the loader body is absent from an
+isolated Pi startup prompt, that the same check detects a deliberately appended
+body, and that explicit invocation delivers the official refusal instruction
+and upstream URLs into the expanded agent prompt. It does not run a model or
+inspect global `AGENTS.md`, so it does not prove model obedience when both
+upstream origins are unreachable or guard arbitrary future global-instruction
+changes.
 
 To update the loader, inspect only `kunchenguid/kun`: verify the upstream
 default-branch commit, its `skills/kun/SKILL.md` content and SHA-256, and the
