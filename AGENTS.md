@@ -74,9 +74,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   TUI state) and must never be replaced or symlinked to a repo file. Home Manager
   owns exactly one key in it, `model_context_window`, through the atomic
   idempotent merge in `bin/codex-set-context-window`; `docs/agents.md` records the
-  GPT long-context values (Sol, Terra, Astra) at 872,000 for both pi and Codex,
-  and the command that re-verifies Codex's advertised ceilings against an
-  upgraded binary.
+  GPT long-context values (Sol, Terra, Astra) for both pi and Codex, and the
+  command that re-verifies Codex's advertised ceilings against an upgraded
+  binary.
 - Nix flakes only read git-tracked files: `git add` any new `bin/`/`home/` file
   before `nix build ...activationPackage`, or evaluation fails with "not tracked
   by Git".
