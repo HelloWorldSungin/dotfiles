@@ -2,6 +2,8 @@
 # Behavior tests for the GPT long-context configuration (GPT-5.6 Sol/Terra and
 # GPT-6 Astra):
 #   - pi/models.json: the exact three openai-codex modelOverrides.
+#   - the installed Pi package (from the npm prefix) applying them, and its
+#     shouldCompact threshold at contextWindow minus the configured reserve.
 #   - bin/codex-set-context-window: the narrowly scoped, atomic, idempotent
 #     merge of the single owned key into a machine-maintained config.toml.
 # No test touches the real ~/.codex or ~/.pi; every case uses a temp file.
