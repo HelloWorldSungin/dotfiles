@@ -4,14 +4,13 @@
 # The loader itself is an intentional user-visible instruction contract, not an
 # executable client. The test obtains each deployed file from Home Manager,
 # verifies its reviewed upstream digest, and drives Pi's RPC interface to prove
-# that startup exposes only skill metadata while explicit invocation emits the
-# full reviewed contract.
+# that startup exposes only skill metadata while explicit invocation delivers
+# the refusal instruction and upstream locations.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 CONFIG='homeConfigurations."sungin@ct110".config'
 EXPECTED_SHA256=37864c82e1d8b73a153fbad9d9b88d2ab62278867b051cdf884ed16d258af0d0
-EXPECTED_EXPANDED_SHA256=b8e72f01509f156baa14f859153d9b4c729e3d762fbb43c787e3c96c6fc9ad35
 LOADER="$ROOT/skills/kun/SKILL.md"
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/kun-skill-tests.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
@@ -84,12 +83,24 @@ export default function (pi: any) {
 
   pi.registerCommand("capture-kun-startup", {
     handler: async (_args: string, ctx: any) => {
-      const skills = ctx.getSystemPromptOptions().skills ?? [];
+      const options = ctx.getSystemPromptOptions();
+      const skills = options.skills ?? [];
       const kun = skills.find((skill: any) => skill.name === "kun");
       const document = kun ? readFileSync(kun.filePath, "utf8") : "";
+      const frontmatterEnd = document.indexOf("\n---\n");
+      const body = frontmatterEnd >= 0
+        ? document.slice(frontmatterEnd + 5).trim()
+        : document.trim();
+      const contextFiles = options.contextFiles ?? [];
       writeFileSync(process.env.KUN_PROBE_FILE!, JSON.stringify({
         kun,
-        fullDocumentVisible: document !== "" && ctx.getSystemPrompt().includes(document),
+        contextFilePaths: contextFiles.map((file: any) => file.path),
+        contextReferencesKun: contextFiles.some((file: any) =>
+          file.content.includes("/kun") ||
+          file.content.includes("skills/kun") ||
+          file.content.includes("kunchenguid/kun")
+        ),
+        instructionBodyVisible: body !== "" && ctx.getSystemPrompt().includes(body),
       }));
       process.exit(0);
     },
@@ -107,16 +118,21 @@ run_pi_probe() {
   printf '{"type":"prompt","message":"%s"}\n' "$message" |
     KUN_PROBE_FILE="$output" KUN_TEST_API_KEY=test \
       pi --mode rpc --offline --no-session --provider kun-test --model probe \
-      --no-context-files --no-prompt-templates --no-themes --no-extensions \
+      --no-prompt-templates --no-themes --no-extensions \
       --no-skills --skill "$LOADER" --extension "$TMP_ROOT/probe.ts" \
       >/dev/null 2>"$TMP_ROOT/pi.stderr" \
-    || fail "Pi failed while probing $message"
+    || {
+      cat "$TMP_ROOT/pi.stderr" >&2
+      fail "Pi failed while probing $message"
+    }
   [ -s "$output" ] || fail "Pi produced no probe result for $message"
 }
 
 run_pi_probe '/capture-kun-startup' "$TMP_ROOT/startup.json"
-if ! jq -e --arg loader "$LOADER" '
-  .fullDocumentVisible == false and
+if ! jq -e --arg loader "$LOADER" --arg agents "$ROOT/AGENTS.md" '
+  .instructionBodyVisible == false and
+  .contextReferencesKun == false and
+  (.contextFilePaths | index($agents)) != null and
   .kun.name == "kun" and
   .kun.filePath == $loader and
   .kun.disableModelInvocation == false and
@@ -128,11 +144,19 @@ fi
 pass 'ordinary startup exposes Kun only for explicit invocation or a matching user request'
 
 run_pi_probe '/skill:kun' "$TMP_ROOT/invocation.txt"
-normalized=$(sed "s#$ROOT#<ROOT>#g" "$TMP_ROOT/invocation.txt" | sha256sum | awk '{print $1}')
-if [ "$normalized" != "$EXPECTED_EXPANDED_SHA256" ]; then
-  sed "s#$ROOT#<ROOT>#g" "$TMP_ROOT/invocation.txt" >&2
-  fail "explicit Kun invocation emitted unexpected contract digest: $normalized"
-fi
-pass 'explicit invocation emits the reviewed visible refusal contract before any model call'
+expected_prompt_lines=(
+  'If the files cannot be fetched, stop and say so. Do not guess file contents.'
+  '- `https://raw.githubusercontent.com/kunchenguid/kun/main/ENTRY.md`'
+  '- `https://raw.githubusercontent.com/kunchenguid/kun/main/TOOLS.md`'
+  '- `https://raw.githubusercontent.com/kunchenguid/kun/main/OPINIONS.md`'
+  '- `https://raw.githubusercontent.com/kunchenguid/kun/main/VOICE.md`'
+)
+for line in "${expected_prompt_lines[@]}"; do
+  grep -Fqx -- "$line" "$TMP_ROOT/invocation.txt" || {
+    sed "s#$ROOT#<ROOT>#g" "$TMP_ROOT/invocation.txt" >&2
+    fail "explicit Kun invocation omitted expected instruction: $line"
+  }
+done
+pass 'explicit invocation delivers the official refusal instruction and upstream URLs'
 
 printf 'kun skill tests passed\n'

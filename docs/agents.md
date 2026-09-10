@@ -84,6 +84,10 @@ instructions, project rules, Firstmate safety, captain decisions, and verified
 repository evidence. It never authorizes writes, credentials, destructive
 actions, merges, service changes, or third-party upstream interaction.
 
+Deterministic tests verify that explicit invocation delivers the official
+refusal instruction into the expanded agent prompt. They do not run a model, so
+model obedience when both upstream origins are unreachable is not CI-verified.
+
 To update the loader, inspect only `kunchenguid/kun`: verify the upstream
 default-branch commit, its `skills/kun/SKILL.md` content and SHA-256, and the
 repository license status. Replace only `skills/kun/SKILL.md` with that exact
