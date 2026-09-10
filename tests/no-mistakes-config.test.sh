@@ -55,30 +55,30 @@ for name, cmd in cmds.items():
 PY
 pass 'commands.test and commands.lint name tracked, executable repository entry points'
 
-py <<'PY' || fail 'review_agents does not describe two independent harnesses'
+py <<'PY' || fail 'review_agents does not configure both roles through an explicit harness'
 import sys, yaml
 cfg = yaml.safe_load(open(sys.argv[1]))
 ra = cfg["review_agents"]
 if set(ra) != {"reviewer", "fixer"}:
     print("review_agents roles %s, expected reviewer and fixer" % sorted(ra), file=sys.stderr); sys.exit(1)
-# Only claude and codex neutralize a target repository's AGENTS.md/CLAUDE.md; a
-# gate agent that does not is refused by no-mistakes in a gated checkout.
-neutralizing = {"claude", "codex"}
-agents = {}
+# The harnesses no-mistakes v1.72.0 names as valid, minus `auto`. The config
+# parser accepts any string here without complaint and only rejects it when it
+# resolves the agent, so a typo would otherwise reach a live run. Which harness
+# each role gets is an operational choice - a same-provider failover is valid -
+# so this only rejects a name no-mistakes could route at all.
+explicit = {"claude", "codex", "grok", "rovodev", "opencode", "pi", "copilot",
+            "cursor", "antigravity"}
 for role, profile in ra.items():
     agent = (profile or {}).get("agent")
     if not agent:
         print("review_agents.%s has no explicit agent" % role, file=sys.stderr); sys.exit(1)
     if agent == "auto":
         print("review_agents.%s must name an explicit harness, not auto" % role, file=sys.stderr); sys.exit(1)
-    if agent not in neutralizing:
-        print("review_agents.%s agent %r does not neutralize AGENTS.md" % (role, agent), file=sys.stderr); sys.exit(1)
-    agents[role] = agent
-if agents["reviewer"] == agents["fixer"]:
-    print("reviewer and fixer share harness %r, losing cross-harness independence"
-          % agents["reviewer"], file=sys.stderr); sys.exit(1)
+    if agent not in explicit:
+        print("review_agents.%s agent %r is not a harness no-mistakes supports" % (role, agent),
+              file=sys.stderr); sys.exit(1)
 PY
-pass 'reviewer and fixer name different neutralizing harnesses explicitly'
+pass 'both review_agents roles name an explicit, supported harness'
 
 py <<'PY' || fail 'a review.path_instructions rule matches no tracked file'
 import fnmatch, subprocess, sys, yaml

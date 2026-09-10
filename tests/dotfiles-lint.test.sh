@@ -81,6 +81,9 @@ skipped=$(awk '
   inlist { exit }
 ' "$OUT" | sort -u)
 
+# The entry point reports how many files it selected before handing them over.
+checked=$(awk '/^dotfiles-lint: checking [0-9]+ shell file\(s\)$/ { print $3 }' "$OUT")
+
 analyzed_has() { grep -qxF "$1" <<<"$analyzed"; }
 skipped_has() { grep -qxF "$1" <<<"$skipped"; }
 report() { cat "$OUT" >&2; fail "$1"; }
@@ -100,7 +103,17 @@ pass 'a shebangless tracked *.sh file is analyzed'
 if grep -qF 'SC2148' "$OUT"; then
   report 'a shebangless *.sh file was linted without being told a shell'
 fi
-pass 'a shebangless *.sh file is linted as bash, so a clean one stays clean'
+# bin/dotfiles-lint, system/runner, lib/helpers.sh and lib/clean.sh. Pinning the
+# count is what proves lib/clean.sh reached ShellCheck at all, and its silence
+# is what proves the shell it was given was bash: its array syntax is reported
+# under any other dialect.
+if [ "$checked" != 4 ]; then
+  report "expected 4 selected files, the entry point reported ${checked:-none}"
+fi
+if analyzed_has 'lib/clean.sh'; then
+  report 'a clean bash sourced library was reported on, so it was not linted as bash'
+fi
+pass 'a shebangless *.sh file is selected and linted as bash, so a clean bash library stays silent'
 
 if analyzed_has 'lib/zshlib.sh'; then
   report 'a *.sh declaring an unsupported shell was handed to ShellCheck'

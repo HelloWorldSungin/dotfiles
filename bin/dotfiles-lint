@@ -53,8 +53,8 @@ declared_shell() { # declared_shell <file>
 # severity error). Only a tracked *.sh that declares nothing falls back to the
 # name, which is the sourced-library shape; ShellCheck does not assume a shell
 # for those either (SC2148, severity error), so they are linted as bash.
-# Extensionless files that declare no supported shell are not shell files at
-# all - that covers the rest of the tree - so they are neither linted nor named.
+# A file that declares nothing and is not named *.sh is not a shell file at all
+# - that covers the rest of the tree - so it is dropped without being named.
 files=()
 bash_files=()
 skipped=()
