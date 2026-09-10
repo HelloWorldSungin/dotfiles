@@ -20,7 +20,7 @@ CURSOR_INSTALLER_SHA256=8513e9f949576d7ced2a2a582252626cc86235437c2749bf93c886f1
 HERDR_LATEST_MANIFEST_URL=https://herdr.dev/latest.json
 
 TREEHOUSE_VERSION=2.3.0
-NO_MISTAKES_VERSION=1.70.1
+NO_MISTAKES_VERSION=1.72.0
 HERDR_VERSION=0.9.0
 
 OPENCODE_ACP_VERSION=1.18.30
@@ -54,17 +54,17 @@ NPM_TOOL_PINS=(
 # name|command|owner/repo|version|install-policy|apply-policy
 GITHUB_TOOL_PINS=(
   'treehouse|treehouse|kunchenguid/treehouse|2.3.0|exact-archive|report-only'
-  'no-mistakes|no-mistakes|kunchenguid/no-mistakes|1.70.1|exact-archive|attended-only'
+  'no-mistakes|no-mistakes|kunchenguid/no-mistakes|1.72.0|exact-archive|attended-only'
   'herdr|herdr|herdrdev/herdr|0.9.0|exact-binary|attended-only'
   'gbrain|gbrain|garrytan/gbrain|0.48.5.0|external-owner|attended-only'
 )
 
 # platform|treehouse-sha256|no-mistakes-sha256|herdr-sha256
 RELEASE_SHA256_PINS=(
-  'darwin-amd64|349afcc13c2beb20d846eb560a11b30e1a5cab8e2dfb22988a36aa7f213b5881|1e28bd7c21b9f855ff246739f8e0673bce839a7adff4c08ea8f5f440514f512f|d0c920b2a126a74809fa1491411c9a097a44786cac9c2ca51b818a995581cf16'
-  'darwin-arm64|1cb09bcfa830b4eec5e54beeaa71589adb9c5d828573dda0f5150e2d80cf13d5|ee13b3dd29ca5d603fba9f04f94921c60770641d15216d7310782ceb78edf20b|32b53df09872628059c789a69f02a6b8e29e14ddf26711421f3463f70c1aef17'
-  'linux-amd64|94fd2b2c20c35aac1ddc2941317890ad82c9916f5ccecbac4a50cda783eed10f|9edc3a5a97c7124b23f35d8cfa8b77976bbf6657067b36a33e3ed6670e26866b|4fa1a01158dd8043da92d31b270780b0dcc10603038d9b61cac4d81ab63fb71f'
-  'linux-arm64|408589ba72b58d5e942071ed863a83fd96566cfd1e514945daa59defde528bbb|b1e011700b0f600fcb67f19f1e9e667b5075f9b5ea82807b771c7c117292e8dd|9c8db20fb7e7427b138d5367113f1621ffd319f2f65d6f009e2594029115f0d2'
+  'darwin-amd64|349afcc13c2beb20d846eb560a11b30e1a5cab8e2dfb22988a36aa7f213b5881|b82a873be9473670f38abe1d9a21a64877c445307d85dfd8d10dfd8d3e1f90d2|d0c920b2a126a74809fa1491411c9a097a44786cac9c2ca51b818a995581cf16'
+  'darwin-arm64|1cb09bcfa830b4eec5e54beeaa71589adb9c5d828573dda0f5150e2d80cf13d5|c3a38e95e050c30ee303806f22fbdc708f945e28d6b249d8e9540de65becb5c7|32b53df09872628059c789a69f02a6b8e29e14ddf26711421f3463f70c1aef17'
+  'linux-amd64|94fd2b2c20c35aac1ddc2941317890ad82c9916f5ccecbac4a50cda783eed10f|c226b69b8b8115827d2e438ea8b32eaff9b89291a1d2fddc5ef2449017b8d927|4fa1a01158dd8043da92d31b270780b0dcc10603038d9b61cac4d81ab63fb71f'
+  'linux-arm64|408589ba72b58d5e942071ed863a83fd96566cfd1e514945daa59defde528bbb|92f402654bdea845ded9cebca41fd565e2ae654bb81c9ce2282e0a2610df8736|9c8db20fb7e7427b138d5367113f1621ffd319f2f65d6f009e2594029115f0d2'
 )
 
 # platform|publisher asset URL|publisher SHA-512

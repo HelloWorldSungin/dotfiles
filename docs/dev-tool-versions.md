@@ -20,7 +20,7 @@ alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
 | Antigravity CLI | 1.1.28 | Google's per-platform production manifest | Exact publisher asset and SHA-512 from that manifest | Report only; its own self-update remains an upstream limitation |
 | Cursor Agent | 2026.09.08-6caf4ff | Version embedded in Cursor's official moving installer | No automated install; observed snapshot only | Report only |
 | Treehouse | 2.3.0 | Latest non-draft, non-prerelease GitHub release | Exact release archive and publisher checksum | Report only |
-| no-mistakes | 1.70.1 | Latest GitHub GA release; 1.71.0 and 1.72.0 prereleases excluded | Exact release archive and publisher checksum | Attended only |
+| no-mistakes | 1.72.0 | Latest GitHub GA release; the 1.73.0 prerelease is excluded | Exact release archive and publisher checksum | Attended only |
 | Herdr | 0.9.0 | `herdr.dev/latest.json`; newer preview builds excluded | Exact manifest asset and publisher checksum, only when absent | Attended only |
 | GBrain | 0.48.5.0 | Latest non-draft, non-prerelease `garrytan/gbrain` release | Not installed here | Firstmate-owned attended migration |
 | gnhf | 0.1.49 | npm default tag | Exact npm package and registry integrity | Guarded exact apply |

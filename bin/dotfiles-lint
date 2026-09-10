@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Canonical lint entry point for this repository.
+#
+# ShellCheck over every tracked shell script, with `-x` so sourced files are
+# followed and at ShellCheck's full default severity, so style-level findings
+# are reported rather than filtered out. Nix evaluation is deliberately not
+# duplicated here: .github/workflows/build.yml is authoritative for it and
+# already runs on every pull request.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$ROOT"
+
+command -v shellcheck >/dev/null 2>&1 || {
+  echo 'dotfiles-lint: missing lint dependency: shellcheck' >&2
+  exit 1
+}
+printf 'dotfiles-lint: %s\n' "$(shellcheck --version | sed -n 's/^version: /ShellCheck /p')"
+
+# Every tracked *.sh file, plus tracked bin/ entries whose shebang says shell.
+# Reading the shebang is what keeps bin/register-nerd-font.ps1 and any future
+# non-shell helper out without maintaining a second hand-written list.
+mapfile -t files < <(
+  {
+    git ls-files -- '*.sh'
+    while IFS= read -r candidate; do
+      [ -f "$candidate" ] || continue
+      head -n 1 -- "$candidate" | grep -qE '^#!.*(bash|sh)$' && printf '%s\n' "$candidate"
+    done < <(git ls-files -- bin)
+  } | sort -u
+)
+
+[ ${#files[@]} -gt 0 ] || { echo 'dotfiles-lint: no shell files found' >&2; exit 1; }
+printf 'dotfiles-lint: checking %d shell file(s)\n' "${#files[@]}"
+
+if shellcheck -x -- "${files[@]}"; then
+  printf 'dotfiles-lint: no findings\n'
+else
+  status=$?
+  printf 'dotfiles-lint: ShellCheck reported findings (exit %d)\n' "$status" >&2
+  exit "$status"
+fi

@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# This suite asserts against literal text read out of the host scripts, so every
+# single-quoted expectation is meant to stay unexpanded; expanding a $-expression
+# here would compare against this shell's values instead of the script's source.
+# shellcheck disable=SC2016
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

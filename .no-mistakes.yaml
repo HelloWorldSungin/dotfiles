@@ -1,0 +1,91 @@
+# Repository-owned no-mistakes configuration.
+#
+# Trust model, which decides when an edit here takes effect: no-mistakes reads
+# `commands` and agent selection from the DEFAULT-BRANCH copy of this file, not
+# from the pushed branch, unless the default-branch copy sets
+# `allow_repo_commands: true`. That opt-in is deliberately NOT set: it would let
+# any pushed branch run arbitrary commands inside the gate. The consequence is
+# that a change to this file is validated by the PREVIOUS configuration and only
+# governs runs started after it lands on master.
+#
+# Every key below was checked against the installed no-mistakes v1.72.0 parser
+# and its public commands; see tests/no-mistakes-config.test.sh.
+
+# Canonical validation entry points. Before these existed, the Test step logged
+# "no test command configured, asking agent to run tests..." and spent 176-860s
+# per run (median 297s) rediscovering how to test this repository, and the Lint
+# step was a 26ms no-op folded into the document housekeeping pass. Both scripts
+# are repository-owned, ShellCheck-clean, and covered by tests/.
+commands:
+  test: bin/dotfiles-test
+  lint: bin/dotfiles-lint
+
+# Independent reviewer and fixer harnesses (v1.72.0).
+#
+# Latency: the reviewer and the fixer alternate serially within a review round,
+# and recorded dotfiles invocations show the fixer role is where the harnesses
+# diverge most - codex review-fix rounds ran 48.9s against 114-795s for claude.
+# Putting the fixer on codex shortens the serial leg while leaving the reviewer,
+# which is what actually gates rigor, on claude.
+#
+# Independence: v1.72.0 already runs every review turn session-free so a
+# rereview never resumes the session that prescribed its fixes. Naming a
+# different harness per role extends that to the model itself, so the pass that
+# re-reviews a fix does not share the blind spots of the pass that wrote it.
+#
+# Load: both provider windows read projected_exhaustion at the time of writing;
+# splitting the roles spends two pools instead of draining one.
+#
+# Only `agent` is pinned here. Model and reasoning effort stay owned by the
+# global ~/.no-mistakes/config.yaml, which the captain re-tunes against live
+# quota, and whose agent_args_override wins over any repo-level model or effort
+# anyway. Both named harnesses neutralize this repository's AGENTS.md; no other
+# adapter does.
+review_agents:
+  reviewer:
+    agent: claude
+  fixer:
+    agent: codex
+
+# Path-scoped review context, so the reviewer is not rediscovering the same
+# repository rules on every cold round. Each entry points at the authoritative
+# file instead of restating its policy, matching the bar AGENTS.md sets for
+# itself.
+review:
+  path_instructions:
+    - path: config/dev-tools-versions.sh
+      instructions: |
+        This file is the machine-readable owner of every external tool pin and
+        is sourced by trusted scripts, so every value must stay a literal with
+        no commands or environment reads. Judge pin changes against
+        docs/dev-tool-versions.md, which owns the stable-version rule and the
+        apply boundary for each tool.
+    - path: bin/dev-tools-*
+      instructions: |
+        `--help` on each of these is authoritative for its contract, and
+        tests/ holds their deterministic self-tests. dev-tools-apply-updates is
+        guarded and opt-in; do not propose widening its tiers, weakening its
+        worker-lane refusal, or making reversal automatic.
+    - path: home/*.nix
+      instructions: |
+        .github/workflows/build.yml is authoritative for validating these:
+        it builds the home-manager generation and never activates it. Nix
+        flakes only read git-tracked files, so a new file referenced from here
+        must be git-added before evaluation succeeds.
+    - path: system/ct110-network-failover/*
+      instructions: |
+        This tree drives live host networking. Its README owns the
+        Proxmox-owned boundary, the guarded apply, and the attended E2E test;
+        the E2E script is deliberately not part of bin/dotfiles-test.
+
+# Where documentation for a change belongs, so the Document step does not have
+# to infer the layout each run.
+document:
+  instructions: |
+    AGENTS.md (CLAUDE.md is a symlink to it) holds project-intrinsic agent
+    knowledge and states its own maintenance bar: point at the authoritative
+    file or command rather than repeating what the codebase already shows, and
+    prefer rewriting an existing entry over appending a new one. docs/ owns the
+    long-form references - docs/dev-tool-versions.md for the pin inventory and
+    apply boundaries, docs/nix.md for the apply path, docs/agents.md for agent
+    configuration. README.md is the operator-facing entry point.
