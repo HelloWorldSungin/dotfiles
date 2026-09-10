@@ -66,10 +66,18 @@ in
   # herdr configuration
   xdg.configFile."herdr/config.toml".source = link "config/herdr/config.toml";
 
-  # --------------------------------------------------- vendored skills
+  # --------------------------------------------------- global skills
   home.file.".claude/skills/vault/SKILL.md".source = link "skills/vault/SKILL.md";
   home.file.".pi/agent/skills/vault/SKILL.md".source = link "skills/vault/SKILL.md";
   home.file.".agents/skills/vault/SKILL.md".source = link "skills/vault/SKILL.md";
+
+  # The official Kun loader is pinned and deployed from this one repository
+  # file. It remains user-invocable: it is not referenced by global memory or
+  # any startup/Firstmate instruction. See docs/agents.md for provenance and
+  # the deliberate boundary around the mutable documents it fetches on /kun.
+  home.file.".claude/skills/kun/SKILL.md".source = link "skills/kun/SKILL.md";
+  home.file.".pi/agent/skills/kun/SKILL.md".source = link "skills/kun/SKILL.md";
+  home.file.".agents/skills/kun/SKILL.md".source = link "skills/kun/SKILL.md";
 
   # ------------------------------------------------ vendored pi extensions
   home.file.".pi/agent/extensions/fusion-harness".source = link "pi/extensions/fusion-harness";
