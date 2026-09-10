@@ -76,10 +76,11 @@ ceiling: on 2026-09-09 the ChatGPT Codex subscription backend accepted a
 **909,436**-token request on `gpt-5.6-luna` (scratch override) and rejected an
 approximately **1,048,000**-token request (`Your input exceeds the context
 window of this model`), also confirmed on `gpt-5.6-sol`. The ceiling sits in
-the unmeasured gap between those sizes, so 1,033,616 was not shown to be
-above it and could fall inside or above the rejected range. Matching Codex's
-advertised 872,000 puts compaction at 855,616, below the lowest measured
-accept. It does not guarantee that every arbitrary oversized first prompt
+the unmeasured gap between those sizes. A 1,033,616-token request could be
+accepted if the ceiling is above it, or rejected if the ceiling is below it;
+it was not shown to exceed the ceiling. Matching Codex's advertised 872,000
+puts compaction at 855,616, below the 909,436-token measured accept.
+It does not guarantee that every arbitrary oversized first prompt
 succeeds, and it does not identify any one historical session as the cause.
 
 Codex is different in mechanism: the verified 0.154.0 catalog advertises
