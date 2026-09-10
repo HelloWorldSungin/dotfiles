@@ -47,40 +47,50 @@ declared_shell() { # declared_shell <file>
   done
 }
 
-# Every tracked *.sh, because a sourced library is a shell file even with no
-# shebang and ShellCheck defaults such a file to sh, plus every tracked file
-# whose shebang names a shell, which is what covers extensionless scripts like
-# system/ct110-network-failover/vpn-ethernet-failover. Anything else is not a
-# shell script, and is listed rather than dropped silently.
+# A declared shebang always wins over the filename: one naming sh, bash, dash or
+# ksh is linted, and any other interpreter is skipped and listed even when the
+# name ends in .sh, because ShellCheck refuses a shell it cannot parse (SC1071,
+# severity error). Only a tracked *.sh that declares nothing falls back to the
+# name, which is the sourced-library shape; ShellCheck does not assume a shell
+# for those either (SC2148, severity error), so they are linted as bash.
+# Extensionless files that declare no supported shell are not shell files at
+# all - that covers the rest of the tree - so they are neither linted nor named.
 files=()
+bash_files=()
 skipped=()
 while IFS= read -r candidate; do
   [ -f "$candidate" ] || continue
-  case $candidate in
-    *.sh)
-      files+=("$candidate")
-      continue
-      ;;
-  esac
   shell=$(declared_shell "$candidate")
   case $shell in
     sh | bash | dash | ksh) files+=("$candidate") ;;
-    '') ;;
+    '')
+      case $candidate in
+        *.sh) bash_files+=("$candidate") ;;
+      esac
+      ;;
     *) skipped+=("$candidate (#!$shell)") ;;
   esac
 done < <(git ls-files)
 
-[ ${#files[@]} -gt 0 ] || { echo 'dotfiles-lint: no shell files found' >&2; exit 1; }
-printf 'dotfiles-lint: checking %d shell file(s)\n' "${#files[@]}"
+total=$((${#files[@]} + ${#bash_files[@]}))
+[ "$total" -gt 0 ] || { echo 'dotfiles-lint: no shell files found' >&2; exit 1; }
+printf 'dotfiles-lint: checking %d shell file(s)\n' "$total"
 if [ ${#skipped[@]} -gt 0 ]; then
-  printf 'dotfiles-lint: not a shell script, skipped %d file(s):\n' "${#skipped[@]}"
+  printf 'dotfiles-lint: no ShellCheck-supported shell, skipped %d file(s):\n' "${#skipped[@]}"
   printf '  %s\n' "${skipped[@]}"
 fi
 
-if shellcheck -x -- "${files[@]}"; then
+status=0
+if [ ${#files[@]} -gt 0 ]; then
+  shellcheck -x -- "${files[@]}" || status=$?
+fi
+if [ ${#bash_files[@]} -gt 0 ]; then
+  shellcheck -x -s bash -- "${bash_files[@]}" || status=$?
+fi
+
+if [ "$status" -eq 0 ]; then
   printf 'dotfiles-lint: no findings\n'
 else
-  status=$?
   printf 'dotfiles-lint: ShellCheck reported findings (exit %d)\n' "$status" >&2
   exit "$status"
 fi

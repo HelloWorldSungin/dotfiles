@@ -26,13 +26,14 @@ fi
 # Bound a hung suite without masking a slow one: the slowest suite measured on
 # CT110 is under 30s, so 600s only ever fires on a genuine hang.
 SUITE_TIMEOUT_SECONDS=600
-run_suite() {
-  if command -v timeout >/dev/null 2>&1; then
-    timeout "$SUITE_TIMEOUT_SECONDS" bash "$1"
-  else
-    bash "$1"
-  fi
-}
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_BIN=timeout
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_BIN=gtimeout
+else
+  echo 'dotfiles-test: missing test dependency: timeout (gtimeout from coreutils on macOS)' >&2
+  exit 1
+fi
 
 shopt -s nullglob
 suites=(tests/*.test.sh)
@@ -43,7 +44,7 @@ failed=()
 for suite in "${suites[@]}"; do
   printf '\n== %s\n' "$suite"
   status=0
-  run_suite "$suite" || status=$?
+  "$TIMEOUT_BIN" "$SUITE_TIMEOUT_SECONDS" bash "$suite" || status=$?
   if [ "$status" -ne 0 ]; then
     failed+=("$suite (exit $status)")
     printf '!! FAILED %s (exit %d)\n' "$suite" "$status"

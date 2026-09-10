@@ -37,7 +37,7 @@ if actual != expected:
     print("top-level keys %s, expected %s" % (sorted(actual), sorted(expected)), file=sys.stderr)
     sys.exit(1)
 PY
-pass 'top-level key set is exactly the reviewed one, so a typo cannot pass as a silent no-op'
+pass 'top-level key set is exactly the reviewed one, so neither a typo nor allow_repo_commands can appear'
 
 py <<'PY' || fail 'commands do not name executable tracked repository scripts'
 import os, subprocess, sys, yaml
@@ -79,17 +79,6 @@ if agents["reviewer"] == agents["fixer"]:
           % agents["reviewer"], file=sys.stderr); sys.exit(1)
 PY
 pass 'reviewer and fixer name different neutralizing harnesses explicitly'
-
-py <<'PY' || fail 'the trust and CI boundaries are not preserved'
-import sys, yaml
-cfg = yaml.safe_load(open(sys.argv[1]))
-# allow_repo_commands would let any pushed branch run arbitrary commands in the
-# gate; no_ci would tell no-mistakes this repository has no CI to wait for.
-for key in ("allow_repo_commands", "no_ci", "disable_project_settings"):
-    if cfg.get(key):
-        print("%s is enabled" % key, file=sys.stderr); sys.exit(1)
-PY
-pass 'allow_repo_commands, no_ci and disable_project_settings stay off'
 
 py <<'PY' || fail 'a review.path_instructions rule matches no tracked file'
 import fnmatch, subprocess, sys, yaml

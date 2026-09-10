@@ -30,6 +30,21 @@ greet() {
   echo $1
 }
 SH
+# The same shape but clean, and using bash-only syntax. ShellCheck reports
+# SC2148 on any shebangless file it is not told a shell for, so this file is
+# silent only if the entry point supplied one.
+cat >"$REPO/lib/clean.sh" <<'SH'
+choices=(one two)
+greet() {
+  echo "${choices[0]}$1"
+}
+SH
+# A *.sh whose shebang names a shell ShellCheck refuses (SC1071): the shebang
+# has to win over the name, or the gate hard-fails on an unparseable file.
+cat >"$REPO/lib/zshlib.sh" <<'SH'
+#!/usr/bin/env zsh
+print -r -- hi
+SH
 # An extensionless shell script outside bin/, the shape of
 # system/ct110-network-failover/vpn-ethernet-failover, with its own SC2086.
 cat >"$REPO/system/runner" <<'SH'
@@ -38,6 +53,8 @@ run() {
   echo $2
 }
 SH
+# Extensionless and declaring nothing: not a shell file.
+echo 'plain data, no shebang' >"$REPO/system/datafile"
 # Not a shell script: a shell-looking name is not what decides this.
 cat >"$REPO/bin/tool.js" <<'JS'
 #!/usr/bin/env node
@@ -80,15 +97,26 @@ if ! analyzed_has 'lib/helpers.sh'; then
 fi
 pass 'a shebangless tracked *.sh file is analyzed'
 
-if grep -qE '\.sh$' <<<"$skipped"; then
-  report 'a tracked *.sh file was reported as not a shell script'
+if grep -qF 'SC2148' "$OUT"; then
+  report 'a shebangless *.sh file was linted without being told a shell'
 fi
-pass 'no tracked *.sh file is reported as not a shell script'
+pass 'a shebangless *.sh file is linted as bash, so a clean one stays clean'
+
+if analyzed_has 'lib/zshlib.sh'; then
+  report 'a *.sh declaring an unsupported shell was handed to ShellCheck'
+fi
+if grep -qF 'SC1071' "$OUT"; then
+  report 'ShellCheck was asked to parse a shell it does not support'
+fi
+if ! grep -qF 'lib/zshlib.sh (#!zsh)' "$OUT"; then
+  report 'a *.sh declaring an unsupported shell was not reported as skipped, or not by its shell'
+fi
+pass 'a *.sh whose shebang names an unsupported shell is skipped, named, and not parsed'
 
 if ! analyzed_has 'system/runner'; then
   report 'an extensionless shell script outside bin/ was not analyzed'
 fi
-pass 'an extensionless shell script outside bin/ is analyzed'
+pass 'an extensionless file with a supported shell shebang is analyzed'
 
 if analyzed_has 'bin/tool.js'; then
   report 'a non-shell script was analyzed'
@@ -98,9 +126,11 @@ if ! skipped_has 'bin/tool.js'; then
 fi
 pass 'a non-shell script is excluded and the exclusion is reported'
 
-if grep -qF 'notes.md' "$OUT"; then
-  report 'a file with neither a shell name nor a shebang was reported'
-fi
-pass 'a file with neither a shell name nor a shebang is not reported at all'
+for quiet in system/datafile notes.md; do
+  if grep -qF "$quiet" "$OUT"; then
+    report "a file declaring no shell and not named *.sh was reported: $quiet"
+  fi
+done
+pass 'files declaring no shell and not named *.sh are neither analyzed nor named'
 
 printf 'dotfiles-lint tests passed\n'
