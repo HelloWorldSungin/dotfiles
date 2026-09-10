@@ -91,13 +91,13 @@ model obedience when both upstream origins are unreachable is not CI-verified.
 To update the loader, inspect only `kunchenguid/kun`: verify the upstream
 default-branch commit, its `skills/kun/SKILL.md` content and SHA-256, and the
 repository license status. Replace only `skills/kun/SKILL.md` with that exact
-loader, update this commit/hash/provenance record, and run
-`bin/dotfiles-test` plus `bin/dotfiles-lint`. Do not copy the four living
-knowledge documents, use `npx skills add -g`, or change global skill directories
-by hand. A downstream review that invokes `/kun` must separately record the
-then-observed upstream commit and content hashes for all fetched living
-documents, distinguish that advice from repository evidence, and say whether it
-materially changed a recommendation.
+loader, update this commit/hash/provenance record and `EXPECTED_SHA256` in
+`tests/kun-skill.test.sh`, and run `bin/dotfiles-test` plus
+`bin/dotfiles-lint`. Do not copy the four living knowledge documents, use `npx
+skills add -g`, or change global skill directories by hand. A downstream review
+that invokes `/kun` must separately record the then-observed upstream commit and
+content hashes for all fetched living documents, distinguish that advice from
+repository evidence, and say whether it materially changed a recommendation.
 
 ## GPT long context (Sol, Terra and Astra)
 

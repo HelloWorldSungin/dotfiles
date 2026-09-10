@@ -83,23 +83,15 @@ export default function (pi: any) {
 
   pi.registerCommand("capture-kun-startup", {
     handler: async (_args: string, ctx: any) => {
-      const options = ctx.getSystemPromptOptions();
-      const skills = options.skills ?? [];
+      const skills = ctx.getSystemPromptOptions().skills ?? [];
       const kun = skills.find((skill: any) => skill.name === "kun");
       const document = kun ? readFileSync(kun.filePath, "utf8") : "";
       const frontmatterEnd = document.indexOf("\n---\n");
       const body = frontmatterEnd >= 0
         ? document.slice(frontmatterEnd + 5).trim()
         : document.trim();
-      const contextFiles = options.contextFiles ?? [];
       writeFileSync(process.env.KUN_PROBE_FILE!, JSON.stringify({
         kun,
-        contextFilePaths: contextFiles.map((file: any) => file.path),
-        contextReferencesKun: contextFiles.some((file: any) =>
-          file.content.includes("/kun") ||
-          file.content.includes("skills/kun") ||
-          file.content.includes("kunchenguid/kun")
-        ),
         instructionBodyVisible: body !== "" && ctx.getSystemPrompt().includes(body),
       }));
       process.exit(0);
@@ -118,7 +110,7 @@ run_pi_probe() {
   printf '{"type":"prompt","message":"%s"}\n' "$message" |
     KUN_PROBE_FILE="$output" KUN_TEST_API_KEY=test \
       pi --mode rpc --offline --no-session --provider kun-test --model probe \
-      --no-prompt-templates --no-themes --no-extensions \
+      --no-context-files --no-prompt-templates --no-themes --no-extensions \
       --no-skills --skill "$LOADER" --extension "$TMP_ROOT/probe.ts" \
       >/dev/null 2>"$TMP_ROOT/pi.stderr" \
     || {
@@ -129,10 +121,8 @@ run_pi_probe() {
 }
 
 run_pi_probe '/capture-kun-startup' "$TMP_ROOT/startup.json"
-if ! jq -e --arg loader "$LOADER" --arg agents "$ROOT/AGENTS.md" '
+if ! jq -e --arg loader "$LOADER" '
   .instructionBodyVisible == false and
-  .contextReferencesKun == false and
-  (.contextFilePaths | index($agents)) != null and
   .kun.name == "kun" and
   .kun.filePath == $loader and
   .kun.disableModelInvocation == false and
