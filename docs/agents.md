@@ -84,9 +84,12 @@ instructions, project rules, Firstmate safety, captain decisions, and verified
 repository evidence. It never authorizes writes, credentials, destructive
 actions, merges, service changes, or third-party upstream interaction.
 
-Deterministic tests verify that explicit invocation delivers the official
-refusal instruction into the expanded agent prompt. They do not run a model, so
-model obedience when both upstream origins are unreachable is not CI-verified.
+Deterministic tests verify that the loader body is absent from an isolated Pi
+startup prompt, that the same check detects a deliberately appended body, and
+that explicit invocation delivers the official refusal instruction into the
+expanded agent prompt. They do not run a model or inspect global `AGENTS.md`, so
+they do not prove model obedience when both upstream origins are unreachable or
+guard arbitrary future global-instruction changes.
 
 To update the loader, inspect only `kunchenguid/kun`: verify the upstream
 default-branch commit, its `skills/kun/SKILL.md` content and SHA-256, and the

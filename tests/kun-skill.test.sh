@@ -2,10 +2,9 @@
 # Behavioral deployment tests for the official, opt-in Kun skill loader.
 #
 # The loader itself is an intentional user-visible instruction contract, not an
-# executable client. The test obtains each deployed file from Home Manager,
-# verifies its reviewed upstream digest, and drives Pi's RPC interface to prove
-# that startup exposes only skill metadata while explicit invocation delivers
-# the refusal instruction and upstream locations.
+# executable client. The test hashes the repository loader, verifies that Home
+# Manager points all three global paths at its intended out-of-store target, and
+# drives Pi's RPC interface to observe isolated startup and explicit expansion.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -106,12 +105,17 @@ export default function (pi: any) {
 TS
 
 run_pi_probe() {
-  local message=$1 output=$2
+  local message=$1 output=$2 append_prompt=${3:-}
+  local append_args=()
+  if [ -n "$append_prompt" ]; then
+    append_args=(--append-system-prompt "$append_prompt")
+  fi
   printf '{"type":"prompt","message":"%s"}\n' "$message" |
     KUN_PROBE_FILE="$output" KUN_TEST_API_KEY=test \
       pi --mode rpc --offline --no-session --provider kun-test --model probe \
       --no-context-files --no-prompt-templates --no-themes --no-extensions \
       --no-skills --skill "$LOADER" --extension "$TMP_ROOT/probe.ts" \
+      "${append_args[@]}" \
       >/dev/null 2>"$TMP_ROOT/pi.stderr" \
     || {
       cat "$TMP_ROOT/pi.stderr" >&2
@@ -131,7 +135,17 @@ if ! jq -e --arg loader "$LOADER" '
   jq . "$TMP_ROOT/startup.json" >&2
   fail 'ordinary startup did not expose only the official Kun activation metadata'
 fi
-pass 'ordinary startup exposes Kun only for explicit invocation or a matching user request'
+pass 'isolated Pi startup omits the Kun instruction body'
+
+awk 'BEGIN { separators = 0 } /^---$/ { separators++; next } separators >= 2 { print }' \
+  "$LOADER" >"$TMP_ROOT/loader-body.md"
+[ -s "$TMP_ROOT/loader-body.md" ] || fail 'could not prepare the loader-body control'
+run_pi_probe '/capture-kun-startup' "$TMP_ROOT/appended.json" "$TMP_ROOT/loader-body.md"
+jq -e '.instructionBodyVisible == true' "$TMP_ROOT/appended.json" >/dev/null || {
+  jq . "$TMP_ROOT/appended.json" >&2
+  fail 'the startup detector missed a deliberately appended Kun instruction body'
+}
+pass 'paired startup control detects an appended Kun instruction body'
 
 run_pi_probe '/skill:kun' "$TMP_ROOT/invocation.txt"
 expected_prompt_lines=(
