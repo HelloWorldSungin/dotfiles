@@ -59,21 +59,33 @@ instructions.
 ## GPT long context (Sol, Terra and Astra)
 
 Both harnesses default these models to a 272,000-token window; each is opted in
-separately, and the two ceilings are **not** the same.
+separately. Both now declare the same **872,000** ceiling, Codex's advertised
+maximum. That value is already accepted; it is not a new per-host choice.
 
 | Harness | Mechanism | Effective window |
 |---------|-----------|------------------|
-| pi | `pi/models.json` → `~/.pi/agent/models.json`, `providers.openai-codex.modelOverrides` | **1,050,000** for `gpt-5.6-sol`, `gpt-5.6-terra` and `gpt-6-astra` |
+| pi | `pi/models.json` → `~/.pi/agent/models.json`, `providers.openai-codex.modelOverrides` | **872,000** for `gpt-5.6-sol`, `gpt-5.6-terra` and `gpt-6-astra` |
 | codex | global `model_context_window` in `~/.codex/config.toml` | **872,000** for `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` and `gpt-6-astra`; models with a lower `max_context_window` keep their own ceiling |
 
-Pi's 1,050,000 is a *local* override: it governs pi's own context accounting and
-model listing. Codex is different - the verified 0.154.0 catalog advertises
+Pi's number is a *local* override: it governs pi's own context accounting,
+listing, and auto-compaction. Pi compacts when
+`contextTokens > contextWindow - reserveTokens` (default reserve 16,384, so
+**855,616** at 872,000). A previous 1,050,000 declaration delayed compaction
+until 1,033,616, which is above what the ChatGPT Codex subscription backend
+accepts. On 2026-09-09 that backend accepted a **909,436**-token request and
+rejected an approximately **1,048,000**-token request with
+`Your input exceeds the context window of this model`. Matching Codex's
+advertised 872,000 puts compaction below that measured reject. It does not
+guarantee that every arbitrary oversized first prompt succeeds, and it does
+not identify any one historical session as the cause.
+
+Codex is different in mechanism: the verified 0.154.0 catalog advertises
 `max_context_window = 872000` for Sol, Terra, Luna and Astra, and
 `models-manager` applies `configured.min(max_context_window)`, so a larger
 configured value is silently clamped. 872,000 is what Codex advertises and
-enforces for Astra, and it is the value this repo commits. Do not read Codex as
-being at parity with pi, and do not read pi's override as evidence that the
-upstream service accepts more than Codex's advertised ceiling.
+enforces for Astra, and it is the value this repo commits for both harnesses.
+Do not restore a Pi override above that advertised ceiling, and do not add a
+direct OpenAI API-key provider for this.
 
 Codex's key is global rather than per-model, and it is the only mechanism Codex
 supports, so it is offered to the whole catalog and needs **no change at all** to
@@ -101,9 +113,9 @@ ceilings listed above, recorded in
 [publisher provenance](tool-updates/2026-09-10/publisher-provenance.json)
 under `codex_catalog.max_context_window`. The
 [catalog results](tool-updates/2026-09-10/README.md) summarize both observations.
-Live Codex convergence remains attended and pending;
-repeat this installed-binary check after convergence before the separate Pi
-context-window correction. This update does not change Pi's override.
+Live Codex convergence remains attended and pending. Repeat this
+installed-binary check after that later attended convergence; it is not a
+prerequisite to the Pi source override, which already uses the accepted 872,000.
 
 Requests above 272K total input tokens bill at the model's long-context rates for
 the whole request. Neither override changes the selected model or effort.

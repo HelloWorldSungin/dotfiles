@@ -41,11 +41,11 @@ pass "modelOverrides covers exactly Sol, Terra and Astra"
 
 for model in gpt-5.6-sol gpt-5.6-terra gpt-6-astra; do
   assert_eq "$(jq -r --arg m "$model" '.providers["openai-codex"].modelOverrides[$m].contextWindow' "$MODELS_JSON")" \
-    "1050000" "$model contextWindow is 1050000"
+    "872000" "$model contextWindow is 872000"
   assert_eq "$(jq -r --arg m "$model" '.providers["openai-codex"].modelOverrides[$m] | keys | join(",")' "$MODELS_JSON")" \
     "contextWindow" "$model overrides only contextWindow"
 done
-pass "Sol, Terra and Astra each override only contextWindow, to 1050000"
+pass "Sol, Terra and Astra each override only contextWindow, to 872000"
 
 # The overrides must not touch model selection, effort, or any unrelated model
 # such as Luna.
@@ -73,6 +73,141 @@ pass "the default model/effort guard fires on a root model and on a nested effor
 assert_eq "$(jq -r '.providers["openai-codex"] | keys | join(",")' "$MODELS_JSON")" \
   "modelOverrides" "the openai-codex provider carries nothing but modelOverrides"
 pass "pi/models.json changes no default model, effort, or Luna"
+
+# Pi's installed ModelRuntime applies models.json, SettingsManager supplies the
+# configured reserve, and shouldCompact is the same predicate the session uses.
+# Live provider probes stay out of this suite.
+command -v node >/dev/null 2>&1 || fail "missing test dependency: node"
+command -v pi >/dev/null 2>&1 || fail "missing test dependency: pi"
+PI_REAL=$(readlink -f "$(command -v pi)")
+PI_PKG=$(python3 - "$PI_REAL" <<'PY'
+import json, os, sys
+path = sys.argv[1]
+directory = os.path.dirname(path)
+while True:
+    pkg = os.path.join(directory, "package.json")
+    if os.path.isfile(pkg):
+        try:
+            name = json.load(open(pkg)).get("name")
+        except OSError:
+            name = None
+        if name == "@earendil-works/pi-coding-agent":
+            print(directory)
+            raise SystemExit(0)
+    parent = os.path.dirname(directory)
+    if parent == directory:
+        raise SystemExit(1)
+    directory = parent
+PY
+) || fail "could not resolve @earendil-works/pi-coding-agent from $PI_REAL"
+
+pi_compact_probe() {
+  local models_json=$1
+  local settings_json=$2
+  local agent_dir
+  agent_dir=$(mktemp -d "$TMP_ROOT/pi-compact.XXXXXX")
+  cp "$models_json" "$agent_dir/models.json"
+  printf '%s\n' "$settings_json" > "$agent_dir/settings.json"
+  PI_CODING_AGENT_DIR="$agent_dir" PI_OFFLINE=1 node --input-type=module - "$PI_PKG" "$agent_dir" 2>"$agent_dir/probe.err" <<'NODE'
+import { join } from "node:path";
+
+const pkg = process.argv[2];
+const agentDir = process.argv[3];
+const { ModelRuntime } = await import(pkg + "/dist/core/model-runtime.js");
+const { SettingsManager, shouldCompact } = await import(pkg + "/dist/index.js");
+const runtime = await ModelRuntime.create({
+  modelsPath: join(agentDir, "models.json"),
+  authPath: join(agentDir, "auth.json"),
+  refreshOnCreate: false,
+  allowModelNetwork: false,
+});
+const settings = SettingsManager.create(agentDir, agentDir).getCompactionSettings();
+const ids = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-6-astra"];
+const windows = {};
+for (const id of ids) {
+  const model = runtime.getModel("openai-codex", id);
+  windows[id] = model?.contextWindow ?? null;
+}
+const sol = runtime.getModel("openai-codex", "gpt-5.6-sol");
+const luna = runtime.getModel("openai-codex", "gpt-5.6-luna");
+const window = windows["gpt-5.6-sol"];
+const threshold = window - settings.reserveTokens;
+process.stdout.write(JSON.stringify({
+  windows,
+  lunaWindow: luna?.contextWindow ?? null,
+  solMaxTokens: sol?.maxTokens ?? null,
+  solApi: sol?.api ?? null,
+  solProvider: sol?.provider ?? null,
+  reserveTokens: settings.reserveTokens,
+  enabled: settings.enabled,
+  threshold,
+  compactAtEq: shouldCompact(threshold, window, settings),
+  compactAtPlusOne: shouldCompact(threshold + 1, window, settings),
+  compactAt909436: shouldCompact(909436, window, settings),
+  compactDisabled: shouldCompact(threshold + 1, window, { ...settings, enabled: false }),
+}));
+NODE
+}
+
+accepted_json="$TMP_ROOT/accepted-compact.json"
+pi_compact_probe "$MODELS_JSON" '{"theme":"dark"}' > "$accepted_json" \
+  || fail "Pi ModelRuntime/shouldCompact probe failed"
+python3 - "$accepted_json" <<'PY' || fail "accepted Pi compaction consumer assertions failed"
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d["windows"] == {
+    "gpt-5.6-sol": 872000,
+    "gpt-5.6-terra": 872000,
+    "gpt-6-astra": 872000,
+}, d["windows"]
+assert d["lunaWindow"] == 272000, d["lunaWindow"]
+assert d["solMaxTokens"] == 128000, d["solMaxTokens"]
+assert d["solApi"] == "openai-codex-responses", d["solApi"]
+assert d["solProvider"] == "openai-codex", d["solProvider"]
+assert d["reserveTokens"] == 16384, d["reserveTokens"]
+assert d["enabled"] is True
+assert d["threshold"] == 872000 - 16384 == 855616, d["threshold"]
+assert d["compactAtEq"] is False
+assert d["compactAtPlusOne"] is True
+assert d["compactAt909436"] is True
+assert d["compactDisabled"] is False
+PY
+pass "Pi applies 872000 and compacts above contextWindow minus the default reserve"
+
+# Negative control: the defective 1,050,000 declaration leaves the historically
+# accepted 909,436-token request below the compact threshold.
+bad_models="$TMP_ROOT/bad-models.json"
+jq '.providers["openai-codex"].modelOverrides |= with_entries(.value.contextWindow=1050000)' \
+  "$MODELS_JSON" > "$bad_models"
+bad_json="$TMP_ROOT/bad-compact.json"
+pi_compact_probe "$bad_models" '{"theme":"dark"}' > "$bad_json" \
+  || fail "defective-declaration probe failed"
+python3 - "$bad_json" <<'PY' || fail "1,050,000 negative control failed"
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d["windows"]["gpt-5.6-sol"] == 1050000, d["windows"]
+assert d["threshold"] == 1050000 - 16384 == 1033616, d["threshold"]
+assert d["compactAtEq"] is False
+assert d["compactAtPlusOne"] is True
+assert d["compactAt909436"] is False, "1,050,000 must not compact a 909,436-token request"
+assert d["lunaWindow"] == 272000
+assert d["solMaxTokens"] == 128000
+PY
+pass "a 1,050,000 override does not compact at 909,436 (negative control)"
+
+# Negative control: a configured reserve, not the default, moves the threshold.
+custom_json="$TMP_ROOT/custom-compact.json"
+pi_compact_probe "$MODELS_JSON" '{"theme":"dark","compaction":{"reserveTokens":20000}}' \
+  > "$custom_json" || fail "custom-reserve probe failed"
+python3 - "$custom_json" <<'PY' || fail "configured-reserve negative control failed"
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d["reserveTokens"] == 20000, d["reserveTokens"]
+assert d["threshold"] == 872000 - 20000 == 852000, d["threshold"]
+assert d["compactAtEq"] is False
+assert d["compactAtPlusOne"] is True
+PY
+pass "shouldCompact uses the configured reserve, not a hard-coded 16384"
 
 # ------------------------------------------------- codex config.toml merge
 

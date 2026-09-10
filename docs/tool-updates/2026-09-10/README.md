@@ -68,8 +68,8 @@ and `3188814c35471432d4123203e0eb38e5bddc60226e3d7ddf0e59e649ea140022`.
 The provenance `codex_catalog.max_context_window` records all eleven ceilings
 the 0.154.0 catalog advertised; `docs/agents.md` explains how Codex applies them.
 The live Codex remains 0.153.4. Re-run the installed catalog command documented
-in `docs/agents.md` after attended convergence and before the separate Pi
-context-window correction.
+in `docs/agents.md` after later attended convergence. That recheck is not a
+prerequisite to the Pi `openai-codex` 872,000 source override.
 
 ## Validation and live handoff
 
