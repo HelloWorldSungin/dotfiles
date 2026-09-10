@@ -71,13 +71,16 @@ Pi's number is a *local* override: it governs pi's own context accounting,
 listing, and auto-compaction. Pi compacts when
 `contextTokens > contextWindow - reserveTokens` (default reserve 16,384, so
 **855,616** at 872,000). A previous 1,050,000 declaration delayed compaction
-until 1,033,616, which is above what the ChatGPT Codex subscription backend
-accepts. On 2026-09-09 that backend accepted a **909,436**-token request and
-rejected an approximately **1,048,000**-token request with
-`Your input exceeds the context window of this model`. Matching Codex's
-advertised 872,000 puts compaction below that measured reject. It does not
-guarantee that every arbitrary oversized first prompt succeeds, and it does
-not identify any one historical session as the cause.
+until 1,033,616. That figure is Pi's threshold, not a measured backend
+ceiling: on 2026-09-09 the ChatGPT Codex subscription backend accepted a
+**909,436**-token request on `gpt-5.6-luna` (scratch override) and rejected an
+approximately **1,048,000**-token request (`Your input exceeds the context
+window of this model`), also confirmed on `gpt-5.6-sol`. The ceiling sits in
+the unmeasured gap between those sizes, so 1,033,616 was not shown to be
+above it and could fall inside or above the rejected range. Matching Codex's
+advertised 872,000 puts compaction at 855,616, below the lowest measured
+accept. It does not guarantee that every arbitrary oversized first prompt
+succeeds, and it does not identify any one historical session as the cause.
 
 Codex is different in mechanism: the verified 0.154.0 catalog advertises
 `max_context_window = 872000` for Sol, Terra, Luna and Astra, and
