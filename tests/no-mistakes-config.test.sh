@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Behavioral tests for the repository-owned .no-mistakes.yaml.
 #
-# The real v1.72.0 parser is the oracle wherever it can be one: `no-mistakes
-# ci-workflow` is the public command that loads and validates the repo config,
-# and it is driven here against throwaway git repositories so nothing in this
-# checkout is written. It tolerates unknown top-level keys silently, so a typo
+# The real v1.72.0 parser is the oracle, and it is required rather than
+# optional: `no-mistakes ci-workflow` is the public command that loads and
+# validates the repo config, and it is driven here against throwaway git
+# repositories so nothing in this checkout is written. Without that binary this
+# suite could prove nothing about the config, so it fails instead of skipping.
+# The parser tolerates unknown top-level keys silently, so a typo
 # would otherwise be an invisible no-op - the key-set assertion below is what
 # catches that, and the negative parse case proves the oracle really is reading
 # the file rather than ignoring it.
@@ -21,6 +23,7 @@ pass() { printf 'ok - %s\n' "$1"; }
 command -v python3 >/dev/null 2>&1 || fail 'missing test dependency: python3'
 python3 -c 'import yaml' >/dev/null 2>&1 || fail 'missing test dependency: python3 with PyYAML'
 GIT_BIN=$(command -v git) || fail 'missing test dependency: git'
+command -v no-mistakes >/dev/null 2>&1 || fail 'missing test dependency: no-mistakes'
 [ -f "$CONFIG" ] || fail '.no-mistakes.yaml is missing'
 
 # --- shape and invariants, independent of the installed binary -----------------
@@ -96,11 +99,6 @@ PY
 pass 'document.instructions is present'
 
 # --- the installed no-mistakes parser as the oracle ---------------------------
-
-if ! command -v no-mistakes >/dev/null 2>&1; then
-  printf 'ok - # SKIP real-parser checks: no-mistakes is not installed\n'
-  exit 0
-fi
 
 probe_repo() { # probe_repo <dir> <config-file>
   mkdir -p "$1"
