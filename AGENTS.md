@@ -10,7 +10,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `.no-mistakes.yaml` points the pipeline's Test and Lint steps at them. Both put
   Nix on PATH the way `bootstrap.sh` does: a service environment inherits neither
   `~/.nix-profile/bin` nor the Nix daemon profile, and three suites need `nix` and
-  `chromium` from there. `system/ct110-network-failover/e2e-failover-test.sh` is
+  `chromium` from there. Neither adds `~/.local/bin`, where `shellcheck` and
+  `no-mistakes` live: a missing one hard-fails by design, never a skip and never
+  a PATH workaround. `system/ct110-network-failover/e2e-failover-test.sh` is
   deliberately outside `bin/dotfiles-test`; its README owns that attended run.
 - `.no-mistakes.yaml` traps, both load-bearing:
   1. no-mistakes reads `commands` from the DEFAULT-BRANCH copy
@@ -23,8 +25,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
      repository copy is accepted and then ignored. The captain decision
      `nm-global-reviewer-fixer-profiles` owns that capability. A top-level
      `agent` IS read from this file, but as one ordered list for every role.
-  2. Never run `no-mistakes ci-workflow` here. It emits a Go-shaped
+  2. Never run `no-mistakes ci-workflow` in this checkout. It emits a Go-shaped
      `.github/workflows/ci.yml`; `build.yml` above is this repository's CI.
+     `tests/no-mistakes-config.test.sh` drives it only in throwaway repositories,
+     which is how the parser can be the oracle without writing here.
 - `bash ~/dotfiles/rebuild.sh` is the apply path for CT110 (it sources nix,
   auto-selects the flake target, and passes `-b backup`). Changes to Nix-evaluated
   inputs require it; the `mkOutOfStoreSymlink` trees in `home/common.nix`
