@@ -78,28 +78,9 @@ pass "pi/models.json changes no default model, effort, or Luna"
 # configured reserve, and shouldCompact is the same predicate the session uses.
 # Live provider probes stay out of this suite.
 command -v node >/dev/null 2>&1 || fail "missing test dependency: node"
-command -v pi >/dev/null 2>&1 || fail "missing test dependency: pi"
-PI_REAL=$(readlink -f "$(command -v pi)")
-PI_PKG=$(python3 - "$PI_REAL" <<'PY'
-import json, os, sys
-path = sys.argv[1]
-directory = os.path.dirname(path)
-while True:
-    pkg = os.path.join(directory, "package.json")
-    if os.path.isfile(pkg):
-        try:
-            name = json.load(open(pkg)).get("name")
-        except OSError:
-            name = None
-        if name == "@earendil-works/pi-coding-agent":
-            print(directory)
-            raise SystemExit(0)
-    parent = os.path.dirname(directory)
-    if parent == directory:
-        raise SystemExit(1)
-    directory = parent
-PY
-) || fail "could not resolve @earendil-works/pi-coding-agent from $PI_REAL"
+PI_PKG="${NPM_CONFIG_PREFIX:-$HOME/.npm-global}/lib/node_modules/@earendil-works/pi-coding-agent"
+jq -e '.name == "@earendil-works/pi-coding-agent"' "$PI_PKG/package.json" >/dev/null \
+  || fail "missing or invalid test dependency: $PI_PKG"
 
 pi_compact_probe() {
   local models_json=$1
@@ -108,13 +89,12 @@ pi_compact_probe() {
   agent_dir=$(mktemp -d "$TMP_ROOT/pi-compact.XXXXXX")
   cp "$models_json" "$agent_dir/models.json"
   printf '%s\n' "$settings_json" > "$agent_dir/settings.json"
-  PI_CODING_AGENT_DIR="$agent_dir" PI_OFFLINE=1 node --input-type=module - "$PI_PKG" "$agent_dir" 2>"$agent_dir/probe.err" <<'NODE'
+  if ! PI_CODING_AGENT_DIR="$agent_dir" PI_OFFLINE=1 node --input-type=module - "$PI_PKG" "$agent_dir" 2>"$agent_dir/probe.err" <<'NODE'
 import { join } from "node:path";
 
 const pkg = process.argv[2];
 const agentDir = process.argv[3];
-const { ModelRuntime } = await import(pkg + "/dist/core/model-runtime.js");
-const { SettingsManager, shouldCompact } = await import(pkg + "/dist/index.js");
+const { ModelRuntime, SettingsManager, shouldCompact } = await import(pkg + "/dist/index.js");
 const runtime = await ModelRuntime.create({
   modelsPath: join(agentDir, "models.json"),
   authPath: join(agentDir, "auth.json"),
@@ -147,6 +127,10 @@ process.stdout.write(JSON.stringify({
   compactDisabled: shouldCompact(threshold + 1, window, { ...settings, enabled: false }),
 }));
 NODE
+  then
+    cat "$agent_dir/probe.err" >&2
+    return 1
+  fi
 }
 
 accepted_json="$TMP_ROOT/accepted-compact.json"
