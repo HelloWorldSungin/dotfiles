@@ -59,8 +59,10 @@ instructions.
 `skills/kun/SKILL.md` is a deliberately **opt-in** copy of the official thin
 loader from [`kunchenguid/kun`](https://github.com/kunchenguid/kun), installed
 declaratively through the same three Home Manager paths as vault: Claude,
-Pi, and generic (`~/.agents`) workers. It is not listed in `AGENTS.md`, startup
-prompts, automatic worker instructions, or Firstmate's always-loaded skills. It
+Pi, and generic (`~/.agents`) workers. The loader body is not injected as an
+always-loaded instruction; skill discovery may list its official name,
+description, and location. It is not added to `AGENTS.md`, automatic worker
+instructions, or Firstmate's always-loaded skills. It
 activates only when a user invokes `/kun` (`/skill:kun` in Pi) or explicitly
 asks how Kun thinks, builds, or solves problems.
 
