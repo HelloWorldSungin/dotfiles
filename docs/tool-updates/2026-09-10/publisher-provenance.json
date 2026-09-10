@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-09-10",
+  "starting_inventory": {
+    "rows": 68,
+    "report_sha256": "249857643d8c700a054a117982f0dd4e1277fadd44ff5e00f999cbc094d7992f"
+  },
+  "npm": [
+    {"name":"claude","package":"@anthropic-ai/claude-code","channel":"stable","version":"2.1.236","integrity":"sha512-sz+7GLMhFcwkN2tZHJIXGgon/g/29WMMV5UNYog9sl4OvdX5q3evM1mcXVQnasP4obP6ueItECMCpSk1MPhTDg==","tags_url":"https://registry.npmjs.org/-/package/@anthropic-ai%2Fclaude-code/dist-tags","metadata_url":"https://registry.npmjs.org/@anthropic-ai%2Fclaude-code/2.1.236","observed_tags":{"stable":"2.1.236","latest":"2.1.267","next":"2.1.267"}},
+    {"name":"codex","package":"@openai/codex","channel":"latest","version":"0.154.0","integrity":"sha512-FV/x1OHXYv/ifjf3mXj9ThTTAWcUZN6cGIRQRhRxkKNOPuImu1WW0c8ev1vUkE9XGH90dEnYG1tBjIkxRikg0w==","tags_url":"https://registry.npmjs.org/-/package/@openai%2Fcodex/dist-tags","metadata_url":"https://registry.npmjs.org/@openai%2Fcodex/0.154.0"},
+    {"name":"opencode","package":"opencode-ai","channel":"latest","version":"1.18.30","integrity":"sha512-oLcOLQE4XzDKy6T5L5d1RdVJvXHXwVlD4hRF5V317JbUQorrl2EyDdGZk5kbgv675J9FXp8usg92MZbEWhh6gQ==","tags_url":"https://registry.npmjs.org/-/package/opencode-ai/dist-tags","metadata_url":"https://registry.npmjs.org/opencode-ai/1.18.30"},
+    {"name":"pi","package":"@earendil-works/pi-coding-agent","channel":"latest","version":"0.85.1","integrity":"sha512-FGRN+OHbWaefBPGaTggAdLjrIHW+s2PzLyglz/5dfLzb9of7uuXMXYC0fJIeZTw+shS32o2cuQ9jF7YSDuL/oQ==","tags_url":"https://registry.npmjs.org/-/package/@earendil-works%2Fpi-coding-agent/dist-tags","metadata_url":"https://registry.npmjs.org/@earendil-works%2Fpi-coding-agent/0.85.1"},
+    {"name":"gnhf","package":"gnhf","channel":"latest","version":"0.1.49","integrity":"sha512-HzvxCzLaNZ2ipN7bqkn90f0sVbp4BgHv11RDOJY9fB1HL5cAdrSIDNQvpwjtqsPLRjRoymHnyJpsz2WOynbL2g==","tags_url":"https://registry.npmjs.org/-/package/gnhf/dist-tags","metadata_url":"https://registry.npmjs.org/gnhf/0.1.49"},
+    {"name":"gh-axi","package":"gh-axi","channel":"latest","version":"0.1.35","integrity":"sha512-xxe7ui0548FJ9KF0LTQZWdfm8UYuLRsfSidSEx3Ztu1Eqrn4GMg+oJW7UReG33Wt0+2Vppwl7P6Qcll0KpymTQ==","tags_url":"https://registry.npmjs.org/-/package/gh-axi/dist-tags","metadata_url":"https://registry.npmjs.org/gh-axi/0.1.35"},
+    {"name":"tasks-axi","package":"tasks-axi","channel":"latest","version":"0.2.5","integrity":"sha512-FxssEW7+MuUNHWJ7uhdGrRsBDev/Zw5NutUBHcf8r/npG6z9+NfUUIeXdcdDHrC9ixEKOqQ9Uomay2TLpDB6Eg==","tags_url":"https://registry.npmjs.org/-/package/tasks-axi/dist-tags","metadata_url":"https://registry.npmjs.org/tasks-axi/0.2.5"},
+    {"name":"quota-axi","package":"quota-axi","channel":"latest","version":"0.1.41","integrity":"sha512-PJEse+te7LteX0tfVpCGzfL8bz6MaLLejx2iClOeT+eoJU7qRMekRRibAx4Bvr4ZFqEP7SjLbJYdU+D3tp0NlA==","tags_url":"https://registry.npmjs.org/-/package/quota-axi/dist-tags","metadata_url":"https://registry.npmjs.org/quota-axi/0.1.41"},
+    {"name":"chrome-devtools-axi","package":"chrome-devtools-axi","channel":"latest","version":"0.1.34","integrity":"sha512-DCLOYmUxs9mDxhv82NKLbSwjfykGRC9kHRocz/Vz45rGxX/kxUbtuvLf1Bxr17V9jINVdsJGGUXGFfnrE51/9w==","tags_url":"https://registry.npmjs.org/-/package/chrome-devtools-axi/dist-tags","metadata_url":"https://registry.npmjs.org/chrome-devtools-axi/0.1.34"},
+    {"name":"lavish-axi","package":"lavish-axi","channel":"latest","version":"0.1.67","integrity":"sha512-7qU7tF1ShNQEQY3SMceNkIR2T1Iuy3kOvatoOgPwUW1QJuXoi+vzF5NOiDSt7xMfNaKJMNLefY856yylFxOxHg==","tags_url":"https://registry.npmjs.org/-/package/lavish-axi/dist-tags","metadata_url":"https://registry.npmjs.org/lavish-axi/0.1.67"},
+    {"name":"omp-acp","package":"omp-acp","channel":"latest","version":"0.1.2","integrity":"sha512-x6MKPKbbsoo0hx/NBCN8fMgIhMMx9GtYTMPqKI88iLqjWRtMyip8aAIk3fpcg9KI06AQDVqWvOwANC8mCoFKcA==","tags_url":"https://registry.npmjs.org/-/package/omp-acp/dist-tags","metadata_url":"https://registry.npmjs.org/omp-acp/0.1.2"},
+    {"name":"claude-spend","package":"claude-spend","channel":"latest","version":"1.0.6","integrity":"sha512-rX70AmCAM9TmrQNz9nqOFBEnXGqmXZ+PDF434PsOTIQ2RHpO3ada3UWq008VSpFQu+2kJ5n5HhOU1DUpwboreQ==","tags_url":"https://registry.npmjs.org/-/package/claude-spend/dist-tags","metadata_url":"https://registry.npmjs.org/claude-spend/1.0.6"}
+  ],
+  "git_refs": [
+    {"name":"firstmate","source":"https://github.com/kunchenguid/firstmate.git","ref":"HEAD","observed_commit":"527aa7c12d25aadbdf3cc56791f87ae71fca5280","recorded_pin":"0fe226c93efdd12a38f1c3936d758571e40111b7","decision":"held pending upstream-sync"},
+    {"name":"nixpkgs","source":"https://github.com/NixOS/nixpkgs.git","ref":"refs/heads/nixos-26.05","commit":"d58a46e3bc02d91ebe04667f8397752a749c0024"},
+    {"name":"home-manager","source":"https://github.com/nix-community/home-manager.git","ref":"refs/heads/release-26.05","commit":"fd0956c99c41ae3c13a73a638f1f7e963aebc4ab"},
+    {"name":"baby-menu","source":"https://github.com/kunchenguid/baby-menu.git","ref":"refs/tags/baby-menu-v0.1.24","commit":"65eb280ea0e05c17677f10b56afc75e91f899f65"},
+    {"name":"actions-checkout","source":"https://github.com/actions/checkout.git","ref":"refs/tags/v7.0.1","commit":"3d3c42e5aac5ba805825da76410c181273ba90b1"},
+    {"name":"nix-installer-action","source":"https://github.com/DeterminateSystems/nix-installer-action.git","ref":"refs/tags/v23","commit":"3138316df39ed29be04236d7ffc686fa525866aa"},
+    {"name":"codewindow.nvim","source":"https://github.com/gorbit99/codewindow.nvim.git","ref":"HEAD","commit":"a8e175043ce3baaa89e0a6b5171bcd920aab3dad"},
+    {"name":"diffview.nvim","source":"https://github.com/sindrets/diffview.nvim.git","ref":"HEAD","commit":"4516612fe98ff56ae0415a259ff6361a89419b0a"},
+    {"name":"gitsigns.nvim","source":"https://github.com/lewis6991/gitsigns.nvim.git","ref":"refs/tags/v2.1.0","commit":"a462f416e2ce4744531c6256252dee99a7d34a83"},
+    {"name":"lazy.nvim","source":"https://github.com/folke/lazy.nvim.git","ref":"refs/tags/v11.17.5","commit":"85c7ff3711b730b4030d03144f6db6375044ae82"},
+    {"name":"neogit","source":"https://github.com/NeogitOrg/neogit.git","ref":"refs/tags/v2.0.0^{}","commit":"43fa47fb61773b0d90a78ebc2521ea8faaeebd86"},
+    {"name":"nvim-treesitter","source":"https://github.com/nvim-treesitter/nvim-treesitter.git","ref":"HEAD","commit":"d4d59cb369da46b95699bd2200efbcffc6dadb3b"},
+    {"name":"nvim-autopairs","source":"https://github.com/windwp/nvim-autopairs.git","ref":"refs/tags/0.10.0","commit":"23320e75953ac82e559c610bec5a90d9c6dfa743"},
+    {"name":"oil.nvim","source":"https://github.com/stevearc/oil.nvim.git","ref":"refs/tags/v2.16.0","commit":"17c0a8faaf48298a0c0cfb0d757c0eaee4ff7a32"},
+    {"name":"plenary.nvim","source":"https://github.com/nvim-lua/plenary.nvim.git","ref":"HEAD","commit":"74b06c6c75e4eeb3108ec01852001636d85a932b"},
+    {"name":"render-markdown.nvim","source":"https://github.com/MeanderingProgrammer/render-markdown.nvim.git","ref":"refs/tags/v8.13.0^{}","commit":"f422cb5c6855f150e2ddcfaf44e7157b98b34f6a"},
+    {"name":"rose-pine","source":"https://github.com/rose-pine/neovim.git","ref":"refs/tags/v3.0.2","commit":"f01eac6eedf6197509dde8b66de0263207ee1877"},
+    {"name":"snacks.nvim","source":"https://github.com/folke/snacks.nvim.git","ref":"refs/tags/v2.31.0","commit":"e6fd58c82f2f3fcddd3fe81703d47d6d48fc7b9f"},
+    {"name":"vim-visual-multi","source":"https://github.com/mg979/vim-visual-multi.git","ref":"HEAD","commit":"a6975e7c1ee157615bbc80fc25e4392f71c344d4"},
+    {"name":"which-key.nvim","source":"https://github.com/folke/which-key.nvim.git","ref":"refs/tags/v3.17.0","commit":"fcbf4eea17cb299c02557d576f0d568878e354a4"}
+  ],
+  "downloads": [
+    {"name":"nix-installer","version":"3.22.3","url":"https://install.determinate.systems/nix/tag/v3.22.3","sha256":"7178e5ed86c64a86f48983ac459219d78df11a31cc03145f6f81ce058d0fd4f0"},
+    {"name":"cursor-agent","version":"2026.09.08-6caf4ff","url":"https://cursor.com/install","sha256":"8513e9f949576d7ced2a2a582252626cc86235437c2749bf93c886f1d5fdb203"},
+    {"name":"herdr","version":"0.9.0","manifest_url":"https://herdr.dev/latest.json","asset_sha256_source":"config/dev-tools-versions.sh:RELEASE_SHA256_PINS"},
+    {"name":"treehouse","version":"2.3.0","release_url":"https://github.com/kunchenguid/treehouse/releases/tag/v2.3.0","asset_sha256_source":"config/dev-tools-versions.sh:RELEASE_SHA256_PINS"},
+    {"name":"no-mistakes","version":"1.72.0","release_url":"https://github.com/kunchenguid/no-mistakes/releases/tag/v1.72.0","asset_sha256_source":"config/dev-tools-versions.sh:RELEASE_SHA256_PINS"},
+    {"name":"antigravity-linux-amd64","version":"1.2.0","url":"https://storage.googleapis.com/antigravity-public/antigravity-cli/1.2.0-5210873191596032/linux-x64/cli_linux_x64.tar.gz","sha512":"d190b25a04ed2a03b0587838476494ae59d0d324ee6373263cabe584352c254f9051f3689c79ac4add8817ff6eb34b11694acd77002c55e91bd1d28b6dfdae22"},
+    {"name":"antigravity-linux-arm64","version":"1.2.0","url":"https://storage.googleapis.com/antigravity-public/antigravity-cli/1.2.0-5210873191596032/linux-arm/cli_linux_arm64.tar.gz","sha512":"5ad72fba8c8e915c59c5505dc99116058352b8eba7f141d7ed220256788bada30df8b5af65c0d931ff10bbc661c0f5fe83931c58071fe3063a809bbeda7f59f9"},
+    {"name":"antigravity-darwin-amd64","version":"1.2.0","url":"https://storage.googleapis.com/antigravity-public/antigravity-cli/1.2.0-5210873191596032/darwin-x64/cli_mac_x64.tar.gz","sha512":"a69a9253add7765f826b51e080005efff9e09b303aebc4f56a08fad29396d9e4ab49f549f0dfb5b686403a5ffb62031f34d65f98da6929fa4fbeb43c64f641b9"},
+    {"name":"antigravity-darwin-arm64","version":"1.2.0","url":"https://storage.googleapis.com/antigravity-public/antigravity-cli/1.2.0-5210873191596032/darwin-arm/cli_mac_arm64.tar.gz","sha512":"7ca4c9d044adc76a1a7b0d5e73fa8b3dc0d56e9e8417f72a747e9bf9ff9783f7a57722c602c2fbb9b5bf5967e4b5568e4f62270480df499fa25ab971c8c2a886"}
+  ],
+  "codex_catalog": {
+    "installed":{"version":"0.153.4","sha256":"56ef98ab4032d317ab26e9b5e5a175650717351edb16ed9cde0cb6d1734d62da"},
+    "candidate":{"version":"0.154.0","sha256":"3188814c35471432d4123203e0eb38e5bddc60226e3d7ddf0e59e649ea140022"},
+    "max_context_window":{"gpt-5.6-sol":872000,"gpt-5.6-terra":872000,"gpt-5.6-luna":872000,"gpt-6-astra":872000,"gpt-daybreak-blue-latest":872000,"codex-auto-review":872000,"gpt-daybreak-red-latest":372000,"gpt-5.5":272000,"gpt-5.4-mini":272000,"gpt-5.2":272000,"gpt-5.4":1000000}
+  }
+}

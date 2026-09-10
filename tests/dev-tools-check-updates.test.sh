@@ -358,11 +358,13 @@ json=$(run_checker --json --force --no-cache)
 unset TEST_NPM_PRERELEASE_PACKAGE TEST_PRERELEASE_REPO
 pass 'stable-channel filters reject npm and GitHub prereleases'
 
-TEST_HERDR_LATEST_VERSION=0.10.0
-TEST_ANTIGRAVITY_LATEST_VERSION=1.2.0
+IFS=. read -r herdr_major herdr_minor _ <<<"$HERDR_VERSION"
+IFS=. read -r antigravity_major antigravity_minor _ <<<"$ANTIGRAVITY_VERSION"
+TEST_HERDR_LATEST_VERSION="$herdr_major.$((herdr_minor + 1)).0"
+TEST_ANTIGRAVITY_LATEST_VERSION="$antigravity_major.$((antigravity_minor + 1)).0"
 json=$(run_checker --json --force --no-cache)
-[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="herdr") | [.latest_stable,.status] | join("|")')" = '0.10.0|pin_outdated' ] || fail 'newer stable Herdr manifest was hidden as unknown'
-[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="antigravity") | [.latest_stable,.status] | join("|")')" = '1.2.0|pin_outdated' ] || fail 'newer stable Antigravity manifest was hidden as unknown'
+[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="herdr") | [.latest_stable,.status] | join("|")')" = "$TEST_HERDR_LATEST_VERSION|pin_outdated" ] || fail 'newer stable Herdr manifest was hidden as unknown'
+[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="antigravity") | [.latest_stable,.status] | join("|")')" = "$TEST_ANTIGRAVITY_LATEST_VERSION|pin_outdated" ] || fail 'newer stable Antigravity manifest was hidden as unknown'
 unset TEST_HERDR_LATEST_VERSION TEST_ANTIGRAVITY_LATEST_VERSION
 pass 'newer stable publisher manifests remain visible as pin drift'
 

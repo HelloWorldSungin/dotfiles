@@ -3,17 +3,17 @@
 # this repository. Keep every value a literal: no commands or environment reads.
 # shellcheck disable=SC2034 # Public manifest fields are consumed by multiple callers.
 
-TOOLCHAIN_VERIFIED_AT=2026-09-09
+TOOLCHAIN_VERIFIED_AT=2026-09-10
 
 NIX_INSTALLER_VERSION=3.22.3
 NIX_INSTALLER_SCRIPT_URL=https://install.determinate.systems/nix/tag/v3.22.3
 NIX_INSTALLER_SCRIPT_SHA256=7178e5ed86c64a86f48983ac459219d78df11a31cc03145f6f81ce058d0fd4f0
 NIXPKGS_CHANNEL=26.05
-NIXPKGS_REV=93108a538f079596c9a16c72cf03e9322782b6dd
+NIXPKGS_REV=d58a46e3bc02d91ebe04667f8397752a749c0024
 HOME_MANAGER_CHANNEL=26.05
 HOME_MANAGER_REV=fd0956c99c41ae3c13a73a638f1f7e963aebc4ab
 
-ANTIGRAVITY_VERSION=1.1.28
+ANTIGRAVITY_VERSION=1.2.0
 CURSOR_AGENT_OBSERVED_VERSION=2026.09.08-6caf4ff
 CURSOR_INSTALLER_URL=https://cursor.com/install
 CURSOR_INSTALLER_SHA256=8513e9f949576d7ced2a2a582252626cc86235437c2749bf93c886f1d5fdb203
@@ -34,13 +34,13 @@ BABY_MENU_REV=65eb280ea0e05c17677f10b56afc75e91f899f65
 # name|repository|stable-release-tag|commit
 CI_ACTION_PINS=(
   'actions-checkout|actions/checkout|v7.0.1|3d3c42e5aac5ba805825da76410c181273ba90b1'
-  'nix-installer-action|DeterminateSystems/nix-installer-action|v22|ef8a148080ab6020fd15196c2084a2eea5ff2d25'
+  'nix-installer-action|DeterminateSystems/nix-installer-action|v23|3138316df39ed29be04236d7ffc686fa525866aa'
 )
 
 # name|command|package|version|registry-integrity|guarded-apply|stable-channel
 NPM_TOOL_PINS=(
   'claude|claude|@anthropic-ai/claude-code|2.1.236|sha512-sz+7GLMhFcwkN2tZHJIXGgon/g/29WMMV5UNYog9sl4OvdX5q3evM1mcXVQnasP4obP6ueItECMCpSk1MPhTDg==|no|stable'
-  'codex|codex|@openai/codex|0.153.4|sha512-wbHDmit7S/YvBGVX1DQmk13xtWblZ2cApeJ/pB7xDZ10Cna+DZc5ij7f0F4OxdsXN4FW1oLT48OpogUI1+8Y2w==|no|default'
+  'codex|codex|@openai/codex|0.154.0|sha512-FV/x1OHXYv/ifjf3mXj9ThTTAWcUZN6cGIRQRhRxkKNOPuImu1WW0c8ev1vUkE9XGH90dEnYG1tBjIkxRikg0w==|no|default'
   'opencode|opencode|opencode-ai|1.18.30|sha512-oLcOLQE4XzDKy6T5L5d1RdVJvXHXwVlD4hRF5V317JbUQorrl2EyDdGZk5kbgv675J9FXp8usg92MZbEWhh6gQ==|no|default'
   'pi|pi|@earendil-works/pi-coding-agent|0.85.1|sha512-FGRN+OHbWaefBPGaTggAdLjrIHW+s2PzLyglz/5dfLzb9of7uuXMXYC0fJIeZTw+shS32o2cuQ9jF7YSDuL/oQ==|no|default'
   'gnhf|gnhf|gnhf|0.1.49|sha512-HzvxCzLaNZ2ipN7bqkn90f0sVbp4BgHv11RDOJY9fB1HL5cAdrSIDNQvpwjtqsPLRjRoymHnyJpsz2WOynbL2g==|yes|default'
@@ -69,10 +69,10 @@ RELEASE_SHA256_PINS=(
 
 # platform|publisher asset URL|publisher SHA-512
 ANTIGRAVITY_ASSET_PINS=(
-  'linux-amd64|https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.28-5576113066475520/linux-x64/cli_linux_x64.tar.gz|a855c623426fe901088bfe2b4d559b01f5b479a7c5ec0e41acfe129d4fe7deee9fbd9057072cc8e8c19ed65474cafa4f1d10fcdc14fbb85f82f20c3ec94295d4'
-  'linux-arm64|https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.28-5576113066475520/linux-arm/cli_linux_arm64.tar.gz|2cc17c2a2dfe5c7d2f8088ac16ccfef270933c7844c3c717b3e4f4f94873f865ebddc5943508cbe54b4976c0f9dc478ca71b8c26b8c08d6758d9508788235530'
-  'darwin-amd64|https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.28-5576113066475520/darwin-x64/cli_mac_x64.tar.gz|b6fcfaebfb8c868426dc792db4db38d1068a84e5c9aee09f46d041da06ac3a91c5956d7c5f974d3e4e67142da4732c114d7eab4fb198e3a86206d8bdb291fe9f'
-  'darwin-arm64|https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.28-5576113066475520/darwin-arm/cli_mac_arm64.tar.gz|84a3bb980b0d967649e66932b04365a578a55609dea9572349a07b114067216447c1fc2f0ff55940fb6657309da665bd3af4fe8aa16af7886e131243b684087f'
+  'linux-amd64|https://storage.googleapis.com/antigravity-public/antigravity-cli/1.2.0-5210873191596032/linux-x64/cli_linux_x64.tar.gz|d190b25a04ed2a03b0587838476494ae59d0d324ee6373263cabe584352c254f9051f3689c79ac4add8817ff6eb34b11694acd77002c55e91bd1d28b6dfdae22'
+  'linux-arm64|https://storage.googleapis.com/antigravity-public/antigravity-cli/1.2.0-5210873191596032/linux-arm/cli_linux_arm64.tar.gz|5ad72fba8c8e915c59c5505dc99116058352b8eba7f141d7ed220256788bada30df8b5af65c0d931ff10bbc661c0f5fe83931c58071fe3063a809bbeda7f59f9'
+  'darwin-amd64|https://storage.googleapis.com/antigravity-public/antigravity-cli/1.2.0-5210873191596032/darwin-x64/cli_mac_x64.tar.gz|a69a9253add7765f826b51e080005efff9e09b303aebc4f56a08fad29396d9e4ab49f549f0dfb5b686403a5ffb62031f34d65f98da6929fa4fbeb43c64f641b9'
+  'darwin-arm64|https://storage.googleapis.com/antigravity-public/antigravity-cli/1.2.0-5210873191596032/darwin-arm/cli_mac_arm64.tar.gz|7ca4c9d044adc76a1a7b0d5e73fa8b3dc0d56e9e8417f72a747e9bf9ff9783f7a57722c602c2fbb9b5bf5967e4b5568e4f62270480df499fa25ab971c8c2a886'
 )
 
 # package|version-command|version|evidence-class. Nixpkgs 26.05 at NIXPKGS_REV
@@ -108,7 +108,7 @@ NEOVIM_PLUGIN_PINS=(
   'gitsigns.nvim|lewis6991/gitsigns.nvim|release|v2.1.0|a462f416e2ce4744531c6256252dee99a7d34a83'
   'lazy.nvim|folke/lazy.nvim|release|v11.17.5|85c7ff3711b730b4030d03144f6db6375044ae82'
   'neogit|NeogitOrg/neogit|release|v2.0.0|43fa47fb61773b0d90a78ebc2521ea8faaeebd86'
-  'nvim-treesitter|nvim-treesitter/nvim-treesitter|head|HEAD|5cb0114e6242625db56dd6440e945ed1ece10bc7'
+  'nvim-treesitter|nvim-treesitter/nvim-treesitter|head|HEAD|d4d59cb369da46b95699bd2200efbcffc6dadb3b'
   'nvim-autopairs|windwp/nvim-autopairs|release|0.10.0|23320e75953ac82e559c610bec5a90d9c6dfa743'
   'oil.nvim|stevearc/oil.nvim|release|v2.16.0|17c0a8faaf48298a0c0cfb0d757c0eaee4ff7a32'
   'plenary.nvim|nvim-lua/plenary.nvim|head|HEAD|74b06c6c75e4eeb3108ec01852001636d85a932b'
