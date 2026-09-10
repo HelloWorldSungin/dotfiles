@@ -96,8 +96,12 @@ strings "$(dirname "$(readlink -f "$(command -v codex)")")"/../node_modules/@ope
 
 On 2026-09-10, the installed 0.153.4 binary and an isolated, registry-integrity
 verified 0.154.0 platform artifact both advertised **872,000** for Sol, Terra,
-Luna and Astra. The [catalog results and provenance](tool-updates/2026-09-10/README.md)
-record both observations. Live Codex convergence remains attended and pending;
+Luna and Astra. The isolated 0.154.0 catalog also confirmed all eleven model
+ceilings listed above, recorded in
+[publisher provenance](tool-updates/2026-09-10/publisher-provenance.json)
+under `codex_catalog.max_context_window`. The
+[catalog results](tool-updates/2026-09-10/README.md) summarize both observations.
+Live Codex convergence remains attended and pending;
 repeat this installed-binary check after convergence before the separate Pi
 context-window correction. This update does not change Pi's override.
 
