@@ -74,7 +74,8 @@ in
   # The official Kun loader is pinned and deployed from this one repository
   # file. It remains user-invocable: it is not referenced by global memory or
   # any startup/Firstmate instruction. See docs/agents.md for provenance and
-  # the deliberate boundary around the mutable documents it fetches on /kun.
+  # the deliberate boundary around the mutable documents it fetches on a
+  # matching user request.
   home.file.".claude/skills/kun/SKILL.md".source = link "skills/kun/SKILL.md";
   home.file.".pi/agent/skills/kun/SKILL.md".source = link "skills/kun/SKILL.md";
   home.file.".agents/skills/kun/SKILL.md".source = link "skills/kun/SKILL.md";

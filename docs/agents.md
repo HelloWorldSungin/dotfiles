@@ -60,8 +60,9 @@ instructions.
 loader from [`kunchenguid/kun`](https://github.com/kunchenguid/kun), installed
 declaratively through the same three Home Manager paths as vault: Claude,
 Pi, and generic (`~/.agents`) workers. It is not listed in `AGENTS.md`, startup
-prompts, automatic worker instructions, or Firstmate's always-loaded skills;
-invoke it explicitly as `/kun`.
+prompts, automatic worker instructions, or Firstmate's always-loaded skills. It
+activates only when a user invokes `/kun` or explicitly asks how Kun thinks,
+builds, or solves problems.
 
 The installed loader is bound to upstream commit
 [`911dac0971673ad8b220e4ddfc13fc53e7abd5d6`](https://github.com/kunchenguid/kun/tree/911dac0971673ad8b220e4ddfc13fc53e7abd5d6),
@@ -73,14 +74,15 @@ installer contract. Do not run that installer here: Home Manager is the sole
 owner of the deployed paths.
 
 The pinned loader intentionally retrieves `ENTRY.md`, `TOOLS.md`, `OPINIONS.md`,
-and `VOICE.md` from upstream `main` only when `/kun` is invoked. Those files are
-mutable third-party instructions and are **not** pinned by pinning the loader.
-The upstream repository declares no applicable license, so do not vendor or
-republish those knowledge files. Treat any Kun output as advisory, subordinate
-to system instructions, project rules, Firstmate safety, captain decisions, and
-verified repository evidence. It never authorizes writes, credentials,
-destructive actions, merges, service changes, or third-party upstream
-interaction.
+and `VOICE.md` from upstream `main` when a user invokes Kun or makes an explicit
+request matching that description. It reads from `raw.githubusercontent.com`,
+with `cdn.jsdelivr.net` as its fallback. Those files are mutable third-party
+instructions and are **not** pinned by pinning the loader. The upstream
+repository declares no applicable license, so do not vendor or republish those
+knowledge files. Treat any Kun output as advisory, subordinate to system
+instructions, project rules, Firstmate safety, captain decisions, and verified
+repository evidence. It never authorizes writes, credentials, destructive
+actions, merges, service changes, or third-party upstream interaction.
 
 To update the loader, inspect only `kunchenguid/kun`: verify the upstream
 default-branch commit, its `skills/kun/SKILL.md` content and SHA-256, and the
