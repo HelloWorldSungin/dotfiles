@@ -1,8 +1,8 @@
 # Repository-owned no-mistakes configuration.
 #
 # Trust model, which decides when an edit here takes effect: no-mistakes reads
-# `commands` and agent selection from the DEFAULT-BRANCH copy of this file, not
-# from the pushed branch, unless the default-branch copy sets
+# `commands` from the DEFAULT-BRANCH copy of this file, not from the pushed
+# branch, unless the default-branch copy sets
 # `allow_repo_commands: true`. That opt-in is deliberately NOT set: it would let
 # any pushed branch run arbitrary commands inside the gate. The consequence is
 # that a change to this file is validated by the PREVIOUS configuration and only
@@ -19,35 +19,6 @@
 commands:
   test: bin/dotfiles-test
   lint: bin/dotfiles-lint
-
-# Independent reviewer and fixer harnesses (v1.72.0).
-#
-# Latency: the reviewer and the fixer alternate serially within a review round,
-# and recorded dotfiles invocations show the fixer role is where the harnesses
-# diverge most - codex review-fix rounds ran 48.9s against 114-795s for claude.
-# Putting the fixer on codex shortens the serial leg while leaving the reviewer,
-# which is what actually gates rigor, on claude.
-#
-# Independence: v1.72.0 already runs every review turn session-free so a
-# rereview never resumes the session that prescribed its fixes. Naming a
-# different harness per role extends that to the model itself, so the pass that
-# re-reviews a fix does not share the blind spots of the pass that wrote it.
-#
-# Load: both provider windows read projected_exhaustion at the time of writing;
-# splitting the roles spends two pools instead of draining one.
-#
-# Only `agent` is pinned here. Model and reasoning effort stay owned by the
-# global ~/.no-mistakes/config.yaml, which the captain re-tunes against live
-# quota, and whose agent_args_override wins over any repo-level model or effort
-# anyway. Both named harnesses neutralize this repository's AGENTS.md, which is
-# required because no-mistakes refuses to launch an agent without that knob in a
-# checkout tracking AGENTS.md/CLAUDE.md; v1.72.0 verifies it for codex, claude
-# and pi only, so those three are the eligible set for either role.
-review_agents:
-  reviewer:
-    agent: claude
-  fixer:
-    agent: codex
 
 # Path-scoped review context, so the reviewer is not rediscovering the same
 # repository rules on every cold round. Each entry points at the authoritative

@@ -13,7 +13,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `chromium` from there. `system/ct110-network-failover/e2e-failover-test.sh` is
   deliberately outside `bin/dotfiles-test`; its README owns that attended run.
 - `.no-mistakes.yaml` traps, both load-bearing:
-  1. no-mistakes reads `commands` and agent selection from the DEFAULT-BRANCH copy
+  1. no-mistakes reads `commands` from the DEFAULT-BRANCH copy
      of that file, so an edit there is validated by the previous configuration and
      only governs runs started after it lands. `allow_repo_commands`, which would
      honor a pushed branch's commands instead, is deliberately off.
