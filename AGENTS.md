@@ -4,6 +4,31 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - `.github/workflows/build.yml` is authoritative for build-only validation of
   Home Manager changes. Do not activate the resulting generation while testing.
+- `bin/dotfiles-test` (every `tests/*.test.sh`, per-suite bound and attribution)
+  and `bin/dotfiles-lint` (ShellCheck `-x` at full severity over every tracked
+  shell file) are this repository's canonical validation entry points, and
+  `.no-mistakes.yaml` points the pipeline's Test and Lint steps at them. Both put
+  Nix on PATH the way `bootstrap.sh` does: a service environment inherits neither
+  `~/.nix-profile/bin` nor the Nix daemon profile, and three suites need `nix` and
+  `chromium` from there. Neither adds `~/.local/bin`, where `shellcheck` and
+  `no-mistakes` live: a missing one hard-fails by design, never a skip and never
+  a PATH workaround. `system/ct110-network-failover/e2e-failover-test.sh` is
+  deliberately outside `bin/dotfiles-test`; its README owns that attended run.
+- `.no-mistakes.yaml` traps, both load-bearing:
+  1. no-mistakes reads `commands` from the DEFAULT-BRANCH copy
+     of that file, so an edit there is validated by the previous configuration and
+     only governs runs started after it lands. `allow_repo_commands`, which would
+     honor a pushed branch's commands instead, is deliberately off.
+     `tests/no-mistakes-config.test.sh` drives the real parser; its key-set
+     assertion is what catches a typo, because the parser ignores unknown keys
+     silently. `review_agents` is one such key here: it is global-only, so a
+     repository copy is accepted and then ignored. The captain decision
+     `nm-global-reviewer-fixer-profiles` owns that capability. A top-level
+     `agent` IS read from this file, but as one ordered list for every role.
+  2. Never run `no-mistakes ci-workflow` in this checkout. It emits a Go-shaped
+     `.github/workflows/ci.yml`; `build.yml` above is this repository's CI.
+     `tests/no-mistakes-config.test.sh` drives it only in throwaway repositories,
+     which is how the parser can be the oracle without writing here.
 - `bash ~/dotfiles/rebuild.sh` is the apply path for CT110 (it sources nix,
   auto-selects the flake target, and passes `-b backup`). Changes to Nix-evaluated
   inputs require it; the `mkOutOfStoreSymlink` trees in `home/common.nix`

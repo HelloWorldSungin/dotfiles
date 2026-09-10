@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Canonical behavioral test entry point for this repository.
+#
+# Runs every suite in tests/ once, in order, with per-suite attribution and a
+# per-suite wall-clock bound. Nothing is skipped, filtered, or summarized away:
+# each suite's own output is printed verbatim under its name, and a failing
+# suite fails this command.
+#
+# system/ct110-network-failover/e2e-failover-test.sh is deliberately NOT run
+# here. It needs root on the Proxmox host and drives live network lifecycle
+# actions; its README owns that attended procedure.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$ROOT"
+
+# The suites need Nix-provided tools (nix, chromium, jq, node) that a service
+# environment does not inherit. This is the same sourcing bootstrap.sh and
+# rebuild.sh use, so there is one idiom for putting Nix on PATH.
+if ! command -v nix >/dev/null 2>&1 &&
+  [ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
+  # shellcheck disable=SC1091
+  . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+fi
+
+# Bound a hung suite without masking a slow one: the slowest suite measured on
+# CT110 is under 30s, so 600s only ever fires on a genuine hang.
+SUITE_TIMEOUT_SECONDS=600
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_BIN=timeout
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_BIN=gtimeout
+else
+  echo 'dotfiles-test: missing test dependency: timeout (gtimeout from coreutils on macOS)' >&2
+  exit 1
+fi
+
+shopt -s nullglob
+suites=(tests/*.test.sh)
+shopt -u nullglob
+[ ${#suites[@]} -gt 0 ] || { echo 'dotfiles-test: no suites found in tests/' >&2; exit 1; }
+
+failed=()
+for suite in "${suites[@]}"; do
+  printf '\n== %s\n' "$suite"
+  status=0
+  "$TIMEOUT_BIN" "$SUITE_TIMEOUT_SECONDS" bash "$suite" || status=$?
+  if [ "$status" -ne 0 ]; then
+    failed+=("$suite (exit $status)")
+    printf '!! FAILED %s (exit %d)\n' "$suite" "$status"
+  fi
+done
+
+printf '\n'
+if [ ${#failed[@]} -gt 0 ]; then
+  printf 'dotfiles-test: %d of %d suite(s) failed:\n' "${#failed[@]}" "${#suites[@]}" >&2
+  printf '  %s\n' "${failed[@]}" >&2
+  exit 1
+fi
+printf 'dotfiles-test: %d suite(s) passed\n' "${#suites[@]}"

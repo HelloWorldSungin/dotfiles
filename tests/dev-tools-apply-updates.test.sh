@@ -81,7 +81,7 @@ done
 tools=$(jq -cn --argjson tools "$tools" '$tools + [
   {name:"codex",current:"0.1.0",pinned:"9.9.9",latest_stable:"9.9.9",status:"drifted"},
   {name:"herdr",current:"0.8.2",pinned:"0.9.0",latest_stable:"0.9.0",status:"drifted"},
-  {name:"no-mistakes",current:"1.60.2",pinned:"1.70.1",latest_stable:"1.70.1",status:"drifted"}
+  {name:"no-mistakes",current:"1.60.2",pinned:"1.72.0",latest_stable:"1.72.0",status:"drifted"}
 ]')
 jq -cn --argjson tools "$tools" '{schema_version:4,tools:$tools}'
 SH

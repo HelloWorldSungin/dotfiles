@@ -150,9 +150,18 @@ e2e_lock=$(sed -n 's/^LOCK_FILE=//p' "$e2e_script")
 apply_marker=$(sed -n 's/^RECOVERY_MARKER=//p' "$apply_script")
 e2e_marker=$(sed -n 's/^RECOVERY_MARKER=//p' "$e2e_script")
 [[ -n $apply_marker && $apply_marker == "$e2e_marker" ]] || fail 'host operations do not share one recovery marker'
+# The six expectations below carry a $-expression that is literal text in the
+# host script, so each one must stay unexpanded: expanding it would compare
+# against this shell's values instead of the script's source. The directives are
+# per-site on purpose, so a later assertion that genuinely meant to expand is
+# still caught.
+# shellcheck disable=SC2016
 assert_contains "$apply_script" 'for unit in "$APPLY_UNIT_NAME" "$E2E_UNIT_NAME"; do'
+# shellcheck disable=SC2016
 assert_contains "$e2e_script" 'for unit in "$APPLY_UNIT_NAME" "$E2E_UNIT_NAME"; do'
+# shellcheck disable=SC2016
 assert_contains "$apply_script" 'exit "\$recovery_failed"'
+# shellcheck disable=SC2016
 assert_contains "$e2e_script" 'exit "\$recovery_failed"'
 assert_contains "$apply_script" 'stop_originating_workflow || exit 1'
 assert_contains "$e2e_script" 'stop_originating_workflow || exit 1'
@@ -160,7 +169,9 @@ assert_contains "$apply_script" 'flock -w 15 9 || exit 1'
 assert_contains "$e2e_script" 'flock -w 15 9 || exit 1'
 assert_contains "$apply_script" '--property=KillMode=control-group'
 assert_contains "$e2e_script" '--property=KillMode=control-group'
+# shellcheck disable=SC2016
 assert_contains "$e2e_script" 'MIN_REVERT_SECONDS=$((WORKFLOW_BUDGET_SECONDS + ROLLBACK_MARGIN_SECONDS))'
+# shellcheck disable=SC2016
 assert_contains "$e2e_script" 'WORKFLOW_DEADLINE=$((SECONDS + REVERT_SECONDS - ROLLBACK_MARGIN_SECONDS))'
 
 printf 'vpn-ethernet-failover tests passed\n'

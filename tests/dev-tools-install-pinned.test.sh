@@ -26,7 +26,7 @@ make_binary() {
 }
 
 make_binary "$ASSETS/treehouse/treehouse" treehouse 2.3.0
-make_binary "$ASSETS/no-mistakes/no-mistakes" no-mistakes 1.70.1
+make_binary "$ASSETS/no-mistakes/no-mistakes" no-mistakes 1.72.0
 make_binary "$ASSETS/herdr" herdr 0.9.0
 mkdir -p "$ASSETS/antigravity-dir"
 make_binary "$ASSETS/antigravity-dir/antigravity" agy 1.1.28
@@ -53,7 +53,7 @@ PINS="$FIXTURE/pins.sh"
 cat >"$PINS" <<EOF
 TOOLCHAIN_VERIFIED_AT=2026-09-09
 TREEHOUSE_VERSION=2.3.0
-NO_MISTAKES_VERSION=1.70.1
+NO_MISTAKES_VERSION=1.72.0
 HERDR_VERSION=0.9.0
 ANTIGRAVITY_VERSION=1.1.28
 CURSOR_AGENT_OBSERVED_VERSION=2026.09.08-test
