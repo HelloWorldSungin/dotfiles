@@ -26,8 +26,7 @@ command -v shellcheck >/dev/null 2>&1 || {
 }
 printf 'dotfiles-lint: %s\n' "$(shellcheck --version | sed -n 's/^version: /ShellCheck /p')"
 
-# The shell a tracked file declares, or nothing when it declares none. This is
-# the single definition of "shell file" the entry point works from: it reads
+# The shell a tracked file declares, or nothing when it declares none. It reads
 # through `env`, its options and its VAR=value prefixes, and it reads the
 # interpreter word rather than the whole line, so `#!/bin/bash -e` resolves to
 # bash and `#!/usr/bin/env zsh` resolves to zsh (which ShellCheck cannot parse).
@@ -48,20 +47,25 @@ declared_shell() { # declared_shell <file>
   done
 }
 
+# Every tracked *.sh, because a sourced library is a shell file even with no
+# shebang and ShellCheck defaults such a file to sh, plus every tracked file
+# whose shebang names a shell, which is what covers extensionless scripts like
+# system/ct110-network-failover/vpn-ethernet-failover. Anything else is not a
+# shell script, and is listed rather than dropped silently.
 files=()
 skipped=()
 while IFS= read -r candidate; do
   [ -f "$candidate" ] || continue
+  case $candidate in
+    *.sh)
+      files+=("$candidate")
+      continue
+      ;;
+  esac
   shell=$(declared_shell "$candidate")
   case $shell in
     sh | bash | dash | ksh) files+=("$candidate") ;;
-    '')
-      # No shebang, so nothing claims this is a shell script. A *.sh name still
-      # claims it, so report that combination instead of dropping it silently.
-      case $candidate in
-        *.sh) skipped+=("$candidate (no shebang)") ;;
-      esac
-      ;;
+    '') ;;
     *) skipped+=("$candidate (#!$shell)") ;;
   esac
 done < <(git ls-files)
