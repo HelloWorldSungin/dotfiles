@@ -4,7 +4,10 @@
 pins. `flake.lock` owns the immutable Nix input revisions, and
 `config/nvim/lazy-lock.json` owns Neovim plugin commits. The pins below were
 verified on 2026-09-09 against each publisher's registry, release feed, or
-manifest. A version is stable only when the publisher's stable/default registry
+manifest. Separately, on 2026-09-10 the no-mistakes 1.72.0 row and its four
+platform publisher checksums alone were independently re-derived; that day
+re-checked no other row and was not a sweep of this inventory.
+A version is stable only when the publisher's stable/default registry
 tag or a non-draft, non-prerelease release says so. Numeric tags containing
 alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
 

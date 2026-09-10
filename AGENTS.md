@@ -19,7 +19,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
      honor a pushed branch's commands instead, is deliberately off.
      `tests/no-mistakes-config.test.sh` drives the real parser; its key-set
      assertion is what catches a typo, because the parser ignores unknown keys
-     silently.
+     silently. `review_agents` is one such key here: it is global-only, so a
+     repository copy is accepted and then ignored. The captain decision
+     `nm-global-reviewer-fixer-profiles` owns that capability. A top-level
+     `agent` IS read from this file, but as one ordered list for every role.
   2. Never run `no-mistakes ci-workflow` here. It emits a Go-shaped
      `.github/workflows/ci.yml`; `build.yml` above is this repository's CI.
 - `bash ~/dotfiles/rebuild.sh` is the apply path for CT110 (it sources nix,
