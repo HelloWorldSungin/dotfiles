@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "projection": "consumed JSON paths and observed types only",
+  "contracts": {
+    "no-mistakes-current-branch": [
+      "$.current_branch:string", "$.runs_on_current_branch:number", "$.count:string",
+      "$.runs:array", "$.runs[]:object", "$.runs[].id:string", "$.runs[].branch:string",
+      "$.runs[].status:string", "$.runs[].head:string", "$.runs[].pr:string", "$.help:array"
+    ],
+    "no-mistakes-explicit-run": [
+      "$.current_branch:string", "$.other_branch_run:object", "$.other_branch_run.id:string",
+      "$.other_branch_run.branch:string", "$.other_branch_run.status:string",
+      "$.other_branch_run.head:string", "$.other_branch_run.head_sha:string",
+      "$.other_branch_run.pr:string", "$.other_branch_run.findings:string",
+      "$.other_branch_run.steps:array", "$.other_branch_run.steps[]:object",
+      "$.other_branch_run.steps[].step:string", "$.other_branch_run.steps[].status:string",
+      "$.other_branch_run.steps[].findings:number", "$.other_branch_run.steps[].duration_ms:number",
+      "$.other_branch_run.shared_work:array", "$.other_branch_run.shared_work[]:object",
+      "$.other_branch_run.shared_work[].attributed_to:string",
+      "$.other_branch_run.shared_work[].scope:string",
+      "$.other_branch_run.shared_work[].duration_ms:number", "$.outcome:string", "$.branch_sync:null"
+    ],
+    "no-mistakes-detached": [
+      "$.current_branch:string", "$.count:string", "$.runs:array", "$.runs[]:object",
+      "$.runs[].id:string", "$.runs[].branch:string", "$.runs[].status:string",
+      "$.runs[].head:string", "$.runs[].pr:string", "$.help:array"
+    ],
+    "herdr-status": [
+      "$.herdr_version:string", "$.client.protocol:number", "$.server.running:boolean",
+      "$.schema:null", "$.v:null"
+    ],
+    "herdr-sessions": [
+      "$.sessions:array", "$.sessions[]:object", "$.sessions[].default:boolean",
+      "$.sessions[].name:string", "$.sessions[].running:boolean",
+      "$.sessions[].session_dir:string", "$.sessions[].socket_path:string"
+    ],
+    "herdr-stop": [
+      "$.exit:number", "$.payload:object", "$.payload.stopped:boolean",
+      "$.payload.session:object", "$.payload.session.default:boolean",
+      "$.payload.session.name:string", "$.payload.session.running:boolean",
+      "$.payload.session.session_dir:string", "$.payload.session.socket_path:string"
+    ],
+    "herdr-delete": [
+      "$.exit:number", "$.payload:object", "$.payload.deleted:boolean",
+      "$.payload.session:object", "$.payload.session.default:boolean",
+      "$.payload.session.name:string", "$.payload.session.running:boolean",
+      "$.payload.session.session_dir:string", "$.payload.session.socket_path:string"
+    ],
+    "quota-axi-json": [
+      "$.schemaVersion:number", "$.providers:array", "$.providers[]:object",
+      "$.providers[].provider:string", "$.providers[].windows:array",
+      "$.providers[].windows[]:object", "$.providers[].windows[].id:string",
+      "$.providers[].windows[].kind:string", "$.providers[].windows[].label:string",
+      "$.providers[].windows[].percentRemaining:number",
+      "$.providers[].windows[].resetsAt:string", "$.providers[].windows[].pace:object",
+      "$.providers[].windows[].pace.status:string",
+      "$.providers[].windows[].pace.reason:string",
+      "$.providers[].windows[].pace.burnMultiple:number",
+      "$.providers[].windows[].pace.reservePercentPoints:number"
+    ],
+    "tasks-axi-list": ["$.count:number", "$.tasks:string", "$.help:array"],
+    "gh-axi-release-list": [
+      "$.count:string", "$.releases:array", "$.releases[]:object",
+      "$.releases[].tag:string", "$.releases[].name:string",
+      "$.releases[].draft:boolean", "$.releases[].prerelease:boolean",
+      "$.releases[].published:string", "$.help:array"
+    ],
+    "dev-tools-check-updates-json": [
+      "$.schema_version:number", "$.checked_at_epoch:number", "$.pins_verified_at:string",
+      "$.summary:object", "$.summary.up_to_date:number", "$.summary.drifted:number",
+      "$.summary.pin_outdated:number", "$.summary.unknown:number", "$.tools:array",
+      "$.tools[]:object", "$.tools[].name:string", "$.tools[].source:string",
+      "$.tools[].pinned:string", "$.tools[].current:string",
+      "$.tools[].latest_stable:string", "$.tools[].latest_observed:string",
+      "$.tools[].status:string", "$.tools[].detail:string",
+      "$.tools[].install_policy:string", "$.tools[].apply_policy:string",
+      "$.intentionally_unmanaged:array", "$.intentionally_unmanaged[]:object",
+      "$.intentionally_unmanaged[].name:string", "$.intentionally_unmanaged[].reason:string",
+      "$.nix:object", "$.nix.nixpkgs:object", "$.nix.nixpkgs.channel:string",
+      "$.nix.nixpkgs.revision:string", "$.nix.home_manager:object",
+      "$.nix.home_manager.channel:string", "$.nix.home_manager.revision:string"
+    ]
+  }
+}

@@ -3,10 +3,11 @@
 `config/dev-tools-versions.sh` is the machine-readable owner for external tool
 pins. `flake.lock` owns the immutable Nix input revisions, and
 `config/nvim/lazy-lock.json` owns Neovim plugin commits. The pins below were
-verified on 2026-09-09 against each publisher's registry, release feed, or
-manifest. Separately, on 2026-09-10 the no-mistakes 1.72.0 row and its four
-platform publisher checksums alone were independently re-derived; that day
-re-checked no other row and was not a sweep of this inventory.
+verified on 2026-09-10 against each publisher's registry, release feed, or
+manifest. The [audit evidence](tool-updates/2026-09-10/README.md) records the
+publisher provenance, checksums, value-free contract comparisons, and pending
+live convergence.
+GBrain is excluded from this sweep; its report-only row remains unchanged.
 A version is stable only when the publisher's stable/default registry
 tag or a non-draft, non-prerelease release says so. Numeric tags containing
 alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
@@ -16,14 +17,14 @@ alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
 | Tool | Exact pin | Authority and stable judgment | Fresh install | Apply boundary |
 |---|---:|---|---|---|
 | Determinate Nix Installer | 3.22.3 | Determinate GitHub GA release, with v3.22.0 prerelease excluded | Versioned installer URL plus recorded installer SHA-256 | Report only |
-| Claude Code | 2.1.236 | Official npm `stable` dist-tag. The moving `latest` 2.1.266 is deliberately not the stable channel | Exact npm package and registry integrity | Report only |
-| Codex | 0.153.4 | Official npm default tag; 0.154.0 alpha builds excluded | Exact npm package and registry integrity | Report only |
+| Claude Code | 2.1.236 | Official npm `stable` dist-tag. The moving `latest` 2.1.267 is separate; existing newer installs are not downgraded | Exact npm package and registry integrity | Report only |
+| Codex | 0.154.0 | Official npm default tag and matching GA release; suffixed alpha builds excluded | Exact npm package and registry integrity | Report only |
 | OpenCode 1 | 1.18.30 | Official npm default tag and matching GA release; OpenCode 2 beta and snapshots excluded | Exact npm package and registry integrity | Report only |
 | Pi | 0.85.1 | `@earendil-works/pi-coding-agent` default tag. The retired Mario Zechner package is not the fleet distribution | Exact npm package and registry integrity | Report only |
-| Antigravity CLI | 1.1.28 | Google's per-platform production manifest | Exact publisher asset and SHA-512 from that manifest | Report only; its own self-update remains an upstream limitation |
+| Antigravity CLI | 1.2.0 | Google's per-platform production manifest | Exact publisher asset and SHA-512 from that manifest | Report only; its own self-update remains an upstream limitation |
 | Cursor Agent | 2026.09.08-6caf4ff | Version embedded in Cursor's official moving installer | No automated install; observed snapshot only | Report only |
 | Treehouse | 2.3.0 | Latest non-draft, non-prerelease GitHub release | Exact release archive and publisher checksum | Report only |
-| no-mistakes | 1.72.0 | Latest GitHub GA release; the 1.73.0 prerelease is excluded | Exact release archive and publisher checksum | Attended only |
+| no-mistakes | 1.72.0 | Latest GitHub GA release; 1.73.0 and 1.74.0 prereleases are excluded | Exact release archive and publisher checksum | Attended only |
 | Herdr | 0.9.0 | `herdr.dev/latest.json`; newer preview builds excluded | Exact manifest asset and publisher checksum, only when absent | Attended only |
 | GBrain | 0.48.5.0 | Latest non-draft, non-prerelease `garrytan/gbrain` release | Not installed here | Firstmate-owned attended migration |
 | gnhf | 0.1.49 | npm default tag | Exact npm package and registry integrity | Guarded exact apply |
@@ -35,10 +36,10 @@ alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
 | OpenCode ACP invocation | 1.18.30 | npm default tag | Exact `npx` spec in `config/baby-menu/agents.json` | Report only |
 | OMP ACP invocation | 0.1.2 | npm default tag | Exact `npx` spec in `config/baby-menu/agents.json` | Report only |
 | claude-spend invocation | 1.0.6 | npm default tag | `CLAUDE_SPEND_VERSION` in `config/dev-tools-versions.sh`, read at run time by `bin/claude-spend-pinned` (the `cspend` alias) | Report only |
-| Firstmate source | `0fe226c93efd...` | No upstream releases exist, so the audited default-branch commit is the explicit exception | Exact commit | Guarded exact fast-forward only |
+| Firstmate source | `0fe226c93efd...` | Held at the existing audited commit pending fork reconciliation through Firstmate upstream-sync | Exact commit | Guarded exact fast-forward only |
 | Baby Menu source | 0.1.24 / `65eb280ea0e0...` | Latest non-prerelease `baby-menu-v0.1.24` release | Exact release commit | Report only |
 | actions/checkout | v7.0.1 / `3d3c42e5aac5...` | Latest GitHub GA action release | Exact workflow action SHA | CI only |
-| Determinate Nix Installer action | v22 / `ef8a148080ab...` | Latest GitHub GA action release | Exact workflow action SHA | CI only |
+| Determinate Nix Installer action | v23 / `3138316df39e...` | Latest GitHub GA action release | Exact workflow action SHA | CI only |
 
 The authoritative feeds used for the audit are the
 [npm registry](https://registry.npmjs.org/) for npm packages,
@@ -50,6 +51,12 @@ platform-specific Antigravity production manifests, the
 Manager release branches. Exact repository and package identifiers live beside
 the values in `config/dev-tools-versions.sh`, so the checker does not infer an
 owner from an executable name.
+
+Claude Code keeps the publisher's `stable` channel for exact fresh installs.
+At this audit it still selects 2.1.236, while the installed 2.1.267 is newer.
+The approved stable-channel recommendation does not authorize downgrading that
+live installation to the older stable-channel version. Leave it in place for the attended
+channel transition; the guarded updater cannot mutate Claude Code.
 
 The Cursor CLI is already an intentional beta dependency in this repository.
 Cursor documents only a moving installer and auto-update commands, with no
@@ -68,7 +75,7 @@ visible instead of claiming the pin controls the running binary forever.
 ## Nix-owned inventory
 
 The stable package authority is Nixpkgs 26.05 at
-`93108a538f079596c9a16c72cf03e9322782b6dd`. Home Manager is the matching
+`d58a46e3bc02d91ebe04667f8397752a749c0024`. Home Manager is the matching
 26.05 input at `fd0956c99c41ae3c13a73a638f1f7e963aebc4ab`. This supersedes the
 deprecated 25.11 channel. The lock file carries the content hashes.
 
@@ -130,7 +137,7 @@ current authoritative release or branch commit.
 | gitsigns.nvim | v2.1.0 GA | `a462f416e2ce4744531c6256252dee99a7d34a83` |
 | lazy.nvim | v11.17.5 GA | `85c7ff3711b730b4030d03144f6db6375044ae82` |
 | neogit | v2.0.0 GA | `43fa47fb61773b0d90a78ebc2521ea8faaeebd86` |
-| nvim-treesitter | No releases; default branch at audit time | `5cb0114e6242625db56dd6440e945ed1ece10bc7` |
+| nvim-treesitter | No releases; default branch at audit time | `d4d59cb369da46b95699bd2200efbcffc6dadb3b` |
 | nvim-autopairs | 0.10.0 GA tag | `23320e75953ac82e559c610bec5a90d9c6dfa743` |
 | oil.nvim | v2.16.0 GA | `17c0a8faaf48298a0c0cfb0d757c0eaee4ff7a32` |
 | plenary.nvim | No releases; default branch at audit time | `74b06c6c75e4eeb3108ec01852001636d85a932b` |

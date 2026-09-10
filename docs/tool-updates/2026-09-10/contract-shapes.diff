@@ -1,0 +1,19 @@
+--- contract-shapes-before.json
++++ contract-shapes-after.json
+@@ -26,8 +26,14 @@
+       "$.runs[].head:string", "$.runs[].pr:string", "$.help:array"
+     ],
+     "herdr-status": [
+-      "$.herdr_version:string", "$.client.protocol:number", "$.server.running:boolean",
+-      "$.schema:null", "$.v:null"
++      "$.herdr_version:string", "$.client.protocol:number",
++      "$.client.endpoint_capabilities:array", "$.client.endpoint_capabilities[]:string",
++      "$.client.endpoint_protocol_generation:number", "$.server.running:boolean",
++      "$.server.endpoint_compatible:boolean",
++      "$.server.capabilities.endpoint_protocol_generation:number",
++      "$.server.capabilities.health_check:boolean",
++      "$.server.capabilities.surface_interest:boolean", "$.server.server_binary_stale:boolean",
++      "$.update.server_binary_stale:boolean", "$.schema:null", "$.v:null"
+     ],
+     "herdr-sessions": [
+       "$.sessions:array", "$.sessions[]:object", "$.sessions[].default:boolean",

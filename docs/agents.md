@@ -67,7 +67,7 @@ separately, and the two ceilings are **not** the same.
 | codex | global `model_context_window` in `~/.codex/config.toml` | **872,000** for `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` and `gpt-6-astra`; models with a lower `max_context_window` keep their own ceiling |
 
 Pi's 1,050,000 is a *local* override: it governs pi's own context accounting and
-model listing. Codex is different - its 0.153.4 catalog advertises
+model listing. Codex is different - the verified 0.154.0 catalog advertises
 `max_context_window = 872000` for Sol, Terra, Luna and Astra, and
 `models-manager` applies `configured.min(max_context_window)`, so a larger
 configured value is silently clamped. 872,000 is what Codex advertises and
@@ -77,7 +77,7 @@ upstream service accepts more than Codex's advertised ceiling.
 
 Codex's key is global rather than per-model, and it is the only mechanism Codex
 supports, so it is offered to the whole catalog and needs **no change at all** to
-cover Astra. The same clamp bounds it per model: in the 0.153.4 catalog it
+cover Astra. The same clamp bounds it per model: in the 0.154.0 catalog it
 reaches the full 872,000 on `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`,
 `gpt-5.6-luna`, `gpt-daybreak-blue-latest` and `codex-auto-review`. Models
 advertising less keep their own lower ceiling (`gpt-daybreak-red-latest`
@@ -93,6 +93,13 @@ package, so the `codex-*` glob resolves on CT110 and the Mac alike):
 strings "$(dirname "$(readlink -f "$(command -v codex)")")"/../node_modules/@openai/codex-*/vendor/*/bin/codex \
   | grep -E '^      "(slug|max_context_window)"'
 ```
+
+On 2026-09-10, the installed 0.153.4 binary and an isolated, registry-integrity
+verified 0.154.0 platform artifact both advertised **872,000** for Sol, Terra,
+Luna and Astra. The [catalog results and provenance](tool-updates/2026-09-10/README.md)
+record both observations. Live Codex convergence remains attended and pending;
+repeat this installed-binary check after convergence before the separate Pi
+context-window correction. This update does not change Pi's override.
 
 Requests above 272K total input tokens bill at the model's long-context rates for
 the whole request. Neither override changes the selected model or effort.
