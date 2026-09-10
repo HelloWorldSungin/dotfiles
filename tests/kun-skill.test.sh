@@ -148,6 +148,7 @@ jq -e '.instructionBodyVisible == true' "$TMP_ROOT/appended.json" >/dev/null || 
 pass 'paired startup control detects an appended Kun instruction body'
 
 run_pi_probe '/skill:kun' "$TMP_ROOT/invocation.txt"
+# shellcheck disable=SC2016 # Markdown backticks are intentional literal output.
 expected_prompt_lines=(
   'If the files cannot be fetched, stop and say so. Do not guess file contents.'
   '- `https://raw.githubusercontent.com/kunchenguid/kun/main/ENTRY.md`'
