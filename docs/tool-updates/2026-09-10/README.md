@@ -65,6 +65,8 @@ Linux artifact both advertised `max_context_window: 872000` for Sol, Terra,
 Luna, and Astra. Their binary SHA-256 values were respectively
 `56ef98ab4032d317ab26e9b5e5a175650717351edb16ed9cde0cb6d1734d62da`
 and `3188814c35471432d4123203e0eb38e5bddc60226e3d7ddf0e59e649ea140022`.
+The provenance `codex_catalog.max_context_window` records all eleven ceilings
+the 0.154.0 catalog advertised; `docs/agents.md` explains how Codex applies them.
 The live Codex remains 0.153.4. Re-run the installed catalog command documented
 in `docs/agents.md` after attended convergence and before the separate Pi
 context-window correction.
