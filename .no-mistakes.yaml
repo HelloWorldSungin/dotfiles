@@ -39,8 +39,10 @@ commands:
 # Only `agent` is pinned here. Model and reasoning effort stay owned by the
 # global ~/.no-mistakes/config.yaml, which the captain re-tunes against live
 # quota, and whose agent_args_override wins over any repo-level model or effort
-# anyway. Both named harnesses neutralize this repository's AGENTS.md; no other
-# adapter does.
+# anyway. Both named harnesses neutralize this repository's AGENTS.md, which is
+# required because no-mistakes refuses to launch an agent without that knob in a
+# checkout tracking AGENTS.md/CLAUDE.md; v1.72.0 verifies it for codex, claude
+# and pi only, so those three are the eligible set for either role.
 review_agents:
   reviewer:
     agent: claude

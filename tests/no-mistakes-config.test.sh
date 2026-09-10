@@ -55,30 +55,63 @@ for name, cmd in cmds.items():
 PY
 pass 'commands.test and commands.lint name tracked, executable repository entry points'
 
-py <<'PY' || fail 'review_agents does not configure both roles through an explicit harness'
+# This rule runs against the real config and against the fixtures below, so it
+# lives in a file rather than on stdin.
+AGENTS_CHECK="$TMP_ROOT/review-agents-check.py"
+cat >"$AGENTS_CHECK" <<'PY'
 import sys, yaml
 cfg = yaml.safe_load(open(sys.argv[1]))
 ra = cfg["review_agents"]
 if set(ra) != {"reviewer", "fixer"}:
     print("review_agents roles %s, expected reviewer and fixer" % sorted(ra), file=sys.stderr); sys.exit(1)
-# The harnesses no-mistakes v1.72.0 names as valid, minus `auto`. The config
-# parser accepts any string here without complaint and only rejects it when it
-# resolves the agent, so a typo would otherwise reach a live run. Which harness
-# each role gets is an operational choice - a same-provider failover is valid -
-# so this only rejects a name no-mistakes could route at all.
-explicit = {"claude", "codex", "grok", "rovodev", "opencode", "pi", "copilot",
-            "cursor", "antigravity"}
+# Both roles are launched inside this checkout, and no-mistakes refuses any
+# agent lacking a verified way to neutralize a tracked AGENTS.md/CLAUDE.md -
+# v1.72.0 names codex, claude and pi as the only three. Parser acceptance is no
+# guard at all: the real parser takes any string here, a nonsense one included,
+# and only refuses at launch, so this is where a wrong value has to be caught.
+# Which of the three each role gets is an operational choice, so both roles may
+# name the same one - a same-provider failover must not turn the gate red.
+neutralizing = {"claude", "codex", "pi"}
 for role, profile in ra.items():
     agent = (profile or {}).get("agent")
     if not agent:
         print("review_agents.%s has no explicit agent" % role, file=sys.stderr); sys.exit(1)
     if agent == "auto":
         print("review_agents.%s must name an explicit harness, not auto" % role, file=sys.stderr); sys.exit(1)
-    if agent not in explicit:
-        print("review_agents.%s agent %r is not a harness no-mistakes supports" % (role, agent),
-              file=sys.stderr); sys.exit(1)
+    if agent not in neutralizing:
+        print("review_agents.%s agent %r has no verified AGENTS.md neutralization, so "
+              "no-mistakes would refuse to launch it here" % (role, agent), file=sys.stderr)
+        sys.exit(1)
 PY
-pass 'both review_agents roles name an explicit, supported harness'
+
+python3 "$AGENTS_CHECK" "$CONFIG" ||
+  fail 'review_agents does not configure both roles through a neutralizing harness'
+pass 'both review_agents roles name an explicit harness with verified AGENTS.md neutralization'
+
+FIXTURE="$TMP_ROOT/review-agents-fixture.yaml"
+write_agents_fixture() { # write_agents_fixture <reviewer> <fixer>
+  python3 - "$CONFIG" "$FIXTURE" "$1" "$2" <<'PY'
+import sys, yaml
+cfg = yaml.safe_load(open(sys.argv[1]))
+cfg["review_agents"]["reviewer"]["agent"] = sys.argv[3]
+cfg["review_agents"]["fixer"]["agent"] = sys.argv[4]
+yaml.safe_dump(cfg, open(sys.argv[2], "w"))
+PY
+}
+
+for pair in claude:pi pi:codex claude:claude codex:codex; do
+  write_agents_fixture "${pair%%:*}" "${pair##*:}"
+  python3 "$AGENTS_CHECK" "$FIXTURE" || fail "review_agents $pair was rejected"
+done
+pass 'pi is permitted for either role, and both roles may name the same harness'
+
+for pair in claude:opencode grok:codex claude:auto; do
+  write_agents_fixture "${pair%%:*}" "${pair##*:}"
+  if python3 "$AGENTS_CHECK" "$FIXTURE" 2>/dev/null; then
+    fail "review_agents $pair was accepted"
+  fi
+done
+pass 'a parser-valid harness without verified neutralization, and auto, are both rejected'
 
 py <<'PY' || fail 'a review.path_instructions rule matches no tracked file'
 import fnmatch, subprocess, sys, yaml
