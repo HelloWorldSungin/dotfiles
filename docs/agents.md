@@ -119,7 +119,7 @@ override, while Codex returns to the 272,000 catalog default.
 | Harness | Mechanism | Effective window |
 |---------|-----------|------------------|
 | pi | `pi/models.json` → `~/.pi/agent/models.json`, `providers.openai-codex.modelOverrides` | **872,000** for `gpt-5.6-sol`, `gpt-5.6-terra` and `gpt-6-astra` (per-model override; Luna and every other model in the catalog keep the openai-codex built-in 272,000) |
-| codex | global `model_context_window` in `~/.codex/config.toml` (committed fallback `272000`, overridable per-call via `CODEX_MODEL_CONTEXT_WINDOW`) | **272,000** for every model on the catalog; `models-manager` clamps it to `min(configured, max_context_window)`, so raising the key above a model's `max_context_window` is silently held down to that ceiling |
+| codex | global `model_context_window` in `~/.codex/config.toml` (committed fallback `272000`, overridable via `CODEX_MODEL_CONTEXT_WINDOW` when running `bin/codex-set-context-window`) | **272,000** for every model on the catalog; `models-manager` clamps it to `min(configured, max_context_window)`, so raising the key above a model's `max_context_window` is silently held down to that ceiling |
 
 Pi's number is a *local* override: it governs pi's own context accounting,
 listing, and auto-compaction. Pi compacts when
@@ -144,22 +144,15 @@ Codex is different in mechanism: the verified 0.154.0 catalog advertises
 `codex-auto-review`, and `models-manager` applies
 `configured.min(max_context_window)`, so a configured value larger than the
 catalog ceiling is silently clamped. The committed fallback is 272,000 and
-that is the catalog's own `context_window` for those six models; `gpt-5.5`,
+that is the catalog's own `context_window` for Sol, Terra, Luna and Astra; `gpt-5.5`,
 `gpt-5.4-mini`, `gpt-5.2`, `gpt-daybreak-red-latest` (372,000), and `gpt-5.4`
 (advertised 1,000,000) all also resolve to 272,000 because the configured
 ceiling is at or below their `max_context_window`. Raising the configured
-key above a model's `max_context_window` is the only way any model can
-actually reach a higher ceiling today. The global key is the only mechanism
+key (up to a model's `max_context_window`) is the only way any model can
+exceed 272,000 in Codex today. The global key is the only mechanism
 Codex supports, so it is offered to the whole catalog without any per-model
 counterpart. Do not restore a Pi override above the 872,000 advertised
 maximum, and do not add a direct OpenAI API-key provider for this.
-
-The same installed-binary command verifies either:
-
-```sh
-strings "$(dirname "$(readlink -f "$(command -v codex)")")"/../node_modules/@openai/codex-*/vendor/*/bin/codex \
-  | grep -E '^      "(slug|context_window|max_context_window)"'
-```
 
 To re-verify against an upgraded Codex, read the catalog the installed binary
 embeds rather than trusting this list (npm installs exactly one platform
@@ -167,6 +160,11 @@ package, so the `codex-*` glob resolves on CT110 and the Mac alike). The
 installed binary is the authoritative source for the four models that
 matter: their catalog `context_window` is 272,000 and `max_context_window`
 is 872,000.
+
+```sh
+strings "$(dirname "$(readlink -f "$(command -v codex)")")"/../node_modules/@openai/codex-*/vendor/*/bin/codex \
+  | grep -E '^      "(slug|context_window|max_context_window)"'
+```
 
 On 2026-09-10, the installed 0.153.4 binary and an isolated, registry-integrity
 verified 0.154.0 platform artifact both advertised **872,000** for Sol, Terra,

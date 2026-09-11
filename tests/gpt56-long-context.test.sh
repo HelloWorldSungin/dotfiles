@@ -267,7 +267,8 @@ pass "repeated merges are idempotent and do not rewrite or duplicate the key"
 # An existing stale value is updated in place, not appended: the prior committed
 # default (872000) sitting in the config must be replaced by the current default
 # (272000) on the next merge, with no CODEX_MODEL_CONTEXT_WINDOW override.
-sed -i 's/^model_context_window = 272000$/model_context_window = 872000/' "$cfg"
+grep -qx 'model_context_window = 872000' "$cfg" \
+  || fail "stale-value fixture must start at 872000"
 env -u CODEX_MODEL_CONTEXT_WINDOW CODEX_CONFIG_FILE="$cfg" "$MERGE" \
   || fail "merge failed over a stale value"
 assert_eq "$(grep -c '^model_context_window' "$cfg")" "1" "stale value must be replaced, not appended"
