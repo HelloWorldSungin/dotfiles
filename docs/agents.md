@@ -173,12 +173,12 @@ ceilings, recorded in
 [publisher provenance](tool-updates/2026-09-10/publisher-provenance.json)
 under `codex_catalog.max_context_window`. The
 [catalog results](tool-updates/2026-09-10/README.md) summarize both
-observations. Live Codex convergence remains attended and pending. Repeat
-this installed-binary check after that later attended convergence; it is not
-a prerequisite to the Pi source override.
+observations. Repeat this installed-binary check after any Codex upgrade and
+before raising the committed Codex value; it is not a prerequisite to the Pi
+source override.
 
 Requests above 272K total input tokens bill at the model's long-context rates for
-the whole request. Neither override changes the selected model or effort.
+the whole request. Pi's override does not change the selected model or effort.
 
 **Activation:** run `bash ~/dotfiles/rebuild.sh`. `~/.pi/agent/models.json` is a
 live symlink into the repo, and `~/.codex/config.toml` is patched by a
