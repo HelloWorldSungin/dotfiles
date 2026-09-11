@@ -223,7 +223,7 @@ fi
 jq -e '.tools[] | select(.name == "kun-loader") | .status == "failed" and (.detail | contains("missing discovered skill: kun"))' \
   "$TMP_ROOT/missing-description" >/dev/null || fail 'missing-description candidate failed for an unrelated reason'
 cp "$TMP_ROOT/valid-loader" "$STAGING/kun/SKILL.md"
-pass 'worker discovery refuses missing metadata while isolated controls remain undiscovered' 
+pass 'worker discovery refuses missing metadata and excludes the malformed control'
 
 json=$(run_updater --json --dry-run adopt)
 [ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="kun-loader") | .status')" = would_adopt ] \

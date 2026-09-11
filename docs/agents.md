@@ -102,10 +102,10 @@ To update the loader, run `skill-reviewed-updates stage` then `verify` then
 deliver its changes through normal review. Adoption and rollback refuse
 checkouts linked from the Claude, Pi, generic, or configured skill stores.
 Verification runs Pi offline once per directory layout for each candidate set:
-its native `~/.pi/agent/skills` directory, and explicitly configured Claude and
-generic skill directories. It checks discovered command names, descriptions,
+its native `~/.pi/agent/skills` directory, and `~/.claude/skills` supplied
+through Pi’s configured skill directories. It checks discovered command names, descriptions,
 resolved candidate sources, and omission of instruction bodies from startup.
-Malformed skills and skills outside the search paths must remain undiscovered.
+A malformed skill missing its description must remain undiscovered.
 These are Pi discovery checks, not native Claude or Codex discovery checks,
 explicit invocation checks, or model behavior evaluations. That path fetches only `skills/kun/SKILL.md`, checks that the loader
 still points at the four living documents, records license status (still

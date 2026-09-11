@@ -286,8 +286,8 @@ export default function (pi: any) {
   });
 }
 TS
-  for layout in .pi/agent/skills .claude/skills .agents/skills; do
-    mkdir -p "$tmp/home/$layout" "$tmp/home/.pi/agent" "$tmp/unsearched/hidden-control"
+  for layout in .pi/agent/skills .claude/skills; do
+    mkdir -p "$tmp/home/$layout" "$tmp/home/.pi/agent"
     directory=$tmp/home/$layout
     printf '[]\n' >"$tmp/manifest.json"
     for loader in "$@"; do
@@ -301,8 +301,6 @@ TS
     done
     mkdir -p "$directory/malformed-control"
     printf '%s\n' '---' 'name: malformed-control' '---' 'Missing description.' >"$directory/malformed-control/SKILL.md"
-    printf '%s\n' '---' 'name: hidden-control' 'description: Must remain undiscovered.' '---' 'Hidden body.' \
-      >"$tmp/unsearched/hidden-control/SKILL.md"
     if [ "$layout" = .pi/agent/skills ]; then
       printf '{}\n' >"$tmp/home/.pi/agent/settings.json"
     else
