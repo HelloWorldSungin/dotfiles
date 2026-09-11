@@ -12,7 +12,7 @@
 set -euo pipefail
 
 KEY="model_context_window"
-VALUE="${CODEX_MODEL_CONTEXT_WINDOW:-872000}"
+VALUE="${CODEX_MODEL_CONTEXT_WINDOW:-272000}"
 CONFIG="${CODEX_CONFIG_FILE:-${HOME}/.codex/config.toml}"
 
 mkdir -p "$(dirname "$CONFIG")"

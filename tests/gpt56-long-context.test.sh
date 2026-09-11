@@ -264,12 +264,17 @@ done
 assert_eq "$(grep -c '^model_context_window' "$cfg")" "1" "the key must not be duplicated"
 pass "repeated merges are idempotent and do not rewrite or duplicate the key"
 
-# An existing stale value is updated in place, not appended.
-sed -i 's/^model_context_window = 872000$/model_context_window = 272000/' "$cfg"
-run_merge "$cfg" || fail "merge failed over a stale value"
+# An existing stale value is updated in place, not appended: the prior committed
+# default (872000) sitting in the config must be replaced by the current default
+# (272000) on the next merge, with no CODEX_MODEL_CONTEXT_WINDOW override.
+grep -qx 'model_context_window = 872000' "$cfg" \
+  || fail "stale-value fixture must start at 872000"
+env -u CODEX_MODEL_CONTEXT_WINDOW CODEX_CONFIG_FILE="$cfg" "$MERGE" \
+  || fail "merge failed over a stale value"
 assert_eq "$(grep -c '^model_context_window' "$cfg")" "1" "stale value must be replaced, not appended"
-grep -qx 'model_context_window = 872000' "$cfg" || fail "stale value was not updated"
-pass "an existing value is updated in place"
+grep -qx 'model_context_window = 272000' "$cfg" \
+  || fail "stale 872000 was not corrected to 272000"
+pass "a stale 872000 value is corrected to the committed 272000 default"
 
 # A config.toml that opens directly with a table header still gets valid TOML.
 cfg2="$TMP_ROOT/table-first.toml"
@@ -289,13 +294,14 @@ pass "a missing config.toml is created with only the owned key"
 # The value an activation actually writes is the script's own default: nothing
 # sets CODEX_MODEL_CONTEXT_WINDOW on the rebuild path, and every assertion above
 # pins it. `env -u` keeps that hermetic while covering the committed value -
-# Codex's advertised maximum for Sol, Terra, Luna and Astra.
+# 272000, the installed Codex 0.154.0 raw catalog's default context_window for
+# Sol, Terra, Luna and Astra (each of which advertises max_context_window 872000).
 cfg4="$TMP_ROOT/committed-default/config.toml"
 env -u CODEX_MODEL_CONTEXT_WINDOW CODEX_CONFIG_FILE="$cfg4" "$MERGE" \
   || fail "merge failed with CODEX_MODEL_CONTEXT_WINDOW unset"
-assert_eq "$(cat "$cfg4")" "model_context_window = 872000" \
-  "an activation with an empty environment must write Codex's 872000 maximum"
-pass "the committed default is 872000, Codex's advertised maximum"
+assert_eq "$(cat "$cfg4")" "model_context_window = 272000" \
+  "an activation with an empty environment must write the committed 272000 default"
+pass "the committed default is 272000, the installed Codex catalog's context_window"
 
 # Astra is covered by that one global key and nothing else. Run the merge over a
 # config that already selects Astra - the case where a per-model window would be
@@ -373,7 +379,7 @@ print(data["projects"]["/home/sungin/firstmate"]["trust_level"])
 print(data["tui"]["theme"]["name"])
 PY
 ) || fail "the merged config is not parseable TOML"
-  assert_eq "$parsed" "872000
+  assert_eq "$parsed" "272000
 gpt-5.6-sol
 True
 trusted
