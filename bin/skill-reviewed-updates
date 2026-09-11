@@ -247,50 +247,82 @@ latest_matt_version() {
 }
 
 verify_worker_skills() (
-  local tmp loader layout name output
+  local tmp loader layout name output directory
   command -v pi >/dev/null 2>&1 || { printf 'Pi is required for worker loading checks\n'; exit 1; }
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/skill-worker-check.XXXXXX") || exit 1
   trap 'rm -rf "$tmp"' EXIT
   cat >"$tmp/probe.ts" <<'TS'
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, realpathSync, statSync } from "node:fs";
+import { join } from "node:path";
 export default function (pi: any) {
-  pi.registerProvider("skill-check", {
-    baseUrl: "http://127.0.0.1:9", apiKey: "test", api: "openai-completions",
-    models: [{ id: "probe", name: "probe", reasoning: false, input: ["text"],
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 4096, maxTokens: 64 }],
-  });
-  pi.on("before_agent_start", async (event: any) => {
-    const file = process.env.SKILL_CHECK_FILE!;
-    const document = readFileSync(file, "utf8");
-    const end = document.indexOf("\n---\n");
-    const body = end >= 0 ? document.slice(end + 5).trim() : "";
-    const valid = body && event.prompt.startsWith(`<skill name="${process.env.SKILL_CHECK_NAME}" `) &&
-      event.prompt.includes(body) && !event.systemPrompt.includes(body);
-    writeFileSync(process.env.SKILL_CHECK_OUTPUT!, valid ? "ok" : "invalid");
-    process.exit(valid ? 0 : 1);
+  pi.registerCommand("capture-skill-discovery", {
+    handler: async (_args: string, ctx: any) => {
+      try {
+        const expected = JSON.parse(readFileSync(process.env.SKILL_CHECK_MANIFEST!, "utf8"));
+        const skills = pi.getCommands().filter((command: any) => command.source === "skill");
+        const errors: string[] = [];
+        for (const entry of expected) {
+          const skill = skills.find((command: any) => command.name === `skill:${entry.name}`);
+          if (!skill || !skill.description?.trim()) {
+            errors.push(`missing discovered skill: ${entry.name}`);
+            continue;
+          }
+          const path = skill.sourceInfo.path;
+          const file = statSync(path).isDirectory() ? join(path, "SKILL.md") : path;
+          if (realpathSync(file) !== realpathSync(entry.file)) errors.push(`wrong source: ${entry.name}`);
+          const document = readFileSync(entry.file, "utf8");
+          const end = document.indexOf("\n---\n");
+          const body = end >= 0 ? document.slice(end + 5).trim() : "";
+          if (!body || ctx.getSystemPrompt().includes(body)) errors.push(`invalid startup body: ${entry.name}`);
+        }
+        if (skills.length !== expected.length) errors.push("unexpected skill or negative control discovered");
+        writeFileSync(process.env.SKILL_CHECK_OUTPUT!, JSON.stringify({errors}));
+        process.exit(errors.length ? 1 : 0);
+      } catch (error) {
+        writeFileSync(process.env.SKILL_CHECK_OUTPUT!, JSON.stringify({errors: [String(error)]}));
+        process.exit(1);
+      }
+    },
   });
 }
 TS
-  for loader in "$@"; do
-    name=$(basename "$(dirname "$loader")")
-    for layout in .claude/skills .pi/agent/skills .agents/skills; do
-      mkdir -p "$tmp/home/$layout/$name"
-      ln -s "$loader" "$tmp/home/$layout/$name/SKILL.md"
-      output=$tmp/result
-      rm -f "$output"
-      if ! (cd "$tmp" && printf '{"type":"prompt","message":"/skill:%s"}\n' "$name" |
-        HOME="$tmp/home" PI_CODING_AGENT_DIR="$tmp/agent" SKILL_CHECK_FILE="$loader" \
-        SKILL_CHECK_NAME="$name" SKILL_CHECK_OUTPUT="$output" \
-        timeout 30 pi --mode rpc --offline --no-session --provider skill-check --model probe \
-          --no-context-files --no-prompt-templates --no-themes --no-extensions --no-skills \
-          --skill "$tmp/home/$layout/$name/SKILL.md" --extension "$tmp/probe.ts" >"$tmp/stdout" 2>"$tmp/stderr") ||
-        [ "$(cat "$output" 2>/dev/null)" != ok ]; then
-        printf 'Worker loading or invocation failed for %s through %s\n' "$name" "$layout"
-        cat "$tmp/stderr"
-        exit 1
-      fi
-      rm "$tmp/home/$layout/$name/SKILL.md"
+  for layout in .pi/agent/skills .claude/skills .agents/skills; do
+    mkdir -p "$tmp/home/$layout" "$tmp/home/.pi/agent" "$tmp/unsearched/hidden-control"
+    directory=$tmp/home/$layout
+    printf '[]\n' >"$tmp/manifest.json"
+    for loader in "$@"; do
+      loader=$(realpath -- "$loader") || exit 1
+      name=$(basename "$(dirname "$loader")")
+      mkdir -p "$directory/$name"
+      ln -s "$loader" "$directory/$name/SKILL.md"
+      jq --arg name "$name" --arg file "$loader" '. + [{name:$name,file:$file}]' \
+        "$tmp/manifest.json" >"$tmp/manifest.next"
+      mv "$tmp/manifest.next" "$tmp/manifest.json"
     done
+    mkdir -p "$directory/malformed-control"
+    printf '%s\n' '---' 'name: malformed-control' '---' 'Missing description.' >"$directory/malformed-control/SKILL.md"
+    printf '%s\n' '---' 'name: hidden-control' 'description: Must remain undiscovered.' '---' 'Hidden body.' \
+      >"$tmp/unsearched/hidden-control/SKILL.md"
+    if [ "$layout" = .pi/agent/skills ]; then
+      printf '{}\n' >"$tmp/home/.pi/agent/settings.json"
+    else
+      jq -n --arg path "$directory" '{skills:[$path]}' >"$tmp/home/.pi/agent/settings.json"
+    fi
+    output=$tmp/result
+    rm -f "$output"
+    if ! (cd "$tmp" && printf '{"type":"prompt","message":"/capture-skill-discovery"}\n' |
+      HOME="$tmp/home" PI_CODING_AGENT_DIR="$tmp/home/.pi/agent" \
+      SKILL_CHECK_MANIFEST="$tmp/manifest.json" SKILL_CHECK_OUTPUT="$output" \
+      timeout 30 pi --mode rpc --offline --no-session \
+        --no-context-files --no-prompt-templates --no-themes --no-extensions \
+        --extension "$tmp/probe.ts" >"$tmp/stdout" 2>"$tmp/stderr") ||
+      ! jq -e '.errors == []' "$output" >/dev/null 2>&1; then
+      printf 'Worker discovery failed through %s\n' "$layout"
+      cat "$tmp/stderr"
+      [ ! -f "$output" ] || cat "$output"
+      exit 1
+    fi
+    rm -rf "$directory"
   done
 )
 
