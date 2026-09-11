@@ -263,7 +263,7 @@ wrapper_text() { # wrapper name -> its generated script
          else throw \"expected exactly one $1 package\""
 }
 
-for wrapper in dev-tools-check-updates dev-tools-install-pinned claude-spend-pinned dev-tools-apply-updates; do
+for wrapper in dev-tools-check-updates dev-tools-install-pinned claude-spend-pinned dev-tools-apply-updates skill-reviewed-updates; do
   text=$(wrapper_text "$wrapper") || fail "the generation does not ship exactly one $wrapper"
   path_line=$(grep -m1 '^export PATH=' <<<"$text") || fail "$wrapper declares no runtime closure"
   path_line=${path_line#export PATH=\"}
@@ -273,7 +273,7 @@ for wrapper in dev-tools-check-updates dev-tools-install-pinned claude-spend-pin
     store_path=${entry%/bin}
     # A wrapper may depend on a sibling wrapper; those are not nixpkgs packages.
     case "$store_path" in
-      *-dev-tools-check-updates|*-dev-tools-versions.sh) continue ;;
+      *-dev-tools-check-updates|*-dev-tools-versions.sh|*-skill-reviewed-updates) continue ;;
     esac
     printf '%s\n' "$PINNED_PATHS" | grep -Fqx "$store_path" \
       || fail "$wrapper depends on ${store_path##*/} but no NIX_PACKAGE_PINS row names it"
@@ -330,13 +330,15 @@ done
 
 # Nothing a wrapper carries may be unmeasurable: each input is either in the
 # manifest, or user-facing and therefore honestly measured through PATH.
-for wrapper in dev-tools-check-updates dev-tools-install-pinned claude-spend-pinned dev-tools-apply-updates; do
+for wrapper in dev-tools-check-updates dev-tools-install-pinned claude-spend-pinned dev-tools-apply-updates skill-reviewed-updates; do
   text=$(wrapper_text "$wrapper") || fail "the generation does not ship exactly one $wrapper"
   path_line=$(grep -m1 '^export PATH=' <<<"$text") || fail "$wrapper declares no runtime closure"
   while IFS= read -r entry; do
     case "$entry" in /nix/store/*) : ;; *) continue ;; esac
     store_path=${entry%/bin}
-    case "$store_path" in *-dev-tools-check-updates|*-dev-tools-versions.sh) continue ;; esac
+    case "$store_path" in
+      *-dev-tools-check-updates|*-dev-tools-versions.sh|*-skill-reviewed-updates) continue ;;
+    esac
     printf '%s' "$MANIFEST" | jq -e --arg p "$store_path" 'any(.[]; .store_path == $p)' >/dev/null && continue
     attr=$(awk -v p="$store_path" '$2 == p {print $1}' <<<"$PINNED_ROWS")
     printf '%s\n' "${user_env_attrs[@]}" | grep -Fqx "$attr" \

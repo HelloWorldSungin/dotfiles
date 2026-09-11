@@ -27,6 +27,15 @@ for row in "${NEOVIM_PLUGIN_PINS[@]}"; do
   mkdir -p "$FIXTURE/nvim/lazy/$name/.git"
 done
 
+mkdir -p "$FIXTURE/home/.claude/plugins"
+jq -n --arg version "$MATTPOCOCK_SKILLS_VERSION" --arg rev "$MATTPOCOCK_SKILLS_REV" \
+  '{version:2,plugins:{"mattpocock-skills@mattpocock":[{
+    scope:"user",installPath:"/tmp/skill-reviewed-updates-does-not-read-this",
+    version:$version,installedAt:"2026-01-01T00:00:00Z",lastUpdated:"2026-01-02T00:00:00Z",
+    gitCommitSha:$rev}]}}' >"$FIXTURE/home/.claude/plugins/installed_plugins.json"
+jq -n '{extraKnownMarketplaces:{mattpocock:{source:{source:"github",repo:"mattpocock/skills"},autoUpdate:true}}}' \
+  >"$FIXTURE/home/.claude/settings.json"
+
 CALL_LOG="$FIXTURE/calls.log"
 : >"$CALL_LOG"
 
@@ -75,6 +84,13 @@ if [ "$url" = "$CURSOR_INSTALLER_URL" ]; then
   printf '%s\n' 'download=https://downloads.cursor.com/versions/2026.09.08-6caf4ff/cursor-agent/linux/x64/cursor-agent' >"$output"
   exit 0
 fi
+case "$url" in
+  *raw.githubusercontent.com/*/skills/kun/SKILL.md)
+    [ -n "${TEST_KUN_LOADER:-}" ] && [ -f "$TEST_KUN_LOADER" ] || exit 1
+    if [ -n "$output" ]; then cat "$TEST_KUN_LOADER" >"$output"; else cat "$TEST_KUN_LOADER"; fi
+    exit 0
+    ;;
+esac
 if [ "$url" = "$HERDR_LATEST_MANIFEST_URL" ]; then
   for row in "${RELEASE_SHA256_PINS[@]}"; do IFS='|' read -r key _tree _nm sha <<<"$row"; [ "$key" = linux-amd64 ] && break; done
   version=${TEST_HERDR_LATEST_VERSION:-$HERDR_VERSION}
@@ -109,6 +125,7 @@ case "$url" in
     done
     [ "$repo" = DeterminateSystems/nix-installer ] && tag="v$NIX_INSTALLER_VERSION"
     [ "$repo" = kunchenguid/baby-menu ] && tag="baby-menu-v$BABY_MENU_VERSION"
+    [ "$repo" = "${MATTPOCOCK_SKILLS_REPO:-}" ] && tag="v$MATTPOCOCK_SKILLS_VERSION"
     [ -n "$tag" ] || exit 1
     if [ "$repo" = "${TEST_PRERELEASE_REPO:-}" ]; then
       jq -cn --arg tag "${tag}-preview.1" '{draft:false,prerelease:true,tag_name:$tag}'
@@ -287,6 +304,7 @@ run_checker() {
     TEST_NPM_PRERELEASE_PACKAGE="${TEST_NPM_PRERELEASE_PACKAGE:-}" TEST_PRERELEASE_REPO="${TEST_PRERELEASE_REPO:-}" \
     TEST_NPM_NO_STABLE_TAG="${TEST_NPM_NO_STABLE_TAG:-}" \
     TEST_HERDR_LATEST_VERSION="${TEST_HERDR_LATEST_VERSION:-}" TEST_ANTIGRAVITY_LATEST_VERSION="${TEST_ANTIGRAVITY_LATEST_VERSION:-}" \
+    TEST_KUN_LOADER="${TEST_KUN_LOADER:-$ROOT/skills/kun/SKILL.md}" \
     TEST_CHROME_ARGS="${TEST_CHROME_ARGS:---no-sandbox --disable-dev-shm-usage --disable-gpu}" "$CHECKER" "$@"
 }
 
@@ -296,7 +314,7 @@ json=$(run_checker --json --force --no-cache)
 
 expected=0
 for _row in "${NPM_TOOL_PINS[@]}" "${GITHUB_TOOL_PINS[@]}" "${NIX_PACKAGE_PINS[@]}" "${NEOVIM_PLUGIN_PINS[@]}" "${CI_ACTION_PINS[@]}"; do expected=$((expected + 1)); done
-expected=$((expected + 10)) # antigravity, Cursor, two repos, installer, two inputs, three npx tools
+expected=$((expected + 12)) # antigravity, Cursor, two repos, installer, two inputs, three npx tools, kun-loader, mattpocock-skills
 [ "$(printf '%s' "$json" | jq '.tools | length')" -eq "$expected" ] || fail 'complete manifest inventory was not emitted'
 [ "$(printf '%s' "$json" | jq '[.tools[] | select(.status != "up_to_date")] | length')" -eq 0 ] || fail 'matching installed, pinned, and latest values were not current'
 [ "$(printf '%s' "$json" | jq '.intentionally_unmanaged | length')" -ge 8 ] || fail 'unmanaged documented dependencies were not explicit'
@@ -315,6 +333,20 @@ grep -Fq 'npm view @anthropic-ai/claude-code dist-tags.stable --json' "$CALL_LOG
 grep -Fq 'herdr --version' "$CALL_LOG" || fail 'Herdr installed version was not surveyed'
 ! grep -Eq 'herdr (update|server|setup|restart|reload|stop|start)' "$CALL_LOG" || fail 'checker drove Herdr lifecycle behavior'
 ! grep -Eq 'no-mistakes (daemon|update|setup|restart|reload|stop|start)' "$CALL_LOG" || fail 'checker drove no-mistakes lifecycle behavior'
+kun_row=$(printf '%s' "$json" | jq -ce '.tools[] | select(.name=="kun-loader")') \
+  || fail 'kun-loader was omitted from the inventory'
+[ "$(printf '%s' "$kun_row" | jq -r '[.current,.pinned,.latest_stable,.status] | join("|")')" = "$KUN_LOADER_SHA256|$KUN_LOADER_SHA256|$KUN_LOADER_SHA256|up_to_date" ] \
+  || fail 'kun-loader did not compare the repository loader hash to the upstream loader hash'
+printf '%s' "$kun_row" | jq -e '.detail | test("living")' >/dev/null \
+  || fail 'kun-loader did not distinguish living documents from the pinned loader'
+matt_row=$(printf '%s' "$json" | jq -ce '.tools[] | select(.name=="mattpocock-skills")') \
+  || fail 'mattpocock-skills was omitted from the inventory'
+[ "$(printf '%s' "$matt_row" | jq -r '[.current,.pinned,.latest_stable,.status] | join("|")')" = "$MATTPOCOCK_SKILLS_VERSION|$MATTPOCOCK_SKILLS_VERSION|$MATTPOCOCK_SKILLS_VERSION|up_to_date" ] \
+  || fail 'mattpocock-skills did not compare the installed plugin version to the GitHub release'
+printf '%s' "$matt_row" | jq -e '.detail | test("native Claude marketplace autoUpdate owns live plugin writes")' >/dev/null \
+  || fail 'mattpocock-skills did not record native marketplace autoUpdate as the live writer'
+! grep -Fq '/tmp/skill-reviewed-updates-does-not-read-this' "$CALL_LOG" \
+  || fail 'the checker opened the live Matt plugin install path'
 pass 'full inventory reports matching installed, pinned, and latest stable values read-only'
 
 # macOS ships shasum but neither sha256sum nor sha512sum. The Cursor snapshot

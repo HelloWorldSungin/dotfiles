@@ -52,7 +52,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The read-only checker lives in `bin/dev-tools-check-updates` and its
   deterministic self-test is in `tests/`. `home/dev-tools.nix` is the single
   owner of every packaged dev-tool derivation (pin artifacts, checker, pinned
-  installer, cspend wrapper, codex context-window helper, guarded updater) and
+  installer, cspend wrapper, codex context-window helper, guarded updater,
+  reviewed skill adopter) and
   of the one closure-input attrset they select from, which also generates the
   store-path manifest the checker measures closure-only packages with;
   `common.nix` and `sungin-ct110.nix` consume them through the `devTools` module
@@ -71,6 +72,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   receipt - settling it in place - before touching anything, so an
   unreconcilable state refuses that whole tier. Its `--help` is authoritative;
   the self-tests sit beside the checker's in `tests/`.
+- `bin/skill-reviewed-updates` is the reviewed Kun-loader and Matt-skills
+  adoption path. The weekly checker already reports both rows. Native Claude
+  marketplace autoUpdate owns live Matt plugin writes; this command stages and
+  verifies candidates, then updates only repository pins and the repository Kun
+  loader. It never writes live skill stores, never vendors Kun's living
+  documents, and is packaged on PATH with no timer. See `docs/agents.md`.
 - `~/.codex/config.toml` is machine-maintained (project trust, hook approvals,
   TUI state) and must never be replaced or symlinked to a repo file. Home Manager
   owns exactly one key in it, `model_context_window`, through the atomic

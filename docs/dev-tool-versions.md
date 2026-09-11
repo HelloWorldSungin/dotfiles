@@ -40,6 +40,8 @@ alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
 | Baby Menu source | 0.1.24 / `65eb280ea0e0...` | Latest non-prerelease `baby-menu-v0.1.24` release | Exact release commit | Report only |
 | actions/checkout | v7.0.1 / `3d3c42e5aac5...` | Latest GitHub GA action release | Exact workflow action SHA | CI only |
 | Determinate Nix Installer action | v23 / `3138316df39e...` | Latest GitHub GA action release | Exact workflow action SHA | CI only |
+| Kun loader | `911dac0...` / SHA-256 `37864c82...` | Exact `skills/kun/SKILL.md` from `kunchenguid/kun`; living ENTRY/TOOLS/OPINIONS/VOICE files are not this pin | Repository copy via Home Manager | Reviewed `skill-reviewed-updates` adopt; never live skill stores |
+| Matt Pocock skills | 1.2.3 / `9c9f36c...` | Latest non-draft GitHub GA tag of `mattpocock/skills` (MIT) | Claude marketplace plugin; native autoUpdate owns live bytes | Reviewed pin adopt only; do not compete with marketplace autoUpdate |
 
 The authoritative feeds used for the audit are the
 [npm registry](https://registry.npmjs.org/) for npm packages,
@@ -174,10 +176,12 @@ current authoritative release or branch commit.
 
 `home/dev-tools.nix` is the single owner of the Nix packaging for these tools.
 It builds the pin, flake-lock, and plugin-lock artifacts and the checker,
-pinned installer, `cspend` wrapper, and guarded updater derivations, each with
-its complete runtime closure declared. The interactive checker, the weekly
-timer, the login-shell startup check, and the updater's checker dependency are
-therefore one derivation rather than four copies that happen to agree.
+pinned installer, `cspend` wrapper, guarded updater, and reviewed skill-adopter
+derivations, each with its complete runtime closure declared. The interactive
+checker, the weekly timer, the login-shell startup check, and the updater's
+checker dependency are therefore one derivation rather than four copies that
+happen to agree. `skill-reviewed-updates` is on PATH with no timer: the weekly
+check already includes `kun-loader` and `mattpocock-skills`.
 
 The login shell runs `dev-tools-check-updates --startup`, which only reads the
 cache the weekly timer refreshes; it never checks a source itself. The timer is

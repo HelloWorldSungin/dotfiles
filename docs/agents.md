@@ -97,16 +97,37 @@ inspect global `AGENTS.md`, so it does not prove model obedience when both
 upstream origins are unreachable or guard arbitrary future global-instruction
 changes.
 
-To update the loader, inspect only `kunchenguid/kun`: verify the upstream
-default-branch commit, its `skills/kun/SKILL.md` content and SHA-256, and the
-repository license status. Replace only `skills/kun/SKILL.md` with that exact
-loader, update this commit/hash/provenance record and `EXPECTED_SHA256` in
-`tests/kun-skill.test.sh`, and run `bin/dotfiles-test` plus
-`bin/dotfiles-lint`. Do not copy the four living knowledge documents, use `npx
-skills add -g`, or change global skill directories by hand. A downstream review
-that invokes `/kun` must separately record the then-observed upstream commit and
-content hashes for all fetched living documents, distinguish that advice from
-repository evidence, and say whether it materially changed a recommendation.
+To update the loader, run `skill-reviewed-updates stage` then `verify` then
+`adopt`. That path fetches only `skills/kun/SKILL.md`, checks that the loader
+still points at the four living documents, records license status (still
+undeclared), updates this commit/hash/provenance record plus
+`KUN_LOADER_*` in `config/dev-tools-versions.sh` and `EXPECTED_SHA256` in
+`tests/kun-skill.test.sh`, and writes a mode-0600 receipt for
+`--rollback <receipt> --attended`. It does not copy the four living knowledge
+documents, use `npx skills add -g`, or change global skill directories. The
+weekly `dev-tools-check-updates` row `kun-loader` compares loader hashes only,
+so a living-document edit on upstream `main` is not a loader update. A
+downstream review that invokes `/kun` must separately record the then-observed
+upstream commit and content hashes for all fetched living documents, distinguish
+that advice from repository evidence, and say whether it materially changed a
+recommendation.
+
+## Matt Pocock skills (plugin lifecycle)
+
+The installed `mattpocock-skills@mattpocock` plugin is the captain-installed
+Claude marketplace copy. Firstmate reads that install at design-task dispatch
+and does not install, copy, or pin it (`fm-design-skills.sh`). Live plugin
+bytes are written by Claude marketplace `extraKnownMarketplaces.mattpocock.autoUpdate`
+when that flag is true. A custom writer must not compete with that native
+updater.
+
+Dotfiles therefore owns a **reviewed pin and adoption record**, not the live
+cache: `dev-tools-check-updates` reports `mattpocock-skills` against the GitHub
+GA release, and `skill-reviewed-updates` stages a candidate tree, runs the
+Firstmate design-skills check against that tree, and on success updates only
+`MATTPOCOCK_SKILLS_*` in `config/dev-tools-versions.sh`. Disabling marketplace
+autoUpdate requires writing machine-owned `~/.claude/settings.json`. This
+repository ships that policy and does not apply that live settings write.
 
 ## GPT long context (Sol, Terra and Astra)
 

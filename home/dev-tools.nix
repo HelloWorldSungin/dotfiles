@@ -92,11 +92,25 @@ let
     runtimeInputs = pick [ "coreutils" "gawk" "git" "gnugrep" "gnused" "gnutar" "gzip" "jq" "nodejs_22" ]
       ++ [ checker ];
   };
+
+  # Opt-in reviewed adoption for the Kun loader and Matt skills pins. Installed
+  # on PATH with no timer: the weekly checker already reports both rows.
+  skillReviewedUpdates = pkgs.writeShellApplication {
+    name = "skill-reviewed-updates";
+    text = ''
+      export DEV_TOOLS_PINS_FILE=${pins};
+      ${builtins.readFile ../bin/skill-reviewed-updates}
+    '';
+    bashOptions = [ ];
+    runtimeInputs = pick [ "coreutils" "curl" "gawk" "git" "gnugrep" "gnused" "gnutar" "gzip" "jq" ]
+      ++ [ checker ];
+  };
 in
 {
   _module.args.devTools = {
     inherit
       closureOnlyInputs userEnvInputs closureManifest pins flakeLock nvimPluginLock
-      checker pinnedInstaller claudeSpendPinned codexSetContextWindow applyUpdates;
+      checker pinnedInstaller claudeSpendPinned codexSetContextWindow applyUpdates
+      skillReviewedUpdates;
   };
 }

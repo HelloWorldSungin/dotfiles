@@ -31,6 +31,19 @@ FIRSTMATE_REV=0fe226c93efdd12a38f1c3936d758571e40111b7
 BABY_MENU_VERSION=0.1.24
 BABY_MENU_REV=65eb280ea0e05c17677f10b56afc75e91f899f65
 
+# Pinned instruction artifacts. Living Kun documents (ENTRY/TOOLS/OPINIONS/VOICE)
+# refresh on invocation from upstream main and are not these pins. The Kun
+# loader is the thin repository copy. Matt live plugin bytes are written by
+# Claude marketplace autoUpdate; these pins are the reviewed record.
+KUN_LOADER_REPO=kunchenguid/kun
+KUN_LOADER_FILE=skills/kun/SKILL.md
+KUN_LOADER_REV=911dac0971673ad8b220e4ddfc13fc53e7abd5d6
+KUN_LOADER_SHA256=37864c82e1d8b73a153fbad9d9b88d2ab62278867b051cdf884ed16d258af0d0
+MATTPOCOCK_SKILLS_REPO=mattpocock/skills
+MATTPOCOCK_SKILLS_PLUGIN=mattpocock-skills@mattpocock
+MATTPOCOCK_SKILLS_VERSION=1.2.3
+MATTPOCOCK_SKILLS_REV=9c9f36ccd3995266cd675468af71639c8dde1ec5
+
 # name|repository|stable-release-tag|commit
 CI_ACTION_PINS=(
   'actions-checkout|actions/checkout|v7.0.1|3d3c42e5aac5ba805825da76410c181273ba90b1'
