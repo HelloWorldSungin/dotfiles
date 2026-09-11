@@ -9,11 +9,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   shell file) are this repository's canonical validation entry points, and
   `.no-mistakes.yaml` points the pipeline's Test and Lint steps at them. Both put
   Nix on PATH the way `bootstrap.sh` does: a service environment inherits neither
-  `~/.nix-profile/bin` nor the Nix daemon profile, and three suites need `nix` and
-  `chromium` from there. Neither adds `~/.local/bin`, where `shellcheck` and
-  `no-mistakes` live: a missing one hard-fails by design, never a skip and never
-  a PATH workaround. `system/ct110-network-failover/e2e-failover-test.sh` is
-  deliberately outside `bin/dotfiles-test`; its README owns that attended run.
+  `~/.nix-profile/bin` nor the Nix daemon profile, and several suites need `nix`
+  and `chromium` from there. Neither adds `~/.local/bin` (`shellcheck`,
+  `no-mistakes`) or `~/.npm-global/bin` (`pi`): a missing one hard-fails by
+  design, never a skip and never a PATH workaround.
+  `system/ct110-network-failover/e2e-failover-test.sh` is deliberately outside
+  `bin/dotfiles-test`; its README owns that attended run.
 - `.no-mistakes.yaml` traps, both load-bearing:
   1. no-mistakes reads `commands` from the DEFAULT-BRANCH copy
      of that file, so an edit there is validated by the previous configuration and

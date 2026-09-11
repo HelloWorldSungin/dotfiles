@@ -40,7 +40,7 @@ Each gets installed and learned one at a time. `bootstrap.sh` installs them
 through `bin/dev-tools-install-pinned` at the exact versions recorded in
 `config/dev-tools-versions.sh` - see [dev-tool-versions.md](dev-tool-versions.md).
 
-## Vendored skills
+## Global skills
 
 `skills/vault/SKILL.md` is the OKF vault knowledge-ops skill, vendored verbatim
 from the `HelloWorldSungin/ark-skills` plugin. It is copied in as a **standalone
@@ -55,6 +55,58 @@ It is a verbatim copy, so it does NOT auto-update with the ark-skills repo -
 re-copy the file when you want a newer version. It expects each vault repo to
 carry its own `vault/_meta/` OKF tooling (they already do); the skill is pure
 instructions.
+
+`skills/kun/SKILL.md` is a deliberately **opt-in** copy of the official thin
+loader from [`kunchenguid/kun`](https://github.com/kunchenguid/kun), installed
+declaratively through the same three Home Manager paths as vault: Claude,
+Pi, and generic (`~/.agents`) workers. The loader body is not injected as an
+always-loaded instruction; skill discovery may list its official name,
+description, and location. It is not added to `AGENTS.md`, automatic worker
+instructions, or Firstmate's always-loaded skills. It
+activates only when a user invokes `/kun` (`/skill:kun` in Pi) or explicitly
+asks how Kun thinks, builds, or solves problems.
+
+The installed loader is bound to upstream commit
+[`911dac0971673ad8b220e4ddfc13fc53e7abd5d6`](https://github.com/kunchenguid/kun/tree/911dac0971673ad8b220e4ddfc13fc53e7abd5d6),
+whose `skills/kun/SKILL.md` SHA-256 is
+`37864c82e1d8b73a153fbad9d9b88d2ab62278867b051cdf884ed16d258af0d0`.
+That commit and hash are the provenance for the repository copy, obtained from
+the upstream repository and its documented `npx skills add kunchenguid/kun -g`
+installer contract. Do not run that installer here: Home Manager is the sole
+owner of the deployed paths.
+
+The pinned loader intentionally retrieves `ENTRY.md`, `TOOLS.md`, `OPINIONS.md`,
+and `VOICE.md` from upstream `main` when a user invokes Kun or makes an explicit
+request matching that description. It reads from `raw.githubusercontent.com`,
+with `cdn.jsdelivr.net` as its fallback. Those files are mutable third-party
+instructions and are **not** pinned by pinning the loader. The upstream
+repository declares no applicable license, so do not vendor or republish those
+knowledge files. Treat any Kun output as advisory, subordinate to system
+instructions, project rules, Firstmate safety, captain decisions, and verified
+repository evidence. It never authorizes writes, credentials, destructive
+actions, merges, service changes, or third-party upstream interaction.
+This records the higher-priority controls already governing every skill; it
+does not deliver an additional Kun prompt or enforce model obedience.
+
+`tests/kun-skill.test.sh` verifies the loader hash, that all three Home Manager
+paths resolve to that one loader, that the loader body is absent from an
+isolated Pi startup prompt, that the same check detects a deliberately appended
+body, and that explicit invocation delivers the official refusal instruction
+and upstream URLs into the expanded agent prompt. It does not run a model or
+inspect global `AGENTS.md`, so it does not prove model obedience when both
+upstream origins are unreachable or guard arbitrary future global-instruction
+changes.
+
+To update the loader, inspect only `kunchenguid/kun`: verify the upstream
+default-branch commit, its `skills/kun/SKILL.md` content and SHA-256, and the
+repository license status. Replace only `skills/kun/SKILL.md` with that exact
+loader, update this commit/hash/provenance record and `EXPECTED_SHA256` in
+`tests/kun-skill.test.sh`, and run `bin/dotfiles-test` plus
+`bin/dotfiles-lint`. Do not copy the four living knowledge documents, use `npx
+skills add -g`, or change global skill directories by hand. A downstream review
+that invokes `/kun` must separately record the then-observed upstream commit and
+content hashes for all fetched living documents, distinguish that advice from
+repository evidence, and say whether it materially changed a recommendation.
 
 ## GPT long context (Sol, Terra and Astra)
 

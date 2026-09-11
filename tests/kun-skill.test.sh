@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# Behavioral deployment tests for the official, opt-in Kun skill loader.
+#
+# The loader itself is an intentional user-visible instruction contract, not an
+# executable client. The test hashes the repository loader, verifies that Home
+# Manager points all three global paths at its intended out-of-store target, and
+# drives Pi's RPC interface to observe isolated startup and explicit expansion.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+CONFIG='homeConfigurations."sungin@ct110".config'
+EXPECTED_SHA256=37864c82e1d8b73a153fbad9d9b88d2ab62278867b051cdf884ed16d258af0d0
+LOADER="$ROOT/skills/kun/SKILL.md"
+TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/kun-skill-tests.XXXXXX")
+trap 'rm -rf "$TMP_ROOT"' EXIT
+
+fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
+pass() { printf 'ok - %s\n' "$1"; }
+
+command -v nix >/dev/null 2>&1 || fail 'missing test dependency: nix'
+command -v sha256sum >/dev/null 2>&1 || fail 'missing test dependency: sha256sum'
+command -v jq >/dev/null 2>&1 || fail 'missing test dependency: jq'
+command -v pi >/dev/null 2>&1 || fail 'missing test dependency: pi'
+[ -f "$LOADER" ] || fail 'the repository Kun loader is missing'
+
+hash_file() { sha256sum "$1" | awk '{print $1}'; }
+assert_hash() {
+  [ "$(hash_file "$1")" = "$EXPECTED_SHA256" ] \
+    || fail "$2 does not match the reviewed official loader"
+}
+
+# Ask Home Manager, the deployment consumer, for each source. The source value
+# is a real path selected by the generated configuration, not a source-tree
+# convention reconstructed by this test.
+hm_source() {
+  nix build --no-link --print-out-paths "$ROOT#$CONFIG.home.file.\"$1\".source"
+}
+
+assert_hash "$LOADER" 'the repository loader'
+pass 'the repository loader matches the reviewed official upstream content hash'
+
+paths=(
+  '.claude/skills/kun/SKILL.md'
+  '.pi/agent/skills/kun/SKILL.md'
+  '.agents/skills/kun/SKILL.md'
+)
+sources=()
+for path in "${paths[@]}"; do
+  source=$(hm_source "$path") || fail "Home Manager has no Kun deployment for $path"
+  [ -L "$source" ] || fail "Home Manager does not deploy $path as a declarative link: $source"
+  sources+=("$(readlink "$source")")
+done
+[ "${sources[0]}" = "${sources[1]}" ] && [ "${sources[1]}" = "${sources[2]}" ] \
+  || fail 'the three global Kun paths do not resolve to one loader'
+[ "${sources[0]}" = '/home/sungin/dotfiles/skills/kun/SKILL.md' ] \
+  || fail "the global Kun paths resolve to an unexpected loader: ${sources[0]}"
+pass 'Claude, Pi, and generic global paths resolve to the same intended loader'
+
+# Probe the supported skill host at the boundaries immediately before a model
+# would run. The startup command records Pi's structured skill inventory and
+# whether the full instruction body reached its system prompt. Explicit skill
+# invocation records Pi's expanded user prompt, then exits before any provider
+# or network tool can run.
+cat >"$TMP_ROOT/probe.ts" <<'TS'
+import { readFileSync, writeFileSync } from "node:fs";
+
+export default function (pi: any) {
+  pi.registerProvider("kun-test", {
+    baseUrl: "http://127.0.0.1:9",
+    apiKey: "KUN_TEST_API_KEY",
+    api: "openai-completions",
+    models: [{
+      id: "probe",
+      name: "Kun test probe",
+      reasoning: false,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 4096,
+      maxTokens: 64,
+    }],
+  });
+
+  pi.registerCommand("capture-kun-startup", {
+    handler: async (_args: string, ctx: any) => {
+      const skills = ctx.getSystemPromptOptions().skills ?? [];
+      const kun = skills.find((skill: any) => skill.name === "kun");
+      const document = kun ? readFileSync(kun.filePath, "utf8") : "";
+      const frontmatterEnd = document.indexOf("\n---\n");
+      const body = frontmatterEnd >= 0
+        ? document.slice(frontmatterEnd + 5).trim()
+        : document.trim();
+      writeFileSync(process.env.KUN_PROBE_FILE!, JSON.stringify({
+        kun,
+        instructionBodyVisible: body !== "" && ctx.getSystemPrompt().includes(body),
+      }));
+      process.exit(0);
+    },
+  });
+
+  pi.on("before_agent_start", async (event: any) => {
+    writeFileSync(process.env.KUN_PROBE_FILE!, event.prompt);
+    process.exit(0);
+  });
+}
+TS
+
+run_pi_probe() {
+  local message=$1 output=$2 append_prompt=${3:-}
+  local append_args=()
+  if [ -n "$append_prompt" ]; then
+    append_args=(--append-system-prompt "$append_prompt")
+  fi
+  printf '{"type":"prompt","message":"%s"}\n' "$message" |
+    KUN_PROBE_FILE="$output" KUN_TEST_API_KEY=test \
+      pi --mode rpc --offline --no-session --provider kun-test --model probe \
+      --no-context-files --no-prompt-templates --no-themes --no-extensions \
+      --no-skills --skill "$LOADER" --extension "$TMP_ROOT/probe.ts" \
+      "${append_args[@]}" \
+      >/dev/null 2>"$TMP_ROOT/pi.stderr" \
+    || {
+      cat "$TMP_ROOT/pi.stderr" >&2
+      fail "Pi failed while probing $message"
+    }
+  [ -s "$output" ] || fail "Pi produced no probe result for $message"
+}
+
+run_pi_probe '/capture-kun-startup' "$TMP_ROOT/startup.json"
+if ! jq -e --arg loader "$LOADER" '
+  .instructionBodyVisible == false and
+  .kun.name == "kun" and
+  .kun.filePath == $loader and
+  .kun.disableModelInvocation == false and
+  .kun.description == "Summon Kun to solve your problems. Use on /kun or when asked how Kun thinks, builds, or solves problems.\n"
+' "$TMP_ROOT/startup.json" >/dev/null; then
+  jq . "$TMP_ROOT/startup.json" >&2
+  fail 'ordinary startup did not expose only the official Kun activation metadata'
+fi
+pass 'isolated Pi startup omits the Kun instruction body'
+
+awk 'BEGIN { separators = 0 } /^---$/ { separators++; next } separators >= 2 { print }' \
+  "$LOADER" >"$TMP_ROOT/loader-body.md"
+[ -s "$TMP_ROOT/loader-body.md" ] || fail 'could not prepare the loader-body control'
+run_pi_probe '/capture-kun-startup' "$TMP_ROOT/appended.json" "$TMP_ROOT/loader-body.md"
+jq -e '.instructionBodyVisible == true' "$TMP_ROOT/appended.json" >/dev/null || {
+  jq . "$TMP_ROOT/appended.json" >&2
+  fail 'the startup detector missed a deliberately appended Kun instruction body'
+}
+pass 'paired startup control detects an appended Kun instruction body'
+
+run_pi_probe '/skill:kun' "$TMP_ROOT/invocation.txt"
+# shellcheck disable=SC2016 # Markdown backticks are intentional literal output.
+expected_prompt_lines=(
+  'If the files cannot be fetched, stop and say so. Do not guess file contents.'
+  '- `https://raw.githubusercontent.com/kunchenguid/kun/main/ENTRY.md`'
+  '- `https://raw.githubusercontent.com/kunchenguid/kun/main/TOOLS.md`'
+  '- `https://raw.githubusercontent.com/kunchenguid/kun/main/OPINIONS.md`'
+  '- `https://raw.githubusercontent.com/kunchenguid/kun/main/VOICE.md`'
+)
+for line in "${expected_prompt_lines[@]}"; do
+  grep -Fqx -- "$line" "$TMP_ROOT/invocation.txt" || {
+    sed "s#$ROOT#<ROOT>#g" "$TMP_ROOT/invocation.txt" >&2
+    fail "explicit Kun invocation omitted expected instruction: $line"
+  }
+done
+pass 'explicit invocation delivers the official refusal instruction and upstream URLs'
+
+printf 'kun skill tests passed\n'
