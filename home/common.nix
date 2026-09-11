@@ -71,11 +71,9 @@ in
   home.file.".pi/agent/skills/vault/SKILL.md".source = link "skills/vault/SKILL.md";
   home.file.".agents/skills/vault/SKILL.md".source = link "skills/vault/SKILL.md";
 
-  # The official Kun loader is pinned and deployed from this one repository
-  # file. It remains user-invocable: it is not referenced by global memory or
-  # any startup/Firstmate instruction. See docs/agents.md for provenance and
-  # the deliberate boundary around the mutable documents it fetches on a
-  # matching user request.
+  # The official Kun loader is pinned, opt-in, and deployed from this one
+  # repository file. See docs/agents.md for provenance, the activation
+  # boundary, and the mutable documents it fetches on a matching user request.
   home.file.".claude/skills/kun/SKILL.md".source = link "skills/kun/SKILL.md";
   home.file.".pi/agent/skills/kun/SKILL.md".source = link "skills/kun/SKILL.md";
   home.file.".agents/skills/kun/SKILL.md".source = link "skills/kun/SKILL.md";
