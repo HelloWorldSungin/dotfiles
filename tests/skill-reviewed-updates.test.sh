@@ -4,7 +4,10 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-UPDATER="$ROOT/bin/skill-reviewed-updates"
+PACKAGED=$(nix build --no-link --print-out-paths --impure --expr "
+  let config = (builtins.getFlake \"$ROOT\").homeConfigurations.\"sungin@ct110\".config;
+  in builtins.head (builtins.filter (p: (p.name or \"\") == \"skill-reviewed-updates\") config.home.packages)")
+UPDATER="$PACKAGED/bin/skill-reviewed-updates"
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/skill-reviewed-updates-tests.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
@@ -22,6 +25,7 @@ cp "$ROOT/skills/kun/SKILL.md" "$WORK/skills/kun/"
 cp "$ROOT/tests/kun-skill.test.sh" "$WORK/tests/"
 cp "$ROOT/docs/agents.md" "$WORK/docs/"
 printf '# project memory\n' >"$WORK/AGENTS.md"
+git -C "$WORK" init -q
 
 # shellcheck source=../config/dev-tools-versions.sh
 # shellcheck disable=SC1091
@@ -129,10 +133,11 @@ jq -n --arg version "$MATTPOCOCK_SKILLS_VERSION" '{version:2,plugins:{"mattpococ
   >"$CLAUDE/plugins/installed_plugins.json"
 jq -n '{extraKnownMarketplaces:{mattpocock:{autoUpdate:true}}}' >"$CLAUDE/settings.json"
 
+TEST_PINS_FILE="$WORK/config/dev-tools-versions.sh"
 run_updater() {
   env HOME="$TMP_ROOT/home" \
     SKILL_UPDATES_ROOT="$WORK" \
-    DEV_TOOLS_PINS_FILE="$WORK/config/dev-tools-versions.sh" \
+    DEV_TOOLS_PINS_FILE="$TEST_PINS_FILE" \
     SKILL_UPDATES_STAGING_DIR="$STAGING" \
     SKILL_UPDATES_RECEIPT_DIR="$RECEIPTS" \
     SKILL_UPDATES_LIVE_SKILL_STORE="$LIVE" \
@@ -154,6 +159,27 @@ assert_live_untouched() {
   [ "$(cat "$LIVE/plugins/cache/mattpocock/mattpocock-skills/1.2.3/SKILL.md")" = live-plugin ] \
     || fail 'the planted Matt plugin cache changed'
 }
+
+mkdir -p "$TMP_ROOT/home"
+if env -u SKILL_UPDATES_ROOT -u DEV_TOOLS_PINS_FILE HOME="$TMP_ROOT/home" \
+  "$UPDATER" --json adopt >"$TMP_ROOT/store-refusal" 2>&1; then
+  fail 'packaged defaults allowed store mutation'
+fi
+grep -Fq 'immutable store mutation target' "$TMP_ROOT/store-refusal" || fail 'store default failed for an unrelated reason'
+TEST_PINS_FILE=
+json=$(run_updater --json check)
+jq -e --arg pin "$KUN_LOADER_SHA256" '.tools[] | select(.name == "kun-loader") | .current == $pin' <<<"$json" >/dev/null \
+  || fail 'explicit checkout did not supply its loader'
+cp "$WORK/config/dev-tools-versions.sh" "$WORK/config/selected-pins.sh"
+TEST_PINS_FILE="$WORK/config/selected-pins.sh"
+sed 's/^MATTPOCOCK_SKILLS_VERSION=.*/MATTPOCOCK_SKILLS_VERSION=0.0.0/' "$TEST_PINS_FILE" >"$TMP_ROOT/pins"
+mv "$TMP_ROOT/pins" "$TEST_PINS_FILE"
+json=$(run_updater --json check)
+jq -e '.tools[] | select(.name == "mattpocock-skills") | .pinned == "0.0.0"' <<<"$json" >/dev/null \
+  || fail 'packaged wrapper ignored explicit pins selection'
+rm "$TEST_PINS_FILE"
+TEST_PINS_FILE=
+pass 'built wrapper honors checkout and pins selection and refuses immutable defaults'
 
 json=$(run_updater --json check)
 [ "$(printf '%s' "$json" | jq -r '.native_matt_writer')" = claude-marketplace-autoupdate ] \

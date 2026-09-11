@@ -97,6 +97,11 @@ inspect global `AGENTS.md`, so it does not prove model obedience when both
 upstream origins are unreachable or guard arbitrary future global-instruction
 changes.
 
+For the packaged command, set `SKILL_UPDATES_ROOT` to an isolated writable Git
+checkout. Pins default to that checkout’s `config/dev-tools-versions.sh`;
+`DEV_TOOLS_PINS_FILE` can select another writable pins file inside it. Without
+a checkout selection the packaged store defaults support read-only use, and
+adoption or rollback refuses with an immutable-target diagnostic.
 To update the loader, run `skill-reviewed-updates stage` then `verify` then
 `adopt` in an isolated checkout that no live skill path resolves into, then
 deliver its changes through normal review. Adoption and rollback refuse

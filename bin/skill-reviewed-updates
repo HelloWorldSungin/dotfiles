@@ -83,6 +83,21 @@ kun_loader_path() {
   printf '%s/%s\n' "$ROOT" "${KUN_LOADER_FILE:-skills/kun/SKILL.md}"
 }
 
+assert_mutation_targets() {
+  case "$COMMAND" in adopt|rollback) ;; *) return 0 ;; esac
+  local root target resolved toplevel
+  root=$(realpath -- "$ROOT") || die "cannot resolve repository: $ROOT"
+  case "$root/" in /nix/store/*) die 'immutable store mutation target; set SKILL_UPDATES_ROOT to an isolated writable Git checkout' ;; esac
+  toplevel=$(git -C "$root" rev-parse --show-toplevel 2>/dev/null) || die 'mutation requires an isolated writable Git checkout'
+  [ "$(realpath -- "$toplevel")" = "$root" ] && [ -w "$root" ] || die 'mutation root must be a writable Git checkout root'
+  for target in "$PINS_FILE" "$(kun_loader_path)" "$ROOT/tests/kun-skill.test.sh" "$ROOT/docs/agents.md"; do
+    resolved=$(realpath -m -- "$target") || die "cannot resolve mutation target: $target"
+    case "$resolved" in /nix/store/*) die "immutable store mutation target: $target" ;; esac
+    case "$resolved" in "$root"/*) ;; *) die "mutation target is outside selected checkout: $target" ;; esac
+    [ -f "$target" ] && [ -w "$target" ] && [ -w "$(dirname "$resolved")" ] || die "mutation target is not a writable file: $target"
+  done
+}
+
 forbidden_live_paths() {
   printf '%s\n' \
     "${HOME:-}/.claude/skills" \
@@ -613,6 +628,7 @@ cmd_rollback() {
   emit "$(jq -n --arg receipt "$receipt" '{schema:"skill-reviewed-updates.v1",command:"rollback",status:"rolled_back",receipt:$receipt,detail:"repository records restored from receipt; live skill stores were not written"}')"
 }
 
+assert_mutation_targets
 assert_no_live_writes
 snapshot_live_store
 case "$COMMAND" in
