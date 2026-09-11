@@ -33,11 +33,14 @@ printf 'live-claude\n' >"$LIVE/claude/SKILL.md"
 printf 'live-plugin\n' >"$LIVE/plugins/cache/mattpocock/mattpocock-skills/1.2.3/SKILL.md"
 LIVE_BEFORE=$(find "$LIVE" -type f -exec sha256sum {} \; | sort | sha256sum | awk '{print $1}')
 
+PI_BIN=$(command -v pi) || fail 'missing test dependency: pi'
 FAKEBIN="$TMP_ROOT/bin"
 STAGING="$TMP_ROOT/staging"
 RECEIPTS="$TMP_ROOT/receipts"
 CLAUDE="$TMP_ROOT/claude"
 mkdir -p "$FAKEBIN" "$STAGING" "$RECEIPTS" "$CLAUDE/plugins"
+ln -s "$PI_BIN" "$FAKEBIN/pi"
+ln -s "$(command -v node)" "$FAKEBIN/node"
 
 CANDIDATE_KUN="$TMP_ROOT/candidate-kun.md"
 {
@@ -52,9 +55,9 @@ mkdir -p "$PLUGIN_SRC/.claude-plugin" \
   "$PLUGIN_SRC/skills/productivity/ask-matt"
 printf 'MIT License\n' >"$PLUGIN_SRC/LICENSE"
 printf '%s\n' '{"name":"mattpocock-skills","version":"1.2.4","license":"MIT"}' >"$PLUGIN_SRC/.claude-plugin/plugin.json"
-printf '# grilling\n' >"$PLUGIN_SRC/skills/productivity/grilling/SKILL.md"
-printf '# domain-modeling\n' >"$PLUGIN_SRC/skills/engineering/domain-modeling/SKILL.md"
-printf '# ask-matt\n' >"$PLUGIN_SRC/skills/productivity/ask-matt/SKILL.md"
+printf '%s\n' '---' 'name: grilling' 'description: Test skill' '---' '# grilling' >"$PLUGIN_SRC/skills/productivity/grilling/SKILL.md"
+printf '%s\n' '---' 'name: domain-modeling' 'description: Test skill' '---' '# domain-modeling' >"$PLUGIN_SRC/skills/engineering/domain-modeling/SKILL.md"
+printf '%s\n' '---' 'name: ask-matt' 'description: Test skill' '---' '# ask-matt' >"$PLUGIN_SRC/skills/productivity/ask-matt/SKILL.md"
 ARCHIVE="$TMP_ROOT/matt.tgz"
 tar -czf "$ARCHIVE" -C "$PLUGIN_SRC" .
 
@@ -175,7 +178,7 @@ grep -Fq 'reviewed-candidate-marker' "$STAGING/kun/SKILL.md" || fail 'staged Kun
 assert_live_untouched
 pass 'stage snapshots candidates without replacing current versions'
 
-json=$(run_updater --json verify)
+json=$(run_updater --json verify) || fail "verify failed: $json"
 [ "$(printf '%s' "$json" | jq -r '.status')" = ok ] || fail "verify failed: $json"
 [ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="mattpocock-skills") | .detail')" \
   = 'Firstmate design-skills check accepted the staged plugin' ] \
@@ -190,6 +193,26 @@ json=$(run_updater --json verify) && fail 'verify accepted a broken Kun loader'
 cp "$CANDIDATE_KUN" "$STAGING/kun/SKILL.md"
 assert_live_untouched
 pass 'verify refuses a candidate that drops living Kun document URLs'
+
+for live_path in "$TMP_ROOT/home/.agents/skills" "$TMP_ROOT/home/.pi/agent/skills" "$CLAUDE/skills" "$LIVE/linked"; do
+  mkdir -p "$live_path/kun"
+  ln -s "$WORK/skills/kun/SKILL.md" "$live_path/kun/SKILL.md"
+  before=$(sha256sum "$WORK/skills/kun/SKILL.md")
+  if run_updater --json adopt >"$TMP_ROOT/refusal" 2>&1; then
+    fail 'adopt accepted a live-linked checkout'
+  fi
+  [ "$(sha256sum "$WORK/skills/kun/SKILL.md")" = "$before" ] || fail 'refusal modified live loader'
+  rm "$live_path/kun/SKILL.md"
+done
+pass 'adoption refuses every supported live-linked checkout before mutation'
+
+cp "$STAGING/kun/SKILL.md" "$TMP_ROOT/valid-loader"
+sed 's/name: kun/name: invalid-name/' "$TMP_ROOT/valid-loader" >"$STAGING/kun/SKILL.md"
+if run_updater --json verify >"$TMP_ROOT/invalid-worker"; then
+  fail 'verify accepted a candidate unavailable under its worker skill name'
+fi
+cp "$TMP_ROOT/valid-loader" "$STAGING/kun/SKILL.md"
+pass 'worker loading rejects an incompatible candidate despite intact living URLs'
 
 json=$(run_updater --json --dry-run adopt)
 [ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="kun-loader") | .status')" = would_adopt ] \

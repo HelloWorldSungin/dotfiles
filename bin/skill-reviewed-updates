@@ -87,18 +87,36 @@ forbidden_live_paths() {
   printf '%s\n' \
     "${HOME:-}/.claude/skills" \
     "${HOME:-}/.claude/plugins" \
+    "$CLAUDE_HOME/skills" \
+    "$CLAUDE_HOME/plugins" \
+    "${PI_CODING_AGENT_DIR:-${HOME:-}/.pi/agent}/skills" \
+    "${CODEX_HOME:-${HOME:-}/.codex}/skills" \
     "${HOME:-}/.pi/agent/skills" \
     "${HOME:-}/.agents/skills"
   [ -n "$LIVE_STORE" ] && printf '%s\n' "$LIVE_STORE"
 }
 
 assert_no_live_writes() {
-  local path
-  while IFS= read -r path; do
-    [ -n "$path" ] || continue
-    case "$STAGING_DIR" in "$path"|"$path"/*) die "staging directory must not be a live skill store: $STAGING_DIR" ;; esac
-    case "$RECEIPT_DIR" in "$path"|"$path"/*) die "receipt directory must not be a live skill store: $RECEIPT_DIR" ;; esac
-  done < <(forbidden_live_paths)
+  local path entry entries target resolved live
+  local targets=("$STAGING_DIR" "$RECEIPT_DIR")
+  case "$COMMAND" in
+    adopt|rollback) targets+=("$ROOT" "$PINS_FILE" "$(kun_loader_path)") ;;
+  esac
+  for target in "${targets[@]}"; do
+    resolved=$(realpath -m -- "$target") || die "cannot resolve $target"
+    while IFS= read -r path; do
+      [ -n "$path" ] || continue
+      entries=$path
+      if [ -e "$path" ]; then
+        entries=$(find -L "$path" -print) || die "cannot inspect live store: $path"
+      fi
+      while IFS= read -r entry; do
+        live=$(realpath -m -- "$entry") || die "cannot resolve live path: $entry"
+        case "$resolved/" in "$live/"*) die "write target overlaps a live skill store: $target" ;; esac
+        case "$live/" in "$resolved/"*) die "checkout or write target is live-linked: $target" ;; esac
+      done <<<"$entries"
+    done < <(forbidden_live_paths)
+  done
 }
 
 live_store_fingerprint() {
@@ -228,6 +246,54 @@ latest_matt_version() {
   printf '%s\n' "$tag"
 }
 
+verify_worker_skills() (
+  local tmp loader layout name output
+  command -v pi >/dev/null 2>&1 || { printf 'Pi is required for worker loading checks\n'; exit 1; }
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/skill-worker-check.XXXXXX") || exit 1
+  trap 'rm -rf "$tmp"' EXIT
+  cat >"$tmp/probe.ts" <<'TS'
+import { readFileSync, writeFileSync } from "node:fs";
+export default function (pi: any) {
+  pi.registerProvider("skill-check", {
+    baseUrl: "http://127.0.0.1:9", apiKey: "test", api: "openai-completions",
+    models: [{ id: "probe", name: "probe", reasoning: false, input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 4096, maxTokens: 64 }],
+  });
+  pi.on("before_agent_start", async (event: any) => {
+    const file = process.env.SKILL_CHECK_FILE!;
+    const document = readFileSync(file, "utf8");
+    const end = document.indexOf("\n---\n");
+    const body = end >= 0 ? document.slice(end + 5).trim() : "";
+    const valid = body && event.prompt.startsWith(`<skill name="${process.env.SKILL_CHECK_NAME}" `) &&
+      event.prompt.includes(body) && !event.systemPrompt.includes(body);
+    writeFileSync(process.env.SKILL_CHECK_OUTPUT!, valid ? "ok" : "invalid");
+    process.exit(valid ? 0 : 1);
+  });
+}
+TS
+  for loader in "$@"; do
+    name=$(basename "$(dirname "$loader")")
+    for layout in .claude/skills .pi/agent/skills .agents/skills; do
+      mkdir -p "$tmp/home/$layout/$name"
+      ln -s "$loader" "$tmp/home/$layout/$name/SKILL.md"
+      output=$tmp/result
+      rm -f "$output"
+      if ! (cd "$tmp" && printf '{"type":"prompt","message":"/skill:%s"}\n' "$name" |
+        HOME="$tmp/home" PI_CODING_AGENT_DIR="$tmp/agent" SKILL_CHECK_FILE="$loader" \
+        SKILL_CHECK_NAME="$name" SKILL_CHECK_OUTPUT="$output" \
+        timeout 30 pi --mode rpc --offline --no-session --provider skill-check --model probe \
+          --no-context-files --no-prompt-templates --no-themes --no-extensions --no-skills \
+          --skill "$tmp/home/$layout/$name/SKILL.md" --extension "$tmp/probe.ts" >"$tmp/stdout" 2>"$tmp/stderr") ||
+        [ "$(cat "$output" 2>/dev/null)" != ok ]; then
+        printf 'Worker loading or invocation failed for %s through %s\n' "$name" "$layout"
+        cat "$tmp/stderr"
+        exit 1
+      fi
+      rm "$tmp/home/$layout/$name/SKILL.md"
+    done
+  done
+)
+
 verify_kun_staged() {
   local loader=$STAGING_DIR/kun/SKILL.md license
   [ -f "$loader" ] || { printf 'staged Kun loader missing\n'; return 1; }
@@ -248,12 +314,13 @@ verify_kun_staged() {
     printf 'Kun loader must stay opt-in and out of always-loaded AGENTS.md\n'
     return 1
   fi
-  return 0
+  verify_worker_skills "$loader"
 }
 
 verify_matt_staged() {
   local tree=$STAGING_DIR/mattpocock-skills/tree tmp out
   local required skill
+  local worker_skills=()
   [ -d "$tree" ] || { printf 'staged Matt plugin tree missing\n'; return 1; }
   [ -f "$tree/LICENSE" ] || { printf 'staged Matt plugin is missing LICENSE\n'; return 1; }
   grep -q 'MIT License' "$tree/LICENSE" || { printf 'staged Matt plugin license is not MIT\n'; return 1; }
@@ -264,7 +331,9 @@ verify_matt_staged() {
       break
     done
     [ -f "${skill:-}" ] || { printf 'staged Matt plugin lacks required Firstmate skill %s\n' "$required"; return 1; }
+    worker_skills+=("$skill")
   done
+  verify_worker_skills "${worker_skills[@]}" || return 1
   [ -x "$FIRSTMATE_DESIGN_SKILLS" ] || { printf 'Firstmate fm-design-skills.sh is not executable at %s\n' "$FIRSTMATE_DESIGN_SKILLS"; return 1; }
   tmp=$(mktemp "${TMPDIR:-/tmp}/matt-registry.XXXXXX") || return 1
   jq -cn --arg path "$tree" --arg version "$(cat "$STAGING_DIR/mattpocock-skills/version" 2>/dev/null || printf unknown)" \
@@ -492,6 +561,7 @@ cmd_rollback() {
   assert_no_live_writes
   snapshot_live_store
   dest=$(jq -er '.tools["kun-loader"].file' "$receipt")
+  [ "$(realpath -m -- "$dest")" = "$(realpath -m -- "$(kun_loader_path)")" ] || die 'receipt targets a different checkout'
   prior_file=$(jq -r '.tools["kun-loader"].prior_file // empty' "$receipt")
   prior_hash=$(jq -r '.tools["kun-loader"].prior // empty' "$receipt")
   prior_matt=$(jq -r '.tools["mattpocock-skills"].prior // empty' "$receipt")

@@ -98,7 +98,13 @@ upstream origins are unreachable or guard arbitrary future global-instruction
 changes.
 
 To update the loader, run `skill-reviewed-updates stage` then `verify` then
-`adopt`. That path fetches only `skills/kun/SKILL.md`, checks that the loader
+`adopt` in an isolated checkout that no live skill path resolves into, then
+deliver its changes through normal review. Adoption and rollback refuse
+checkouts linked from the Claude, Pi, generic, or configured skill stores.
+Verification uses Pi offline to discover and explicitly expand staged skills
+through isolated Claude, Pi, and generic directory layouts, without a model
+call. This checks shared skill loading contracts, not Claude or Codex model
+behavior. That path fetches only `skills/kun/SKILL.md`, checks that the loader
 still points at the four living documents, records license status (still
 undeclared), updates this commit/hash/provenance record plus
 `KUN_LOADER_*` in `config/dev-tools-versions.sh` and `EXPECTED_SHA256` in
