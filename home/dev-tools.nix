@@ -98,12 +98,8 @@ let
   skillReviewedUpdates = pkgs.writeShellApplication {
     name = "skill-reviewed-updates";
     text = ''
-      if [ -z "''${DEV_TOOLS_PINS_FILE:-}" ]; then
-        if [ -n "''${SKILL_UPDATES_ROOT:-}" ]; then
-          export DEV_TOOLS_PINS_FILE="$SKILL_UPDATES_ROOT/config/dev-tools-versions.sh"
-        else
-          export DEV_TOOLS_PINS_FILE=${pins}
-        fi
+      if [ -z "''${DEV_TOOLS_PINS_FILE:-}" ] && [ -z "''${SKILL_UPDATES_ROOT:-}" ]; then
+        export DEV_TOOLS_PINS_FILE=${pins}
       fi
       ${builtins.readFile ../bin/skill-reviewed-updates}
     '';

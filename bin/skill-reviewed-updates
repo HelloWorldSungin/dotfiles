@@ -31,7 +31,6 @@ RECEIPT_DIR=${SKILL_UPDATES_RECEIPT_DIR:-${XDG_STATE_HOME:-${HOME:-.}/.local/sta
 CLAUDE_HOME=${DEV_TOOLS_CLAUDE_CONFIG_DIR:-${CLAUDE_CONFIG_DIR:-${HOME:-.}/.claude}}
 SETTINGS_FILE=${DEV_TOOLS_CLAUDE_SETTINGS:-$CLAUDE_HOME/settings.json}
 FIRSTMATE_DESIGN_SKILLS=${SKILL_UPDATES_FIRSTMATE_DESIGN_SKILLS:-${DEV_TOOLS_FIRSTMATE_PATH:-${HOME:-.}/firstmate}/bin/fm-design-skills.sh}
-LIVE_STORE=${SKILL_UPDATES_LIVE_SKILL_STORE:-}
 MODE=human
 DRY_RUN=0
 ATTENDED=0
@@ -108,7 +107,6 @@ forbidden_live_paths() {
     "${CODEX_HOME:-${HOME:-}/.codex}/skills" \
     "${HOME:-}/.pi/agent/skills" \
     "${HOME:-}/.agents/skills"
-  [ -n "$LIVE_STORE" ] && printf '%s\n' "$LIVE_STORE"
 }
 
 assert_no_live_writes() {
@@ -132,27 +130,6 @@ assert_no_live_writes() {
       done <<<"$entries"
     done < <(forbidden_live_paths)
   done
-}
-
-live_store_fingerprint() {
-  local file hashes=
-  while IFS= read -r file; do
-    hashes=${hashes}$(hash_file "$file")$'\n'"$file"$'\n'
-  done < <(find "$LIVE_STORE" -type f | sort)
-  printf '%s' "$hashes" | $SHA256_BIN | awk '{print $1}'
-}
-
-snapshot_live_store() {
-  LIVE_SNAPSHOT=
-  [ -n "$LIVE_STORE" ] && [ -e "$LIVE_STORE" ] || return 0
-  LIVE_SNAPSHOT=$(live_store_fingerprint)
-}
-
-assert_live_store_unchanged() {
-  local now
-  [ -n "$LIVE_STORE" ] && [ -e "$LIVE_STORE" ] || return 0
-  now=$(live_store_fingerprint)
-  [ "$now" = "$LIVE_SNAPSHOT" ] || die 'refused: a live skill store changed during this run'
 }
 
 native_matt_owner() {
@@ -206,12 +183,19 @@ replace_assignment() {
 
 license_status() {
   local repo=$1 json key
-  json=$(run_timed "$NETWORK_TIMEOUT" "$CURL_BIN" -fsSL --connect-timeout 5 --max-time "$NETWORK_TIMEOUT" \
-    -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$repo" 2>/dev/null || true)
-  key=$(printf '%s' "$json" | jq -r '.license.spdx_id // empty' 2>/dev/null || true)
-  if [ -n "$key" ] && [ "$key" != null ]; then printf '%s\n' "$key"
-  else printf 'none-declared\n'
+  if ! json=$(run_timed "$NETWORK_TIMEOUT" "$CURL_BIN" -fsSL --connect-timeout 5 --max-time "$NETWORK_TIMEOUT" \
+    -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$repo" 2>/dev/null); then
+    printf 'unknown\n'
+    return 0
   fi
+  key=$(printf '%s' "$json" | jq -er '
+    if type != "object" or (has("license") | not) then "unknown"
+    elif .license == null then "none-declared"
+    elif (.license | type) != "object" then "unknown"
+    elif (.license.spdx_id | type) != "string" then "unknown"
+    elif .license.spdx_id == "" or .license.spdx_id == "NOASSERTION" then "unknown"
+    else .license.spdx_id end' 2>/dev/null) || key=unknown
+  printf '%s\n' "$key"
 }
 
 stage_kun() {
@@ -352,8 +336,9 @@ verify_kun_staged() {
   fi
   license=$(tr -d '\n' <"$STAGING_DIR/kun/license" 2>/dev/null || true)
   case "$license" in
-    none-declared|'') : ;;
-    *) printf 'Kun upstream now declares license %s; refuse vendoring living documents\n' "$license"; return 1 ;;
+    none-declared) : ;;
+    unknown|'') printf 'Kun license status is unknown; adoption requires a successful license read\n'; return 1 ;;
+    *) printf 'Kun license changed to %s; adoption requires license review\n' "$license"; return 1 ;;
   esac
   if [ -f "$ROOT/AGENTS.md" ] && grep -Fqx -- '## /kun' "$ROOT/AGENTS.md" 2>/dev/null; then
     printf 'Kun loader must stay opt-in and out of always-loaded AGENTS.md\n'
@@ -364,9 +349,15 @@ verify_kun_staged() {
 
 verify_matt_staged() {
   local tree=$STAGING_DIR/mattpocock-skills/tree tmp out
-  local required skill
+  local required skill license
   local worker_skills=()
   [ -d "$tree" ] || { printf 'staged Matt plugin tree missing\n'; return 1; }
+  license=$(tr -d '\n' <"$STAGING_DIR/mattpocock-skills/license" 2>/dev/null || true)
+  case "$license" in
+    MIT) : ;;
+    unknown|'') printf 'Matt license status is unknown; adoption requires a successful license read\n'; return 1 ;;
+    *) printf 'Matt license changed to %s; adoption requires license review\n' "$license"; return 1 ;;
+  esac
   [ -f "$tree/LICENSE" ] || { printf 'staged Matt plugin is missing LICENSE\n'; return 1; }
   grep -q 'MIT License' "$tree/LICENSE" || { printf 'staged Matt plugin license is not MIT\n'; return 1; }
   for required in grilling domain-modeling ask-matt; do
@@ -423,7 +414,6 @@ cmd_check() {
 cmd_stage() {
   local matt_version kun_status matt_status kun_detail matt_detail
   assert_no_live_writes
-  snapshot_live_store
   if [ "$DRY_RUN" -eq 1 ]; then
     emit "$(jq -n '{schema:"skill-reviewed-updates.v1",command:"stage",status:"would_stage",detail:"dry-run writes neither staging nor live skill stores"}')"
     return 0
@@ -444,7 +434,6 @@ cmd_stage() {
     matt_status=failed
     matt_detail='Matt skills archive could not be staged; current pin is unchanged'
   fi
-  assert_live_store_unchanged
   local overall=ok
   [ "$kun_status" = staged ] && [ "$matt_status" = staged ] || overall=failed
   emit "$(jq -n --arg status "$overall" --arg ks "$kun_status" --arg ms "$matt_status" \
@@ -460,7 +449,6 @@ cmd_stage() {
 cmd_verify() {
   local kun_status matt_status kun_detail matt_detail overall
   assert_no_live_writes
-  snapshot_live_store
   kun_status=verified
   matt_status=verified
   kun_detail=
@@ -475,7 +463,6 @@ cmd_verify() {
   else
     matt_detail='Firstmate design-skills check accepted the staged plugin'
   fi
-  assert_live_store_unchanged
   overall=ok
   [ "$kun_status" = verified ] && [ "$matt_status" = verified ] || overall=failed
   emit "$(jq -n --arg status "$overall" --arg ks "$kun_status" --arg ms "$matt_status" \
@@ -533,7 +520,6 @@ adopt_matt() {
 cmd_adopt() {
   local kun_v matt_v kun_status matt_status kun_detail matt_detail prior_kun prior_matt receipt receipt_json overall
   assert_no_live_writes
-  snapshot_live_store
   kun_status=preserved
   matt_status=preserved
   kun_detail=
@@ -572,7 +558,6 @@ cmd_adopt() {
       matt_detail='Matt pin adoption failed; current pin is unchanged'
     fi
   fi
-  assert_live_store_unchanged
   overall=ok
   printf '%s\n' "$kun_status" "$matt_status" | grep -Eq 'failed' && overall=failed
   receipt=$RECEIPT_DIR/skill-reviewed-$(date -u +%Y%m%dT%H%M%SZ).json
@@ -604,7 +589,6 @@ cmd_rollback() {
   local receipt=$ROLLBACK_RECEIPT prior_file dest prior_hash current_hash prior_matt
   [ -f "$receipt" ] || die "receipt unavailable: $receipt"
   assert_no_live_writes
-  snapshot_live_store
   dest=$(jq -er '.tools["kun-loader"].file' "$receipt")
   [ "$(realpath -m -- "$dest")" = "$(realpath -m -- "$(kun_loader_path)")" ] || die 'receipt targets a different checkout'
   prior_file=$(jq -r '.tools["kun-loader"].prior_file // empty' "$receipt")
@@ -624,13 +608,11 @@ cmd_rollback() {
   if [ -n "$prior_matt" ]; then
     replace_assignment "$PINS_FILE" MATTPOCOCK_SKILLS_VERSION "$prior_matt" || true
   fi
-  assert_live_store_unchanged
   emit "$(jq -n --arg receipt "$receipt" '{schema:"skill-reviewed-updates.v1",command:"rollback",status:"rolled_back",receipt:$receipt,detail:"repository records restored from receipt; live skill stores were not written"}')"
 }
 
 assert_mutation_targets
 assert_no_live_writes
-snapshot_live_store
 case "$COMMAND" in
   check) cmd_check ;;
   stage) cmd_stage ;;

@@ -31,9 +31,9 @@ git -C "$WORK" init -q
 # shellcheck disable=SC1091
 source "$WORK/config/dev-tools-versions.sh"
 
-LIVE="$TMP_ROOT/live-skills"
-mkdir -p "$LIVE/claude" "$LIVE/plugins/cache/mattpocock/mattpocock-skills/1.2.3"
-printf 'live-claude\n' >"$LIVE/claude/SKILL.md"
+LIVE="$TMP_ROOT/home/.claude"
+mkdir -p "$LIVE/skills" "$LIVE/plugins/cache/mattpocock/mattpocock-skills/1.2.3"
+printf 'live-claude\n' >"$LIVE/skills/SKILL.md"
 printf 'live-plugin\n' >"$LIVE/plugins/cache/mattpocock/mattpocock-skills/1.2.3/SKILL.md"
 LIVE_BEFORE=$(find "$LIVE" -type f -exec sha256sum {} \; | sort | sha256sum | awk '{print $1}')
 
@@ -80,7 +80,13 @@ case "$url" in
     exit 0
     ;;
   *api.github.com/repos/kunchenguid/kun)
-    jq -cn '{license:null}'
+    case "${TEST_KUN_LICENSE:-none-declared}" in
+      transport) exit 1 ;;
+      malformed) printf 'not-json' ;;
+      missing) printf '{}' ;;
+      none-declared) jq -cn '{license:null}' ;;
+      *) jq -cn --arg license "$TEST_KUN_LICENSE" '{license:{spdx_id:$license}}' ;;
+    esac
     exit 0
     ;;
   *api.github.com/repos/mattpocock/skills/releases/latest)
@@ -140,11 +146,11 @@ run_updater() {
     DEV_TOOLS_PINS_FILE="$TEST_PINS_FILE" \
     SKILL_UPDATES_STAGING_DIR="$STAGING" \
     SKILL_UPDATES_RECEIPT_DIR="$RECEIPTS" \
-    SKILL_UPDATES_LIVE_SKILL_STORE="$LIVE" \
     DEV_TOOLS_CLAUDE_CONFIG_DIR="$CLAUDE" \
     DEV_TOOLS_UPDATE_CURL_BIN="$FAKEBIN/curl" \
     DEV_TOOLS_UPDATE_GIT_BIN="$FAKEBIN/git" \
     SKILL_UPDATES_FIRSTMATE_DESIGN_SKILLS="$FAKEBIN/fm-design-skills.sh" \
+    TEST_KUN_LICENSE="${TEST_KUN_LICENSE:-none-declared}" \
     TEST_KUN_CANDIDATE="$CANDIDATE_KUN" \
     TEST_MATT_ARCHIVE="$ARCHIVE" \
     PATH="$FAKEBIN:/usr/bin:/bin" \
@@ -155,7 +161,7 @@ assert_live_untouched() {
   local now
   now=$(find "$LIVE" -type f -exec sha256sum {} \; | sort | sha256sum | awk '{print $1}')
   [ "$now" = "$LIVE_BEFORE" ] || fail 'a live skill store was written'
-  [ "$(cat "$LIVE/claude/SKILL.md")" = live-claude ] || fail 'the planted Claude skill store changed'
+  [ "$(cat "$LIVE/skills/SKILL.md")" = live-claude ] || fail 'the planted Claude skill store changed'
   [ "$(cat "$LIVE/plugins/cache/mattpocock/mattpocock-skills/1.2.3/SKILL.md")" = live-plugin ] \
     || fail 'the planted Matt plugin cache changed'
 }
@@ -204,6 +210,29 @@ grep -Fq 'reviewed-candidate-marker' "$STAGING/kun/SKILL.md" || fail 'staged Kun
 assert_live_untouched
 pass 'stage snapshots candidates without replacing current versions'
 
+for TEST_KUN_LICENSE in transport malformed missing MIT; do
+  run_updater --json stage >"$TMP_ROOT/license-stage"
+  if [ "$TEST_KUN_LICENSE" = MIT ]; then
+    expected_license=MIT
+    expected_reason='Kun license changed to MIT; adoption requires license review'
+  else
+    expected_license=unknown
+    expected_reason='Kun license status is unknown; adoption requires a successful license read'
+  fi
+  [ "$(cat "$STAGING/kun/license")" = "$expected_license" ] || fail 'license observation lost uncertainty'
+  if run_updater --json --dry-run adopt >"$TMP_ROOT/license-refusal"; then
+    fail 'adoption accepted an unresolved license state'
+  fi
+  jq -e --arg reason "$expected_reason" '.tools[] | select(.name == "kun-loader") | .status == "failed" and .detail == $reason' \
+    "$TMP_ROOT/license-refusal" >/dev/null || fail 'license refusal reported an unrelated failure'
+  cmp "$ROOT/skills/kun/SKILL.md" "$WORK/skills/kun/SKILL.md" || fail 'license refusal changed the loader'
+  assert_live_untouched
+done
+TEST_KUN_LICENSE=none-declared
+run_updater --json stage >"$TMP_ROOT/license-stage"
+pass 'packaged adoption distinguishes unknown license reads and unresolved license changes'
+
+
 json=$(run_updater --json verify) || fail "verify failed: $json"
 [ "$(printf '%s' "$json" | jq -r '.status')" = ok ] || fail "verify failed: $json"
 [ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="mattpocock-skills") | .detail')" \
@@ -220,7 +249,7 @@ cp "$CANDIDATE_KUN" "$STAGING/kun/SKILL.md"
 assert_live_untouched
 pass 'verify refuses a candidate that drops living Kun document URLs'
 
-for live_path in "$TMP_ROOT/home/.agents/skills" "$TMP_ROOT/home/.pi/agent/skills" "$CLAUDE/skills" "$LIVE/linked"; do
+for live_path in "$TMP_ROOT/home/.agents/skills" "$TMP_ROOT/home/.pi/agent/skills" "$CLAUDE/skills"; do
   mkdir -p "$live_path/kun"
   ln -s "$WORK/skills/kun/SKILL.md" "$live_path/kun/SKILL.md"
   before=$(sha256sum "$WORK/skills/kun/SKILL.md")

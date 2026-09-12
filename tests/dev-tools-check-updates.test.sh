@@ -28,11 +28,10 @@ for row in "${NEOVIM_PLUGIN_PINS[@]}"; do
 done
 
 mkdir -p "$FIXTURE/home/.claude/plugins"
-jq -n --arg version "$MATTPOCOCK_SKILLS_VERSION" --arg rev "$MATTPOCOCK_SKILLS_REV" \
+jq -n --arg version "$MATTPOCOCK_SKILLS_VERSION" \
   '{version:2,plugins:{"mattpocock-skills@mattpocock":[{
     scope:"user",installPath:"/tmp/skill-reviewed-updates-does-not-read-this",
-    version:$version,installedAt:"2026-01-01T00:00:00Z",lastUpdated:"2026-01-02T00:00:00Z",
-    gitCommitSha:$rev}]}}' >"$FIXTURE/home/.claude/plugins/installed_plugins.json"
+    version:$version,installedAt:"2026-01-01T00:00:00Z",lastUpdated:"2026-01-02T00:00:00Z"}]}}' >"$FIXTURE/home/.claude/plugins/installed_plugins.json"
 jq -n '{extraKnownMarketplaces:{mattpocock:{source:{source:"github",repo:"mattpocock/skills"},autoUpdate:true}}}' \
   >"$FIXTURE/home/.claude/settings.json"
 

@@ -41,7 +41,7 @@ alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
 | actions/checkout | v7.0.1 / `3d3c42e5aac5...` | Latest GitHub GA action release | Exact workflow action SHA | CI only |
 | Determinate Nix Installer action | v23 / `3138316df39e...` | Latest GitHub GA action release | Exact workflow action SHA | CI only |
 | Kun loader | `911dac0...` / SHA-256 `37864c82...` | Exact `skills/kun/SKILL.md` from `kunchenguid/kun`; living ENTRY/TOOLS/OPINIONS/VOICE files are not this pin | Repository copy via Home Manager | Reviewed `skill-reviewed-updates` adopt; never live skill stores |
-| Matt Pocock skills | 1.2.3 / `9c9f36c...` | Latest non-draft GitHub GA tag of `mattpocock/skills` (MIT) | Claude marketplace plugin; native autoUpdate owns live bytes | Reviewed pin adopt only; do not compete with marketplace autoUpdate |
+| Matt Pocock skills | 1.2.3 | Latest non-draft GitHub GA tag of `mattpocock/skills` (MIT) | Claude marketplace plugin; native autoUpdate owns live bytes | Reviewed pin adopt only; do not compete with marketplace autoUpdate |
 
 The authoritative feeds used for the audit are the
 [npm registry](https://registry.npmjs.org/) for npm packages,
