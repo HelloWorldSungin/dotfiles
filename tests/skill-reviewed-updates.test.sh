@@ -166,6 +166,29 @@ assert_live_untouched() {
     || fail 'the planted Matt plugin cache changed'
 }
 
+state_digest() {
+  find "$WORK" "$STAGING" "$RECEIPTS" "$LIVE" -type f -exec sha256sum {} \; | sort | sha256sum
+}
+
+before=$(state_digest)
+for command in check verify rollback; do
+  command_args=("$command")
+  [ "$command" != rollback ] || command_args+=("$TMP_ROOT/unused-receipt.json")
+  for flag in --dry-run -n; do
+    if run_updater --json "$flag" "${command_args[@]}" >"$TMP_ROOT/dry-run-refusal" 2>&1; then
+      fail "accepted $flag for $command"
+    fi
+    grep -Fq -- '--dry-run only applies to stage and adopt' "$TMP_ROOT/dry-run-refusal" \
+      || fail "wrong refusal for $flag $command"
+  done
+done
+[ "$(state_digest)" = "$before" ] || fail 'invalid dry-run options changed persisted state'
+help=$(run_updater --help)
+for command in check verify; do
+  grep -Eq "^.*skill-reviewed-updates \\[--json\\] $command$" <<<"$help" || fail "help misstates $command options"
+done
+pass 'built wrapper rejects dry-run for read-only commands and rollback'
+
 mkdir -p "$TMP_ROOT/home"
 if env -u SKILL_UPDATES_ROOT -u DEV_TOOLS_PINS_FILE HOME="$TMP_ROOT/home" \
   "$UPDATER" --json adopt >"$TMP_ROOT/store-refusal" 2>&1; then
@@ -187,7 +210,9 @@ rm "$TEST_PINS_FILE"
 TEST_PINS_FILE=
 pass 'built wrapper honors checkout and pins selection and refuses immutable defaults'
 
+before=$(state_digest)
 json=$(run_updater --json check)
+[ "$(state_digest)" = "$before" ] || fail 'check changed persisted state'
 [ "$(printf '%s' "$json" | jq -r '.native_matt_writer')" = claude-marketplace-autoupdate ] \
   || fail 'check did not establish native Claude marketplace autoUpdate as the live Matt writer'
 assert_live_untouched
@@ -233,7 +258,9 @@ run_updater --json stage >"$TMP_ROOT/license-stage"
 pass 'packaged adoption distinguishes unknown license reads and unresolved license changes'
 
 
+before=$(state_digest)
 json=$(run_updater --json verify) || fail "verify failed: $json"
+[ "$(state_digest)" = "$before" ] || fail 'verify changed persisted state'
 [ "$(printf '%s' "$json" | jq -r '.status')" = ok ] || fail "verify failed: $json"
 [ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="mattpocock-skills") | .detail')" \
   = 'Firstmate design-skills check accepted the staged plugin' ] \

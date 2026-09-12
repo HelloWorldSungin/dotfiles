@@ -11,9 +11,9 @@
 # Kun living ENTRY/TOOLS/OPINIONS/VOICE documents refresh on invocation from
 # upstream main. They are not this pin and are never vendored here.
 #
-# Usage: skill-reviewed-updates [--json] [--dry-run] check
+# Usage: skill-reviewed-updates [--json] check
 #        skill-reviewed-updates [--json] [--dry-run] stage
-#        skill-reviewed-updates [--json] [--dry-run] verify
+#        skill-reviewed-updates [--json] verify
 #        skill-reviewed-updates [--json] [--dry-run] adopt
 #        skill-reviewed-updates [--json] rollback <receipt> [--attended]
 set -euo pipefail
@@ -52,9 +52,14 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 [ -n "$COMMAND" ] || die 'need check, stage, verify, adopt, or rollback'
+if [ "$DRY_RUN" -eq 1 ]; then
+  case "$COMMAND" in
+    stage|adopt) ;;
+    *) die '--dry-run only applies to stage and adopt' ;;
+  esac
+fi
 if [ "$COMMAND" = rollback ]; then
   [ -n "$ROLLBACK_RECEIPT" ] || die '--rollback needs a receipt path'
-  [ "$DRY_RUN" -eq 0 ] || die '--dry-run does not apply to rollback; omit --attended to check without performing'
 elif [ "$ATTENDED" -eq 1 ]; then
   die '--attended only applies to rollback'
 fi
