@@ -183,6 +183,7 @@ replace_assignment() {
     $0 ~ pat { print k "=" v; next }
     { print }
   ' "$file" >"$tmp"
+  chmod --reference="$file" "$tmp"
   mv -f "$tmp" "$file"
 }
 
@@ -505,6 +506,7 @@ adopt_kun() {
   if [ -f "$docs" ]; then
     tmp=$(mktemp "${docs}.XXXXXX")
     sed -e "s/${KUN_LOADER_SHA256}/${new_hash}/g" -e "s/${KUN_LOADER_REV}/${commit}/g" "$docs" >"$tmp"
+    chmod --reference="$docs" "$tmp"
     mv -f "$tmp" "$docs"
   fi
   printf '%s\n' "$prior_hash"

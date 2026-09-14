@@ -37,11 +37,13 @@ let
   pins = pkgs.writeText "dev-tools-versions.sh" (builtins.readFile ../config/dev-tools-versions.sh);
   flakeLock = pkgs.writeText "flake.lock" (builtins.readFile ../flake.lock);
   nvimPluginLock = pkgs.writeText "nvim-lazy-lock.json" (builtins.readFile ../config/nvim/lazy-lock.json);
+  kunLoader = pkgs.writeText "kun-SKILL.md" (builtins.readFile ../skills/kun/SKILL.md);
 
   checker = pkgs.writeShellApplication {
     name = "dev-tools-check-updates";
     text = ''
       export DEV_TOOLS_PINS_FILE=${pins}
+      export DEV_TOOLS_KUN_LOADER_FILE=${kunLoader}
       export DEV_TOOLS_FLAKE_LOCK_FILE=${flakeLock}
       export DEV_TOOLS_NVIM_LOCK_FILE=${nvimPluginLock}
       export DEV_TOOLS_CLOSURE_FILE=${closureManifest}

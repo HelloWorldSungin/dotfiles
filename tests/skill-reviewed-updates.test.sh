@@ -318,8 +318,14 @@ grep -Fq "MATTPOCOCK_SKILLS_VERSION=1.2.3" "$WORK/config/dev-tools-versions.sh" 
 assert_live_untouched
 pass 'dry-run adopt leaves current versions in place'
 
+file_mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%OLp' "$1"; }
+chmod 755 "$WORK/tests/kun-skill.test.sh"
+chmod 644 "$WORK/config/dev-tools-versions.sh" "$WORK/docs/agents.md"
 json=$(run_updater --json adopt)
 [ "$(printf '%s' "$json" | jq -r '.status')" = ok ] || fail "adopt failed: $json"
+[ "$(file_mode "$WORK/tests/kun-skill.test.sh")" = 755 ] || fail 'adopt changed the Kun test file mode'
+[ "$(file_mode "$WORK/config/dev-tools-versions.sh")" = 644 ] || fail 'adopt changed the pins file mode'
+[ "$(file_mode "$WORK/docs/agents.md")" = 644 ] || fail 'adopt changed the docs file mode'
 grep -Fq 'reviewed-candidate-marker' "$WORK/skills/kun/SKILL.md" || fail 'adopt did not update the repository Kun loader'
 grep -Fq "MATTPOCOCK_SKILLS_VERSION=1.2.4" "$WORK/config/dev-tools-versions.sh" \
   || fail 'adopt did not update the repository Matt pin'
