@@ -227,3 +227,30 @@ from `home/common.nix` leaves the key behind, so back the setting out by editing
 `~/.codex/config.toml` by hand.
 Both tools read their config at startup, so **start a new session** to pick the
 change up; no model reselection is needed.
+
+## Pi default and supervision models
+
+| Role | Model | Thinking | Owner |
+|------|-------|----------|-------|
+| Pi default (every new session) | `openai-codex/gpt-6-astra` | `low` | `defaultProvider`, `defaultModel`, `defaultThinkingLevel` in `~/.pi/agent/settings.json` |
+| Firstmate Pi supervision branch | `openai-codex/gpt-5.6-luna` | `high` | `config/supervision-branch-model` and `config/supervision-branch-effort` under `~/firstmate` |
+
+Pi writes `settings.json` itself (changelog version, theme, `/model` and
+`/thinking` Ctrl+S saves, `/settings`), and the supervision pins are the files
+Firstmate's `/supervision-model` command writes, so neither is a repo symlink.
+The home-manager activation step `bin/pi-set-model-defaults` merges only those
+three settings keys and rewrites the two pins in Firstmate's own format (one
+line, mode `0600`, atomic replace), leaves every other key untouched, skips the
+pins on a host with no `~/firstmate/config`, and does nothing on a repeat
+rebuild. `tests/pi-model-defaults.test.sh` checks that Pi resolves the result.
+
+Precedence is unchanged: `pi --model`/`--thinking`, and per-launch routing such as
+the `pi-fusion` alias, still win over the settings defaults for that run, and
+`modelThinkingLevels` still wins per model. A supervision pin wins over main's
+model and effort, as Firstmate documents. A `/model` Ctrl+S save or a
+`/supervision-model` pick lasts only until the next rebuild; change the
+defaults in `bin/pi-set-model-defaults` to keep one.
+
+**Activation:** run `bash ~/dotfiles/rebuild.sh`, then start a new Pi session.
+Firstmate reads the pins each time it builds a supervision branch. Like the Codex
+step above, removing the activation step leaves the last written values behind.
