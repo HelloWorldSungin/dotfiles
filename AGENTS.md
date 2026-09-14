@@ -52,7 +52,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The read-only checker lives in `bin/dev-tools-check-updates` and its
   deterministic self-test is in `tests/`. `home/dev-tools.nix` is the single
   owner of every packaged dev-tool derivation (pin artifacts, checker, pinned
-  installer, cspend wrapper, codex context-window helper, guarded updater,
+  installer, cspend wrapper, codex context-window helper, Pi model-defaults helper, guarded updater,
   reviewed skill adopter) and
   of the one closure-input attrset they select from, which also generates the
   store-path manifest the checker measures closure-only packages with;
