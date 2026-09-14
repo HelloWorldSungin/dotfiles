@@ -174,14 +174,16 @@ before=$(state_digest)
 for command in check verify rollback; do
   command_args=("$command")
   [ "$command" != rollback ] || command_args+=("$TMP_ROOT/unused-receipt.json")
-  for flag in --dry-run -n; do
-    if run_updater --json "$flag" "${command_args[@]}" >"$TMP_ROOT/dry-run-refusal" 2>&1; then
-      fail "accepted $flag for $command"
-    fi
-    grep -Fq -- '--dry-run only applies to stage and adopt' "$TMP_ROOT/dry-run-refusal" \
-      || fail "wrong refusal for $flag $command"
-  done
+  if run_updater --json --dry-run "${command_args[@]}" >"$TMP_ROOT/dry-run-refusal" 2>&1; then
+    fail "accepted --dry-run for $command"
+  fi
+  grep -Fq -- '--dry-run only applies to stage and adopt' "$TMP_ROOT/dry-run-refusal" \
+    || fail "wrong refusal for --dry-run $command"
 done
+if run_updater --json -n stage >"$TMP_ROOT/alias-refusal" 2>&1; then
+  fail 'accepted the removed -n alias'
+fi
+grep -Fq -- 'unknown argument: -n' "$TMP_ROOT/alias-refusal" || fail 'removed alias failed for an unrelated reason'
 [ "$(state_digest)" = "$before" ] || fail 'invalid dry-run options changed persisted state'
 help=$(run_updater --help)
 for command in check verify; do

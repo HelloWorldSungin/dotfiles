@@ -42,7 +42,7 @@ die() { printf 'skill-reviewed-updates: %s\n' "$1" >&2; exit "${2:-2}"; }
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --json) MODE=json ;;
-    --dry-run|-n) DRY_RUN=1 ;;
+    --dry-run) DRY_RUN=1 ;;
     --attended) ATTENDED=1 ;;
     --help|-h) usage; exit 0 ;;
     check|stage|verify|adopt) COMMAND=$1 ;;
