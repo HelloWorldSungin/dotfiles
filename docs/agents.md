@@ -119,7 +119,7 @@ After any upstream license change, review the new terms and update the accepted
 state through the normal code review path before adoption. The command updates this commit/hash/provenance record plus
 `KUN_LOADER_*` in `config/dev-tools-versions.sh` and `EXPECTED_SHA256` in
 `tests/kun-skill.test.sh`, and writes a mode-0600 receipt for
-`--rollback <receipt> --attended`. It does not copy the four living knowledge
+`skill-reviewed-updates rollback <receipt> --attended`. It does not copy the four living knowledge
 documents, use `npx skills add -g`, or change global skill directories. The
 weekly `dev-tools-check-updates` row `kun-loader` compares loader hashes only,
 so a living-document edit on upstream `main` is not a loader update. A
