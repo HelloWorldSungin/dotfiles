@@ -78,6 +78,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   verifies candidates, then updates only repository pins and the repository Kun
   loader. It never writes live skill stores, never vendors Kun's living
   documents, and is packaged on PATH with no timer. See `docs/agents.md`.
+- `~/.pi/agent/settings.json` and Firstmate's `config/supervision-branch-*` pins
+  are machine-written too; `bin/pi-set-model-defaults` (activation step) merges
+  only the Pi default model/thinking keys and those two pins. See `docs/agents.md`.
 - `~/.codex/config.toml` is machine-maintained (project trust, hook approvals,
   TUI state) and must never be replaced or symlinked to a repo file. Home Manager
   owns exactly one key in it, `model_context_window`, through the atomic

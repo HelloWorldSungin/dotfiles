@@ -98,6 +98,15 @@ in
       $DRY_RUN_CMD ${devTools.codexSetContextWindow}/bin/codex-set-context-window
     '';
 
+  # ------------------------------------------------------ pi model defaults
+  # Pi writes ~/.pi/agent/settings.json itself, so home-manager owns only its
+  # three default-model keys, plus the Firstmate Pi supervision-branch model and
+  # effort pins, via an atomic idempotent merge. See docs/agents.md.
+  home.activation.piModelDefaults =
+    lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      $DRY_RUN_CMD ${devTools.piSetModelDefaults}/bin/pi-set-model-defaults
+    '';
+
   # ------------------------------------------------------------------ zsh
   programs.zsh = {
     enable = true;
