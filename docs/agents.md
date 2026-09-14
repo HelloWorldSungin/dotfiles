@@ -97,16 +97,53 @@ inspect global `AGENTS.md`, so it does not prove model obedience when both
 upstream origins are unreachable or guard arbitrary future global-instruction
 changes.
 
-To update the loader, inspect only `kunchenguid/kun`: verify the upstream
-default-branch commit, its `skills/kun/SKILL.md` content and SHA-256, and the
-repository license status. Replace only `skills/kun/SKILL.md` with that exact
-loader, update this commit/hash/provenance record and `EXPECTED_SHA256` in
-`tests/kun-skill.test.sh`, and run `bin/dotfiles-test` plus
-`bin/dotfiles-lint`. Do not copy the four living knowledge documents, use `npx
-skills add -g`, or change global skill directories by hand. A downstream review
-that invokes `/kun` must separately record the then-observed upstream commit and
-content hashes for all fetched living documents, distinguish that advice from
-repository evidence, and say whether it materially changed a recommendation.
+For the packaged command, set `SKILL_UPDATES_ROOT` to an isolated writable Git
+checkout. Pins default to that checkout’s `config/dev-tools-versions.sh`;
+`DEV_TOOLS_PINS_FILE` can select another writable pins file inside it. Without
+a checkout selection the packaged store defaults support read-only use, and
+adoption or rollback refuses with an immutable-target diagnostic.
+To update the loader, run `skill-reviewed-updates stage` then `verify` then
+`adopt` in an isolated checkout that no live skill path resolves into, then
+deliver its changes through normal review. Adoption and rollback refuse
+checkouts linked from the Claude, Pi, generic, or configured skill stores.
+Verification runs Pi offline once per directory layout for each candidate set:
+its native `~/.pi/agent/skills` directory, and `~/.claude/skills` supplied
+through Pi’s configured skill directories. It checks discovered command names, descriptions,
+resolved candidate sources, and omission of instruction bodies from startup.
+A malformed skill missing its description must remain undiscovered.
+These are Pi discovery checks, not native Claude or Codex discovery checks,
+explicit invocation checks, or model behavior evaluations. That path fetches only `skills/kun/SKILL.md`, checks that the loader
+still points at the four living documents, records license status, and refuses
+unknown reads or changes from the reviewed states (Kun: none declared; Matt: MIT).
+After any upstream license change, review the new terms and update the accepted
+state through the normal code review path before adoption. The command updates this commit/hash/provenance record plus
+`KUN_LOADER_*` in `config/dev-tools-versions.sh` and `EXPECTED_SHA256` in
+`tests/kun-skill.test.sh`, and writes a mode-0600 receipt for
+`skill-reviewed-updates rollback <receipt> --attended`. It does not copy the four living knowledge
+documents, use `npx skills add -g`, or change global skill directories. The
+weekly `dev-tools-check-updates` row `kun-loader` compares loader hashes only,
+so a living-document edit on upstream `main` is not a loader update. A
+downstream review that invokes `/kun` must separately record the then-observed
+upstream commit and content hashes for all fetched living documents, distinguish
+that advice from repository evidence, and say whether it materially changed a
+recommendation.
+
+## Matt Pocock skills (plugin lifecycle)
+
+The installed `mattpocock-skills@mattpocock` plugin is the captain-installed
+Claude marketplace copy. Firstmate reads that install at design-task dispatch
+and does not install, copy, or pin it (`fm-design-skills.sh`). Live plugin
+bytes are written by Claude marketplace `extraKnownMarketplaces.mattpocock.autoUpdate`
+when that flag is true. A custom writer must not compete with that native
+updater.
+
+Dotfiles therefore owns a **reviewed pin and adoption record**, not the live
+cache: `dev-tools-check-updates` reports `mattpocock-skills` against the GitHub
+GA release, and `skill-reviewed-updates` stages a candidate tree, runs the
+Firstmate design-skills check against that tree, and on success updates only
+`MATTPOCOCK_SKILLS_*` in `config/dev-tools-versions.sh`. Disabling marketplace
+autoUpdate requires writing machine-owned `~/.claude/settings.json`. This
+repository ships that policy and does not apply that live settings write.
 
 ## GPT long context (Sol, Terra and Astra)
 

@@ -55,6 +55,7 @@ etc.).
 | Audit installed, pinned, and latest stable tools | `dev-tools-check-updates --force` |
 | Refresh declared pins | update `config/dev-tools-versions.sh` and lock files from authoritative stable feeds, test, then rebuild |
 | Preview/apply guarded CT110 tool updates | `dev-tools-apply-updates --dry-run`, then `dev-tools-apply-updates` (`--help` documents its scope) |
+| Stage/verify/adopt Kun loader or Matt skill pins | `skill-reviewed-updates stage`, `verify`, then `adopt` (`--help`; never writes live skill stores) |
 | See what a rebuild would change    | `git diff` before running `rebuild` |
 | Validate a change to this repo     | `bin/dotfiles-test` (every suite in `tests/`), then `bin/dotfiles-lint` (ShellCheck) |
 | Start / reattach sessions          | `ssh ct110` then `herdr` -> [docs/herdr.md](docs/herdr.md) |

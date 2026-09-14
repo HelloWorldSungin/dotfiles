@@ -320,6 +320,79 @@ check_cursor() {
     '{name:"cursor-agent",source:"cursor-moving-beta",current:$current,pinned:$snapshot,latest_stable:"unavailable",latest_observed:$observed,status:$status,install_policy:"unavailable-unpinnable",apply_policy:"report-only",detail:$detail}'
 }
 
+hash_file() {
+  $SHA256_BIN "$1" 2>/dev/null | awk '{print $1}'
+}
+
+check_kun_loader() {
+  local loader=${DEV_TOOLS_KUN_LOADER_FILE:-$ROOT/${KUN_LOADER_FILE:-skills/kun/SKILL.md}}
+  local url="https://raw.githubusercontent.com/${KUN_LOADER_REPO:-kunchenguid/kun}/main/${KUN_LOADER_FILE:-skills/kun/SKILL.md}"
+  local current=unknown latest=unknown detail='living ENTRY/TOOLS/OPINIONS/VOICE documents refresh on invocation and are not this pin' tmp
+  if [ -f "$loader" ]; then
+    current=$(hash_file "$loader")
+    [ -n "$current" ] || current=unknown
+  else
+    detail='repository Kun loader is missing; living documents are not this pin'
+  fi
+  tmp=$(mktemp "${TMPDIR:-/tmp}/kun-loader-check.XXXXXX") || {
+    tool_json kun-loader kun-upstream-loader "$current" "${KUN_LOADER_SHA256:-unknown}" unknown exact-loader-hash report-only 'temporary audit file could not be created'
+    return
+  }
+  if run_timed "$NETWORK_TIMEOUT" "$CURL_BIN" -fsSL --connect-timeout 5 --max-time "$NETWORK_TIMEOUT" "$url" -o "$tmp" 2>/dev/null \
+     && [ -s "$tmp" ]; then
+    latest=$(hash_file "$tmp")
+    [ -n "$latest" ] || latest=unknown
+  else
+    latest=unknown
+    detail='upstream Kun loader could not be fetched; living documents are not this pin'
+  fi
+  rm -f "$tmp"
+  tool_json kun-loader kun-upstream-loader "$current" "${KUN_LOADER_SHA256:-unknown}" "$latest" exact-loader-hash report-only "$detail"
+}
+
+check_mattpocock_skills() {
+  local claude_home=${DEV_TOOLS_CLAUDE_CONFIG_DIR:-${CLAUDE_CONFIG_DIR:-${HOME:-.}/.claude}}
+  local registry=${DEV_TOOLS_MATTPOCOCK_REGISTRY:-$claude_home/plugins/installed_plugins.json}
+  local settings=${DEV_TOOLS_CLAUDE_SETTINGS:-$claude_home/settings.json}
+  local plugin=${MATTPOCOCK_SKILLS_PLUGIN:-mattpocock-skills@mattpocock}
+  local current=unknown latest=unknown detail='' native='' rc
+  if [ -f "$registry" ]; then
+    current=$(jq -er --arg plugin "$plugin" '
+      (.plugins[$plugin] // .[$plugin] // [])
+      | map(select(.lastUpdated | type == "string"))
+      | sort_by(.lastUpdated) | last | .version // empty
+    ' "$registry" 2>/dev/null) || current=unknown
+    [ -n "$current" ] || current=unknown
+  else
+    detail='Claude plugin registry is absent; live Matt bytes are not read from skill stores'
+  fi
+  latest=$(latest_github_tag "${MATTPOCOCK_SKILLS_REPO:-mattpocock/skills}"); rc=$?
+  case "$rc" in
+    0) latest=${latest#v} ;;
+    2) latest=unknown
+       [ -n "$detail" ] && detail="$detail; "
+       detail="${detail}GitHub latest Matt skills release has a prerelease-like tag" ;;
+    *) latest=unknown
+       [ -n "$detail" ] && detail="$detail; "
+       detail="${detail}latest non-draft, non-prerelease Matt skills GitHub release could not be verified" ;;
+  esac
+  if [ -f "$settings" ]; then
+    native=$(jq -r '.extraKnownMarketplaces.mattpocock.autoUpdate // empty' "$settings" 2>/dev/null || true)
+  fi
+  case "$native" in
+    true)
+      [ -n "$detail" ] && detail="$detail; "
+      detail="${detail}native Claude marketplace autoUpdate owns live plugin writes; this row never writes that cache" ;;
+    false)
+      [ -n "$detail" ] && detail="$detail; "
+      detail="${detail}native Claude marketplace autoUpdate is disabled; live plugin writes are unowned until an attended /plugin refresh" ;;
+    *)
+      [ -n "$detail" ] && detail="$detail; "
+      detail="${detail}Claude marketplace autoUpdate setting was not established; do not assume a custom writer owns live plugin bytes" ;;
+  esac
+  tool_json mattpocock-skills github-latest-release "$current" "${MATTPOCOCK_SKILLS_VERSION:-unknown}" "$latest" exact-plugin-release report-only "$detail"
+}
+
 check_git_repo() {
   local name=$1 path=$2 repo=$3 pinned=$4 install_policy=$5 apply_policy=$6 current latest detail=
   if [ -d "$path/.git" ]; then current=$($GIT_BIN -C "$path" rev-parse HEAD 2>/dev/null || printf unknown); else current=unknown; fi
@@ -485,6 +558,8 @@ collect() {
   append_tool "$(check_cursor)"
   append_tool "$(check_git_repo firstmate "$FIRSTMATE_PATH" https://github.com/kunchenguid/firstmate.git "$FIRSTMATE_REV" exact-commit guarded-exact)"
   append_tool "$(check_baby_menu)"
+  append_tool "$(check_kun_loader)"
+  append_tool "$(check_mattpocock_skills)"
   append_tool "$(check_nix_installer)"
   append_tool "$(check_nix_input nixpkgs-input https://github.com/NixOS/nixpkgs.git "refs/heads/nixos-${NIXPKGS_CHANNEL}" "$NIXPKGS_REV" nixpkgs)"
   append_tool "$(check_nix_input home-manager-input https://github.com/nix-community/home-manager.git "refs/heads/release-${HOME_MANAGER_CHANNEL}" "$HOME_MANAGER_REV" home-manager)"

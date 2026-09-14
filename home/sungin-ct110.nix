@@ -20,6 +20,7 @@ in
     gtkwave  # view GHDL-produced .ghw/.vcd waveforms
   ]) ++ [
     devTools.applyUpdates # opt-in guarded auto-apply for the safe update tiers
+    devTools.skillReviewedUpdates # opt-in reviewed Kun loader and Matt pin adoption; no timer
   ];
 
   home.sessionVariables = {

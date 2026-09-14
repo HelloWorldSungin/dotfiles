@@ -263,7 +263,7 @@ wrapper_text() { # wrapper name -> its generated script
          else throw \"expected exactly one $1 package\""
 }
 
-for wrapper in dev-tools-check-updates dev-tools-install-pinned claude-spend-pinned dev-tools-apply-updates; do
+for wrapper in dev-tools-check-updates dev-tools-install-pinned claude-spend-pinned dev-tools-apply-updates skill-reviewed-updates; do
   text=$(wrapper_text "$wrapper") || fail "the generation does not ship exactly one $wrapper"
   path_line=$(grep -m1 '^export PATH=' <<<"$text") || fail "$wrapper declares no runtime closure"
   path_line=${path_line#export PATH=\"}
@@ -273,7 +273,7 @@ for wrapper in dev-tools-check-updates dev-tools-install-pinned claude-spend-pin
     store_path=${entry%/bin}
     # A wrapper may depend on a sibling wrapper; those are not nixpkgs packages.
     case "$store_path" in
-      *-dev-tools-check-updates|*-dev-tools-versions.sh) continue ;;
+      *-dev-tools-check-updates|*-dev-tools-versions.sh|*-skill-reviewed-updates) continue ;;
     esac
     printf '%s\n' "$PINNED_PATHS" | grep -Fqx "$store_path" \
       || fail "$wrapper depends on ${store_path##*/} but no NIX_PACKAGE_PINS row names it"
@@ -330,13 +330,15 @@ done
 
 # Nothing a wrapper carries may be unmeasurable: each input is either in the
 # manifest, or user-facing and therefore honestly measured through PATH.
-for wrapper in dev-tools-check-updates dev-tools-install-pinned claude-spend-pinned dev-tools-apply-updates; do
+for wrapper in dev-tools-check-updates dev-tools-install-pinned claude-spend-pinned dev-tools-apply-updates skill-reviewed-updates; do
   text=$(wrapper_text "$wrapper") || fail "the generation does not ship exactly one $wrapper"
   path_line=$(grep -m1 '^export PATH=' <<<"$text") || fail "$wrapper declares no runtime closure"
   while IFS= read -r entry; do
     case "$entry" in /nix/store/*) : ;; *) continue ;; esac
     store_path=${entry%/bin}
-    case "$store_path" in *-dev-tools-check-updates|*-dev-tools-versions.sh) continue ;; esac
+    case "$store_path" in
+      *-dev-tools-check-updates|*-dev-tools-versions.sh|*-skill-reviewed-updates) continue ;;
+    esac
     printf '%s' "$MANIFEST" | jq -e --arg p "$store_path" 'any(.[]; .store_path == $p)' >/dev/null && continue
     attr=$(awk -v p="$store_path" '$2 == p {print $1}' <<<"$PINNED_ROWS")
     printf '%s\n' "${user_env_attrs[@]}" | grep -Fqx "$attr" \
@@ -346,5 +348,22 @@ for wrapper in dev-tools-check-updates dev-tools-install-pinned claude-spend-pin
   done <<<"$(printf '%s' "${path_line#export PATH=\"}" | tr ':' '\n')"
 done
 pass 'the closure manifest measures exactly the closure-only rows, and every other wrapper input is user-facing'
+
+# ------------------------- the packaged checker measures the Kun loader
+
+# The weekly timer runs the store copy, whose own output holds no skills tree,
+# so the loader row has to be measured from what the wrapper binds. The network
+# is refused so only the local measurement is under test.
+# shellcheck source=../config/dev-tools-versions.sh
+# shellcheck disable=SC1091
+KUN_PIN=$(source "$ROOT/config/dev-tools-versions.sh" && printf '%s' "$KUN_LOADER_SHA256")
+FALSE_BIN=$(command -v false)
+kun_row=$(env HOME="$TMP_ROOT/home" DEV_TOOLS_UPDATE_CACHE_PATH="$TMP_ROOT/checker-cache.json" \
+  DEV_TOOLS_UPDATE_CURL_BIN="$FALSE_BIN" DEV_TOOLS_UPDATE_GIT_BIN="$FALSE_BIN" DEV_TOOLS_UPDATE_NPM_BIN="$FALSE_BIN" \
+  "$BUILT_CHECKER/bin/dev-tools-check-updates" --json --force --no-cache \
+  | jq -ce '.tools[] | select(.name == "kun-loader")') || fail 'the packaged checker omits the kun-loader row'
+[ "$(printf '%s' "$kun_row" | jq -r '.current')" = "$KUN_PIN" ] \
+  || fail "the packaged checker cannot measure the Kun loader: $kun_row"
+pass 'the packaged checker measures the generation Kun loader against its pin'
 
 printf '\nall dev-tools nix packaging tests passed\n'

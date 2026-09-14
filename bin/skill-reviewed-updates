@@ -1,0 +1,629 @@
+#!/usr/bin/env bash
+# skill-reviewed-updates - stage, verify, and adopt Kun loader and Matt skills.
+#
+# Automatic checks live on the existing weekly dev-tools-update-checker timer
+# through `dev-tools-check-updates`. This command is the reviewed adoption
+# path: it never starts another daemon, never writes live skill stores, and
+# never drives Claude marketplace autoUpdate. Native Claude marketplace
+# autoUpdate currently owns live Matt plugin bytes; this command updates only
+# repository pins and the repository Kun loader after staging and verification.
+#
+# Kun living ENTRY/TOOLS/OPINIONS/VOICE documents refresh on invocation from
+# upstream main. They are not this pin and are never vendored here.
+#
+# Usage: skill-reviewed-updates [--json] check
+#        skill-reviewed-updates [--json] [--dry-run] stage
+#        skill-reviewed-updates [--json] verify
+#        skill-reviewed-updates [--json] [--dry-run] adopt
+#        skill-reviewed-updates [--json] rollback <receipt> [--attended]
+set -euo pipefail
+
+SELF_DIR=$(cd "$(dirname "$0")" && pwd)
+ROOT=$(cd "${SKILL_UPDATES_ROOT:-$SELF_DIR/..}" && pwd)
+PINS_FILE=${DEV_TOOLS_PINS_FILE:-$ROOT/config/dev-tools-versions.sh}
+CURL_BIN=${DEV_TOOLS_UPDATE_CURL_BIN:-curl}
+GIT_BIN=${DEV_TOOLS_UPDATE_GIT_BIN:-git}
+TAR_BIN=${SKILL_UPDATES_TAR_BIN:-tar}
+SHA256_BIN=${DEV_TOOLS_UPDATE_SHA256_BIN:-$(command -v sha256sum >/dev/null 2>&1 && printf sha256sum || printf 'shasum -a 256')}
+NETWORK_TIMEOUT=${DEV_TOOLS_UPDATE_NETWORK_TIMEOUT_SECONDS:-15}
+STAGING_DIR=${SKILL_UPDATES_STAGING_DIR:-${XDG_STATE_HOME:-${HOME:-.}/.local/state}/skill-reviewed-updates/staging}
+RECEIPT_DIR=${SKILL_UPDATES_RECEIPT_DIR:-${XDG_STATE_HOME:-${HOME:-.}/.local/state}/skill-reviewed-updates/receipts}
+CLAUDE_HOME=${DEV_TOOLS_CLAUDE_CONFIG_DIR:-${CLAUDE_CONFIG_DIR:-${HOME:-.}/.claude}}
+SETTINGS_FILE=${DEV_TOOLS_CLAUDE_SETTINGS:-$CLAUDE_HOME/settings.json}
+FIRSTMATE_DESIGN_SKILLS=${SKILL_UPDATES_FIRSTMATE_DESIGN_SKILLS:-${DEV_TOOLS_FIRSTMATE_PATH:-${HOME:-.}/firstmate}/bin/fm-design-skills.sh}
+MODE=human
+DRY_RUN=0
+ATTENDED=0
+COMMAND=
+ROLLBACK_RECEIPT=
+
+usage() { sed -n '/^# skill-reviewed-updates - /,/^set -euo pipefail$/s/^# \{0,1\}//p' "$0"; }
+die() { printf 'skill-reviewed-updates: %s\n' "$1" >&2; exit "${2:-2}"; }
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --json) MODE=json ;;
+    --dry-run) DRY_RUN=1 ;;
+    --attended) ATTENDED=1 ;;
+    --help|-h) usage; exit 0 ;;
+    check|stage|verify|adopt) COMMAND=$1 ;;
+    rollback) COMMAND=rollback; shift; ROLLBACK_RECEIPT=${1:-} ;;
+    *) die "unknown argument: $1" ;;
+  esac
+  shift
+done
+[ -n "$COMMAND" ] || die 'need check, stage, verify, adopt, or rollback'
+if [ "$DRY_RUN" -eq 1 ]; then
+  case "$COMMAND" in
+    stage|adopt) ;;
+    *) die '--dry-run only applies to stage and adopt' ;;
+  esac
+fi
+if [ "$COMMAND" = rollback ]; then
+  [ -n "$ROLLBACK_RECEIPT" ] || die '--rollback needs a receipt path'
+elif [ "$ATTENDED" -eq 1 ]; then
+  die '--attended only applies to rollback'
+fi
+
+[ -f "$PINS_FILE" ] || die "pins unavailable: $PINS_FILE"
+# shellcheck source=../config/dev-tools-versions.sh
+# shellcheck disable=SC1091
+source "$PINS_FILE"
+command -v jq >/dev/null 2>&1 || die 'jq is required'
+
+run_timed() {
+  local seconds=$1
+  shift
+  if command -v timeout >/dev/null 2>&1; then timeout "$seconds" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$seconds" "$@"
+  else "$@"
+  fi
+}
+
+hash_file() {
+  $SHA256_BIN "$1" 2>/dev/null | awk '{print $1}'
+}
+
+kun_loader_path() {
+  printf '%s/%s\n' "$ROOT" "${KUN_LOADER_FILE:-skills/kun/SKILL.md}"
+}
+
+assert_mutation_targets() {
+  case "$COMMAND" in adopt|rollback) ;; *) return 0 ;; esac
+  local root target resolved toplevel
+  root=$(realpath -- "$ROOT") || die "cannot resolve repository: $ROOT"
+  case "$root/" in /nix/store/*) die 'immutable store mutation target; set SKILL_UPDATES_ROOT to an isolated writable Git checkout' ;; esac
+  toplevel=$(git -C "$root" rev-parse --show-toplevel 2>/dev/null) || die 'mutation requires an isolated writable Git checkout'
+  [ "$(realpath -- "$toplevel")" = "$root" ] && [ -w "$root" ] || die 'mutation root must be a writable Git checkout root'
+  for target in "$PINS_FILE" "$(kun_loader_path)" "$ROOT/tests/kun-skill.test.sh" "$ROOT/docs/agents.md"; do
+    resolved=$(realpath -m -- "$target") || die "cannot resolve mutation target: $target"
+    case "$resolved" in /nix/store/*) die "immutable store mutation target: $target" ;; esac
+    case "$resolved" in "$root"/*) ;; *) die "mutation target is outside selected checkout: $target" ;; esac
+    [ -f "$target" ] && [ -w "$target" ] && [ -w "$(dirname "$resolved")" ] || die "mutation target is not a writable file: $target"
+  done
+}
+
+forbidden_live_paths() {
+  printf '%s\n' \
+    "${HOME:-}/.claude/skills" \
+    "${HOME:-}/.claude/plugins" \
+    "$CLAUDE_HOME/skills" \
+    "$CLAUDE_HOME/plugins" \
+    "${PI_CODING_AGENT_DIR:-${HOME:-}/.pi/agent}/skills" \
+    "${CODEX_HOME:-${HOME:-}/.codex}/skills" \
+    "${HOME:-}/.pi/agent/skills" \
+    "${HOME:-}/.agents/skills"
+}
+
+assert_no_live_writes() {
+  local path entry entries target resolved live
+  local targets=("$STAGING_DIR" "$RECEIPT_DIR")
+  case "$COMMAND" in
+    adopt|rollback) targets+=("$ROOT" "$PINS_FILE" "$(kun_loader_path)") ;;
+  esac
+  for target in "${targets[@]}"; do
+    resolved=$(realpath -m -- "$target") || die "cannot resolve $target"
+    while IFS= read -r path; do
+      [ -n "$path" ] || continue
+      entries=$path
+      if [ -e "$path" ]; then
+        entries=$(find -L "$path" -print) || die "cannot inspect live store: $path"
+      fi
+      while IFS= read -r entry; do
+        live=$(realpath -m -- "$entry") || die "cannot resolve live path: $entry"
+        case "$resolved/" in "$live/"*) die "write target overlaps a live skill store: $target" ;; esac
+        case "$live/" in "$resolved/"*) die "checkout or write target is live-linked: $target" ;; esac
+      done <<<"$entries"
+    done < <(forbidden_live_paths)
+  done
+}
+
+native_matt_owner() {
+  local native=
+  if [ -f "$SETTINGS_FILE" ]; then
+    native=$(jq -r '.extraKnownMarketplaces.mattpocock.autoUpdate // empty' "$SETTINGS_FILE" 2>/dev/null || true)
+  fi
+  case "$native" in
+    true) printf 'claude-marketplace-autoupdate\n' ;;
+    false) printf 'disabled\n' ;;
+    *) printf 'unestablished\n' ;;
+  esac
+}
+
+emit() {
+  if [ "$MODE" = json ]; then printf '%s\n' "$1" | jq .
+  else printf '%s\n' "$1" | jq -r '
+      "command=" + (.command // "")
+      + " status=" + (.status // "")
+      + (if .detail then " - " + .detail else "" end),
+      ((.tools // [])[] | .name + ": " + .status + (if .detail then " - " + .detail else "" end))
+    '
+  fi
+}
+
+ensure_dir() {
+  mkdir -p "$1" || die "could not create $1"
+}
+
+write_receipt() {
+  local payload=$1 dest tmp
+  ensure_dir "$RECEIPT_DIR"
+  dest=$2
+  tmp=$(mktemp "$RECEIPT_DIR/.receipt.XXXXXX") || die 'could not create receipt'
+  printf '%s\n' "$payload" >"$tmp"
+  chmod 600 "$tmp"
+  mv -f "$tmp" "$dest"
+}
+
+replace_assignment() {
+  local file=$1 key=$2 value=$3 tmp
+  grep -Eq "^${key}=" "$file" || return 1
+  tmp=$(mktemp "${file}.XXXXXX") || return 1
+  awk -v k="$key" -v v="$value" '
+    BEGIN { pat = "^" k "=" }
+    $0 ~ pat { print k "=" v; next }
+    { print }
+  ' "$file" >"$tmp"
+  chmod --reference="$file" "$tmp"
+  mv -f "$tmp" "$file"
+}
+
+license_status() {
+  local repo=$1 json key
+  if ! json=$(run_timed "$NETWORK_TIMEOUT" "$CURL_BIN" -fsSL --connect-timeout 5 --max-time "$NETWORK_TIMEOUT" \
+    -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$repo" 2>/dev/null); then
+    printf 'unknown\n'
+    return 0
+  fi
+  key=$(printf '%s' "$json" | jq -er '
+    if type != "object" or (has("license") | not) then "unknown"
+    elif .license == null then "none-declared"
+    elif (.license | type) != "object" then "unknown"
+    elif (.license.spdx_id | type) != "string" then "unknown"
+    elif .license.spdx_id == "" or .license.spdx_id == "NOASSERTION" then "unknown"
+    else .license.spdx_id end' 2>/dev/null) || key=unknown
+  printf '%s\n' "$key"
+}
+
+stage_kun() {
+  local dest=$STAGING_DIR/kun loader_url tmp
+  loader_url="https://raw.githubusercontent.com/${KUN_LOADER_REPO}/main/${KUN_LOADER_FILE}"
+  ensure_dir "$dest"
+  tmp=$(mktemp "$dest/.loader.XXXXXX") || return 1
+  if ! run_timed "$NETWORK_TIMEOUT" "$CURL_BIN" -fsSL --connect-timeout 5 --max-time "$NETWORK_TIMEOUT" "$loader_url" -o "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  [ -s "$tmp" ] || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$dest/SKILL.md"
+  run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" ls-remote "https://github.com/${KUN_LOADER_REPO}.git" HEAD 2>/dev/null \
+    | awk '$2 == "HEAD" {print $1; exit}' >"$dest/upstream-commit" || true
+  license_status "$KUN_LOADER_REPO" >"$dest/license"
+}
+
+stage_matt() {
+  local dest=$STAGING_DIR/mattpocock-skills url archive
+  local version=${1:-$MATTPOCOCK_SKILLS_VERSION}
+  ensure_dir "$dest"
+  url="https://github.com/${MATTPOCOCK_SKILLS_REPO}/archive/refs/tags/v${version}.tar.gz"
+  archive=$(mktemp "$dest/.archive.XXXXXX") || return 1
+  if ! run_timed "$NETWORK_TIMEOUT" "$CURL_BIN" -fsSL --connect-timeout 5 --max-time "$NETWORK_TIMEOUT" "$url" -o "$archive"; then
+    rm -f "$archive"
+    return 1
+  fi
+  mkdir -p "$dest/tree"
+  if ! "$TAR_BIN" -xzf "$archive" -C "$dest/tree" --strip-components=1; then
+    rm -f "$archive"
+    return 1
+  fi
+  rm -f "$archive"
+  printf '%s\n' "$version" >"$dest/version"
+  license_status "$MATTPOCOCK_SKILLS_REPO" >"$dest/license"
+}
+
+latest_matt_version() {
+  local json tag
+  json=$(run_timed "$NETWORK_TIMEOUT" "$CURL_BIN" -fsSL --connect-timeout 5 --max-time "$NETWORK_TIMEOUT" \
+    -H 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/${MATTPOCOCK_SKILLS_REPO}/releases/latest" 2>/dev/null || true)
+  tag=$(printf '%s' "$json" | jq -er 'select(.draft == false and .prerelease == false) | .tag_name | select(type == "string")' 2>/dev/null || true)
+  tag=${tag#v}
+  printf '%s' "$tag" | grep -Eq '^[0-9]+(\.[0-9]+){2,3}$' || return 1
+  printf '%s\n' "$tag"
+}
+
+verify_worker_skills() (
+  local tmp loader layout name output directory
+  command -v pi >/dev/null 2>&1 || { printf 'Pi is required for worker loading checks\n'; exit 1; }
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/skill-worker-check.XXXXXX") || exit 1
+  trap 'rm -rf "$tmp"' EXIT
+  cat >"$tmp/probe.ts" <<'TS'
+import { readFileSync, writeFileSync, realpathSync, statSync } from "node:fs";
+import { join } from "node:path";
+export default function (pi: any) {
+  pi.registerCommand("capture-skill-discovery", {
+    handler: async (_args: string, ctx: any) => {
+      try {
+        const expected = JSON.parse(readFileSync(process.env.SKILL_CHECK_MANIFEST!, "utf8"));
+        const skills = pi.getCommands().filter((command: any) => command.source === "skill");
+        const errors: string[] = [];
+        for (const entry of expected) {
+          const skill = skills.find((command: any) => command.name === `skill:${entry.name}`);
+          if (!skill || !skill.description?.trim()) {
+            errors.push(`missing discovered skill: ${entry.name}`);
+            continue;
+          }
+          const path = skill.sourceInfo.path;
+          const file = statSync(path).isDirectory() ? join(path, "SKILL.md") : path;
+          if (realpathSync(file) !== realpathSync(entry.file)) errors.push(`wrong source: ${entry.name}`);
+          const document = readFileSync(entry.file, "utf8");
+          const end = document.indexOf("\n---\n");
+          const body = end >= 0 ? document.slice(end + 5).trim() : "";
+          if (!body || ctx.getSystemPrompt().includes(body)) errors.push(`invalid startup body: ${entry.name}`);
+        }
+        if (skills.length !== expected.length) errors.push("unexpected skill or negative control discovered");
+        writeFileSync(process.env.SKILL_CHECK_OUTPUT!, JSON.stringify({errors}));
+        process.exit(errors.length ? 1 : 0);
+      } catch (error) {
+        writeFileSync(process.env.SKILL_CHECK_OUTPUT!, JSON.stringify({errors: [String(error)]}));
+        process.exit(1);
+      }
+    },
+  });
+}
+TS
+  for layout in .pi/agent/skills .claude/skills; do
+    mkdir -p "$tmp/home/$layout" "$tmp/home/.pi/agent"
+    directory=$tmp/home/$layout
+    printf '[]\n' >"$tmp/manifest.json"
+    for loader in "$@"; do
+      loader=$(realpath -- "$loader") || exit 1
+      name=$(basename "$(dirname "$loader")")
+      mkdir -p "$directory/$name"
+      ln -s "$loader" "$directory/$name/SKILL.md"
+      jq --arg name "$name" --arg file "$loader" '. + [{name:$name,file:$file}]' \
+        "$tmp/manifest.json" >"$tmp/manifest.next"
+      mv "$tmp/manifest.next" "$tmp/manifest.json"
+    done
+    mkdir -p "$directory/malformed-control"
+    printf '%s\n' '---' 'name: malformed-control' '---' 'Missing description.' >"$directory/malformed-control/SKILL.md"
+    if [ "$layout" = .pi/agent/skills ]; then
+      printf '{}\n' >"$tmp/home/.pi/agent/settings.json"
+    else
+      jq -n --arg path "$directory" '{skills:[$path]}' >"$tmp/home/.pi/agent/settings.json"
+    fi
+    output=$tmp/result
+    rm -f "$output"
+    if ! (cd "$tmp" && printf '{"type":"prompt","message":"/capture-skill-discovery"}\n' |
+      HOME="$tmp/home" PI_CODING_AGENT_DIR="$tmp/home/.pi/agent" \
+      SKILL_CHECK_MANIFEST="$tmp/manifest.json" SKILL_CHECK_OUTPUT="$output" \
+      timeout 30 pi --mode rpc --offline --no-session \
+        --no-context-files --no-prompt-templates --no-themes --no-extensions \
+        --extension "$tmp/probe.ts" >"$tmp/stdout" 2>"$tmp/stderr") ||
+      ! jq -e '.errors == []' "$output" >/dev/null 2>&1; then
+      printf 'Worker discovery failed through %s\n' "$layout"
+      cat "$tmp/stderr"
+      [ ! -f "$output" ] || cat "$output"
+      exit 1
+    fi
+    rm -rf "$directory"
+  done
+)
+
+verify_kun_staged() {
+  local loader=$STAGING_DIR/kun/SKILL.md license
+  [ -f "$loader" ] || { printf 'staged Kun loader missing\n'; return 1; }
+  grep -Fq 'https://raw.githubusercontent.com/kunchenguid/kun/main/ENTRY.md' "$loader" || { printf 'staged Kun loader is missing living ENTRY.md URL\n'; return 1; }
+  grep -Fq 'https://raw.githubusercontent.com/kunchenguid/kun/main/TOOLS.md' "$loader" || { printf 'staged Kun loader is missing living TOOLS.md URL\n'; return 1; }
+  grep -Fq 'https://raw.githubusercontent.com/kunchenguid/kun/main/OPINIONS.md' "$loader" || { printf 'staged Kun loader is missing living OPINIONS.md URL\n'; return 1; }
+  grep -Fq 'https://raw.githubusercontent.com/kunchenguid/kun/main/VOICE.md' "$loader" || { printf 'staged Kun loader is missing living VOICE.md URL\n'; return 1; }
+  if grep -Eq '^# (Entry|Opinions|Voice|Tools)\b' "$loader"; then
+    printf 'staged Kun loader appears to vendor living reference documents\n'
+    return 1
+  fi
+  license=$(tr -d '\n' <"$STAGING_DIR/kun/license" 2>/dev/null || true)
+  case "$license" in
+    none-declared) : ;;
+    unknown|'') printf 'Kun license status is unknown; adoption requires a successful license read\n'; return 1 ;;
+    *) printf 'Kun license changed to %s; adoption requires license review\n' "$license"; return 1 ;;
+  esac
+  if [ -f "$ROOT/AGENTS.md" ] && grep -Fqx -- '## /kun' "$ROOT/AGENTS.md" 2>/dev/null; then
+    printf 'Kun loader must stay opt-in and out of always-loaded AGENTS.md\n'
+    return 1
+  fi
+  verify_worker_skills "$loader"
+}
+
+verify_matt_staged() {
+  local tree=$STAGING_DIR/mattpocock-skills/tree tmp out
+  local required skill license
+  local worker_skills=()
+  [ -d "$tree" ] || { printf 'staged Matt plugin tree missing\n'; return 1; }
+  license=$(tr -d '\n' <"$STAGING_DIR/mattpocock-skills/license" 2>/dev/null || true)
+  case "$license" in
+    MIT) : ;;
+    unknown|'') printf 'Matt license status is unknown; adoption requires a successful license read\n'; return 1 ;;
+    *) printf 'Matt license changed to %s; adoption requires license review\n' "$license"; return 1 ;;
+  esac
+  [ -f "$tree/LICENSE" ] || { printf 'staged Matt plugin is missing LICENSE\n'; return 1; }
+  grep -q 'MIT License' "$tree/LICENSE" || { printf 'staged Matt plugin license is not MIT\n'; return 1; }
+  for required in grilling domain-modeling ask-matt; do
+    skill=
+    for skill in "$tree/skills/"*"/$required/SKILL.md"; do
+      [ -f "$skill" ] || continue
+      break
+    done
+    [ -f "${skill:-}" ] || { printf 'staged Matt plugin lacks required Firstmate skill %s\n' "$required"; return 1; }
+    worker_skills+=("$skill")
+  done
+  verify_worker_skills "${worker_skills[@]}" || return 1
+  [ -x "$FIRSTMATE_DESIGN_SKILLS" ] || { printf 'Firstmate fm-design-skills.sh is not executable at %s\n' "$FIRSTMATE_DESIGN_SKILLS"; return 1; }
+  tmp=$(mktemp "${TMPDIR:-/tmp}/matt-registry.XXXXXX") || return 1
+  jq -cn --arg path "$tree" --arg version "$(cat "$STAGING_DIR/mattpocock-skills/version" 2>/dev/null || printf unknown)" \
+    '{version:2,plugins:{"mattpocock-skills@mattpocock":[{installPath:$path,version:$version,lastUpdated:"1970-01-01T00:00:00Z"}]}}' >"$tmp"
+  if ! out=$(FM_MATTPOCOCK_PLUGIN_REGISTRY="$tmp" "$FIRSTMATE_DESIGN_SKILLS" check 2>&1); then
+    rm -f "$tmp"
+    printf 'Firstmate design-skills check refused the staged plugin: %s\n' "$out"
+    return 1
+  fi
+  rm -f "$tmp"
+  printf '%s\n' "$out" | grep -q 'mattpocock design skills ready:' || {
+    printf 'Firstmate design-skills check produced no ready line\n'
+    return 1
+  }
+  return 0
+}
+
+cmd_check() {
+  local kun_loader latest_kun latest_matt native
+  kun_loader=$(kun_loader_path)
+  latest_kun=unknown
+  latest_matt=unknown
+  if [ -f "$STAGING_DIR/kun/SKILL.md" ]; then latest_kun=$(hash_file "$STAGING_DIR/kun/SKILL.md"); fi
+  if [ -f "$STAGING_DIR/mattpocock-skills/version" ]; then latest_matt=$(cat "$STAGING_DIR/mattpocock-skills/version"); fi
+  native=$(native_matt_owner)
+  emit "$(jq -n --arg command check --arg status ok \
+    --arg kun_current "$(hash_file "$kun_loader" 2>/dev/null || printf unknown)" \
+    --arg kun_pin "$KUN_LOADER_SHA256" \
+    --arg matt_pin "$MATTPOCOCK_SKILLS_VERSION" \
+    --arg native "$native" \
+    --arg staged_kun "$latest_kun" --arg staged_matt "$latest_matt" \
+    '{schema:"skill-reviewed-updates.v1",command:$command,status:$status,
+      native_matt_writer:$native,
+      tools:[
+        {name:"kun-loader",pinned:$kun_pin,current:$kun_current,staged:$staged_kun,status:"checked",
+         detail:"living ENTRY/TOOLS/OPINIONS/VOICE documents refresh on invocation and are not this pin"},
+        {name:"mattpocock-skills",pinned:$matt_pin,staged:$staged_matt,status:"checked",
+         detail:(if $native == "claude-marketplace-autoupdate" then "native Claude marketplace autoUpdate owns live plugin writes" else "native marketplace autoUpdate is not the established live writer" end)}
+      ]}')"
+}
+
+cmd_stage() {
+  local matt_version kun_status matt_status kun_detail matt_detail
+  assert_no_live_writes
+  if [ "$DRY_RUN" -eq 1 ]; then
+    emit "$(jq -n '{schema:"skill-reviewed-updates.v1",command:"stage",status:"would_stage",detail:"dry-run writes neither staging nor live skill stores"}')"
+    return 0
+  fi
+  ensure_dir "$STAGING_DIR"
+  kun_status=staged
+  matt_status=staged
+  kun_detail=
+  matt_detail=
+  if ! stage_kun; then
+    kun_status=failed
+    kun_detail='upstream Kun loader could not be staged; current repository loader is unchanged'
+  fi
+  if ! matt_version=$(latest_matt_version); then
+    matt_status=failed
+    matt_detail='latest Matt skills release could not be verified; current pin is unchanged'
+  elif ! stage_matt "$matt_version"; then
+    matt_status=failed
+    matt_detail='Matt skills archive could not be staged; current pin is unchanged'
+  fi
+  local overall=ok
+  [ "$kun_status" = staged ] && [ "$matt_status" = staged ] || overall=failed
+  emit "$(jq -n --arg status "$overall" --arg ks "$kun_status" --arg ms "$matt_status" \
+    --arg kd "$kun_detail" --arg md "$matt_detail" --arg native "$(native_matt_owner)" \
+    '{schema:"skill-reviewed-updates.v1",command:"stage",status:$status,native_matt_writer:$native,
+      tools:[
+        {name:"kun-loader",status:$ks} + (if $kd == "" then {} else {detail:$kd} end),
+        {name:"mattpocock-skills",status:$ms} + (if $md == "" then {} else {detail:$md} end)
+      ]}')"
+  [ "$overall" = ok ]
+}
+
+cmd_verify() {
+  local kun_status matt_status kun_detail matt_detail overall
+  assert_no_live_writes
+  kun_status=verified
+  matt_status=verified
+  kun_detail=
+  matt_detail=
+  if ! kun_detail=$(verify_kun_staged 2>&1); then
+    kun_status=failed
+  else
+    kun_detail='loader still fetches living documents and does not vendor them'
+  fi
+  if ! matt_detail=$(verify_matt_staged 2>&1); then
+    matt_status=failed
+  else
+    matt_detail='Firstmate design-skills check accepted the staged plugin'
+  fi
+  overall=ok
+  [ "$kun_status" = verified ] && [ "$matt_status" = verified ] || overall=failed
+  emit "$(jq -n --arg status "$overall" --arg ks "$kun_status" --arg ms "$matt_status" \
+    --arg kd "$kun_detail" --arg md "$matt_detail" --arg native "$(native_matt_owner)" \
+    '{schema:"skill-reviewed-updates.v1",command:"verify",status:$status,native_matt_writer:$native,
+      tools:[
+        {name:"kun-loader",status:$ks,detail:$kd},
+        {name:"mattpocock-skills",status:$ms,detail:$md}
+      ]}')"
+  [ "$overall" = ok ]
+}
+
+adopt_kun() {
+  local loader dest prior_hash new_hash commit test_file docs
+  dest=$(kun_loader_path)
+  loader=$STAGING_DIR/kun/SKILL.md
+  [ -f "$loader" ] || return 1
+  prior_hash=$(hash_file "$dest")
+  new_hash=$(hash_file "$loader")
+  commit=$(tr -d '\n' <"$STAGING_DIR/kun/upstream-commit" 2>/dev/null || true)
+  [ -n "$commit" ] || commit=$KUN_LOADER_REV
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '%s\n' "$prior_hash"
+    return 0
+  fi
+  cp -f "$dest" "$STAGING_DIR/kun/prior.SKILL.md"
+  cp -f "$loader" "$dest"
+  replace_assignment "$PINS_FILE" KUN_LOADER_SHA256 "$new_hash" || return 1
+  replace_assignment "$PINS_FILE" KUN_LOADER_REV "$commit" || return 1
+  test_file=$ROOT/tests/kun-skill.test.sh
+  if [ -f "$test_file" ]; then
+    replace_assignment "$test_file" EXPECTED_SHA256 "$new_hash" || true
+  fi
+  docs=$ROOT/docs/agents.md
+  if [ -f "$docs" ]; then
+    tmp=$(mktemp "${docs}.XXXXXX")
+    sed -e "s/${KUN_LOADER_SHA256}/${new_hash}/g" -e "s/${KUN_LOADER_REV}/${commit}/g" "$docs" >"$tmp"
+    chmod --reference="$docs" "$tmp"
+    mv -f "$tmp" "$docs"
+  fi
+  printf '%s\n' "$prior_hash"
+}
+
+adopt_matt() {
+  local version prior=$MATTPOCOCK_SKILLS_VERSION
+  version=$(tr -d '\n' <"$STAGING_DIR/mattpocock-skills/version" 2>/dev/null || true)
+  [ -n "$version" ] || return 1
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '%s\n' "$prior"
+    return 0
+  fi
+  replace_assignment "$PINS_FILE" MATTPOCOCK_SKILLS_VERSION "$version" || return 1
+  printf '%s\n' "$prior"
+}
+
+cmd_adopt() {
+  local kun_v matt_v kun_status matt_status kun_detail matt_detail prior_kun prior_matt receipt receipt_json overall
+  assert_no_live_writes
+  kun_status=preserved
+  matt_status=preserved
+  kun_detail=
+  matt_detail=
+  if ! kun_v=$(verify_kun_staged 2>&1); then
+    kun_status=failed
+    kun_detail=$kun_v
+  fi
+  if ! matt_v=$(verify_matt_staged 2>&1); then
+    matt_status=failed
+    matt_detail=$matt_v
+  fi
+  if [ "$kun_status" != failed ]; then
+    if prior_kun=$(adopt_kun); then
+      if [ "$DRY_RUN" -eq 1 ]; then kun_status=would_adopt
+      else kun_status=adopted
+      fi
+      kun_detail='repository Kun loader and pin records updated; live skill paths were not written'
+    else
+      kun_status=failed
+      kun_detail='Kun adoption failed; current repository loader is unchanged'
+      dest=$(kun_loader_path)
+      if [ -f "$STAGING_DIR/kun/prior.SKILL.md" ]; then
+        cp -f "$STAGING_DIR/kun/prior.SKILL.md" "$dest"
+      fi
+    fi
+  fi
+  if [ "$matt_status" != failed ]; then
+    if prior_matt=$(adopt_matt); then
+      if [ "$DRY_RUN" -eq 1 ]; then matt_status=would_adopt
+      else matt_status=adopted
+      fi
+      matt_detail='repository Matt pin updated; live plugin cache was not written because native marketplace autoUpdate owns those bytes'
+    else
+      matt_status=failed
+      matt_detail='Matt pin adoption failed; current pin is unchanged'
+    fi
+  fi
+  overall=ok
+  printf '%s\n' "$kun_status" "$matt_status" | grep -Eq 'failed' && overall=failed
+  receipt=$RECEIPT_DIR/skill-reviewed-$(date -u +%Y%m%dT%H%M%SZ).json
+  receipt_json=$(jq -n --arg status "$overall" --arg kun "$kun_status" --arg matt "$matt_status" \
+    --arg prior_kun "${prior_kun:-}" --arg prior_matt "${prior_matt:-}" \
+    --arg kun_pin "$KUN_LOADER_SHA256" --arg matt_pin "$MATTPOCOCK_SKILLS_VERSION" \
+    --arg native "$(native_matt_owner)" --arg dest "$(kun_loader_path)" --arg pins "$PINS_FILE" \
+    --arg prior_loader "$STAGING_DIR/kun/prior.SKILL.md" \
+    '{schema:"skill-reviewed-updates-receipt.v1",status:$status,native_matt_writer:$native,
+      tools:{
+        "kun-loader":{status:$kun,prior:$prior_kun,target_pin:$kun_pin,file:$dest,prior_file:$prior_loader},
+        "mattpocock-skills":{status:$matt,prior:$prior_matt,target_pin:$matt_pin,file:$pins}
+      }}')
+  if [ "$DRY_RUN" -eq 0 ]; then
+    write_receipt "$receipt_json" "$receipt"
+  fi
+  emit "$(jq -n --argjson receipt "$receipt_json" --arg command adopt --arg receipt_path "$receipt" \
+    --arg kd "$kun_detail" --arg md "$matt_detail" \
+    --arg ks "$kun_status" --arg ms "$matt_status" \
+    '$receipt + {command:$command,receipt:$receipt_path,detail:"live skill stores are never adoption targets",
+      tools:[
+        {name:"kun-loader",status:$ks,detail:$kd},
+        {name:"mattpocock-skills",status:$ms,detail:$md}
+      ]}')"
+  [ "$overall" = ok ]
+}
+
+cmd_rollback() {
+  local receipt=$ROLLBACK_RECEIPT prior_file dest prior_hash current_hash prior_matt
+  [ -f "$receipt" ] || die "receipt unavailable: $receipt"
+  assert_no_live_writes
+  dest=$(jq -er '.tools["kun-loader"].file' "$receipt")
+  [ "$(realpath -m -- "$dest")" = "$(realpath -m -- "$(kun_loader_path)")" ] || die 'receipt targets a different checkout'
+  prior_file=$(jq -r '.tools["kun-loader"].prior_file // empty' "$receipt")
+  prior_hash=$(jq -r '.tools["kun-loader"].prior // empty' "$receipt")
+  prior_matt=$(jq -r '.tools["mattpocock-skills"].prior // empty' "$receipt")
+  if [ "$ATTENDED" -eq 0 ]; then
+    emit "$(jq -n --arg receipt "$receipt" '{schema:"skill-reviewed-updates.v1",command:"rollback",status:"check_only",receipt:$receipt,detail:"omit --attended to inspect; live skill stores stay untouched"}')"
+    return 0
+  fi
+  if [ -n "$prior_file" ] && [ -f "$prior_file" ]; then
+    current_hash=$(hash_file "$dest")
+    if [ -n "$prior_hash" ] && [ "$current_hash" != "$prior_hash" ]; then
+      cp -f "$prior_file" "$dest"
+      replace_assignment "$PINS_FILE" KUN_LOADER_SHA256 "$prior_hash" || true
+    fi
+  fi
+  if [ -n "$prior_matt" ]; then
+    replace_assignment "$PINS_FILE" MATTPOCOCK_SKILLS_VERSION "$prior_matt" || true
+  fi
+  emit "$(jq -n --arg receipt "$receipt" '{schema:"skill-reviewed-updates.v1",command:"rollback",status:"rolled_back",receipt:$receipt,detail:"repository records restored from receipt; live skill stores were not written"}')"
+}
+
+assert_mutation_targets
+assert_no_live_writes
+case "$COMMAND" in
+  check) cmd_check ;;
+  stage) cmd_stage ;;
+  verify) cmd_verify ;;
+  adopt) cmd_adopt ;;
+  rollback) cmd_rollback ;;
+esac
