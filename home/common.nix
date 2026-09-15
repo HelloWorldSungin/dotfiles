@@ -91,7 +91,7 @@ in
 
   # --------------------------------------------------- codex context window
   # ~/.codex/config.toml is machine-maintained (project trust entries, hook
-  # approvals, TUI preferences), so home-manager owns exactly one key in it via
+  # approvals, TUI preferences), so home-manager owns three context policy keys via
   # an atomic idempotent merge rather than taking over the file.
   home.activation.codexContextWindow =
     lib.hm.dag.entryAfter [ "writeBoundary" ] ''

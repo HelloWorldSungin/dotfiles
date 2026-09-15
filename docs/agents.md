@@ -145,18 +145,41 @@ Firstmate design-skills check against that tree, and on success updates only
 autoUpdate requires writing machine-owned `~/.claude/settings.json`. This
 repository ships that policy and does not apply that live settings write.
 
-## GPT long context (Sol, Terra and Astra)
+## GPT long context and compaction
 
-The Codex subscription backend catalog defaults Sol, Terra, Luna, and Astra
-to 272,000 tokens (`context_window = 272000`), and each of them separately
-advertises `max_context_window = 872000`. The two harnesses opt into the
-wider window independently and now disagree on purpose: Pi keeps the 872,000
-override, while Codex returns to the 272,000 catalog default.
+The installed Codex 0.154.0 catalog defaults Sol, Terra, Luna and Astra to
+272,000 tokens and advertises `max_context_window = 872000`. Home Manager
+opts Codex into that larger window and a 500,000-token compaction threshold.
 
-| Harness | Mechanism | Effective window |
+| Harness | Mechanism | Effective policy |
 |---------|-----------|------------------|
-| pi | `pi/models.json` → `~/.pi/agent/models.json`, `providers.openai-codex.modelOverrides` | **872,000** for `gpt-5.6-sol`, `gpt-5.6-terra` and `gpt-6-astra` (per-model override; Luna and every other model in the catalog keep the openai-codex built-in 272,000) |
-| codex | global `model_context_window` in `~/.codex/config.toml` (committed fallback `272000`, overridable via `CODEX_MODEL_CONTEXT_WINDOW` when running `bin/codex-set-context-window`) | **272,000** for every model on the catalog; `models-manager` clamps it to `min(configured, max_context_window)`, so raising the key above a model's `max_context_window` is silently held down to that ceiling |
+| Pi | `pi/models.json`, `providers.openai-codex.modelOverrides` | 872,000 for `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-6-astra`; Luna keeps 272,000. Native compaction reserve unchanged. |
+| Codex | `bin/codex-set-context-window` atomically merges three global keys into machine-maintained `~/.codex/config.toml` | `model_context_window = 872000`, `model_auto_compact_token_limit = 500000`, `model_auto_compact_token_limit_scope = "total"`. Native catalog clamping remains active. |
+
+Codex's 872,000 is its catalog window ceiling, with **828,400 usable tokens**
+after 5% headroom. It is not the public API's total context of 1,050,000 or
+its maximum output of 128,000. See the official model pages for
+[Astra](https://developers.openai.com/api/docs/models/gpt-6-astra),
+[Sol](https://developers.openai.com/api/docs/models/gpt-5.6-sol),
+[Terra](https://developers.openai.com/api/docs/models/gpt-5.6-terra) and
+[Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna).
+
+The global scope is intentional: Codex has no native `models.<id>` context
+configuration. On 0.154.0, an isolated strict app-server rejects that table;
+`config/read` accepts the three global settings. The window is clamped to
+each model's advertised maximum, and the compaction limit is clamped to 90%
+of its resolved window. All four selected models therefore have a 500,000
+limit; 272,000 models retain an earlier 244,800 limit. This also raises other
+catalog entries: daybreak-blue and codex-auto-review to 872,000, daybreak-red
+to 372,000, and GPT-5.4 to 872,000. Do not describe this as per-model policy.
+`total` counts the whole active context, unlike `body_after_prefix` growth
+counting. The threshold is checked at harness boundaries, not a guarantee
+that every oversized first prompt or tool result will succeed.
+
+The existing `CODEX_MODEL_CONTEXT_WINDOW` override remains available for
+explicit helper invocations; compaction stays at 500,000 with total scope
+and native clamping. Activation changes the next configuration read; tests
+build the generation without activating it or modifying live sessions.
 
 Pi's number is a *local* override: it governs pi's own context accounting,
 listing, and auto-compaction. Pi compacts when
@@ -175,33 +198,27 @@ clear of the 1,048,000-token rejection. It does not guarantee that every
 arbitrary oversized first prompt succeeds, and it does not identify any one
 historical session as the cause.
 
-Codex is different in mechanism: the verified 0.154.0 catalog advertises
-`max_context_window = 872000` for `gpt-6-astra`, `gpt-5.6-sol`,
-`gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-daybreak-blue-latest` and
-`codex-auto-review`, and `models-manager` applies
-`configured.min(max_context_window)`, so a configured value larger than the
-catalog ceiling is silently clamped. The committed fallback is 272,000 and
-that is the catalog's own `context_window` for Sol, Terra, Luna and Astra; `gpt-5.5`,
-`gpt-5.4-mini`, `gpt-5.2`, `gpt-daybreak-red-latest` (372,000), and `gpt-5.4`
-(advertised 1,000,000) all also resolve to 272,000 because the configured
-ceiling is at or below their `max_context_window`. Raising the configured
-key (up to a model's `max_context_window`) is the only way any model can
-exceed 272,000 in Codex today. The global key is the only mechanism
-Codex supports, so it is offered to the whole catalog without any per-model
-counterpart. Do not restore a Pi override above the 872,000 advertised
-maximum, and do not add a direct OpenAI API-key provider for this.
+To re-verify after an upgrade, use an isolated `CODEX_HOME` with
+`codex debug models --bundled`. Inspect `context_window`,
+`max_context_window`, and `effective_context_window_percent` for each exact
+model ID. This checks the installed catalog, not account-specific backend
+acceptance. The version-matched implementations are
+[model overrides](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/models-manager/src/model_info.rs)
+and [context/compaction limits](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/protocol/src/openai_models.rs).
+The [configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
+documents the global controls. Use a private `codex app-server --stdio
+--strict-config` plus `config/read` for executable schema validation;
+`debug` and `features` do not support strict mode in 0.154.0.
 
-To re-verify against an upgraded Codex, read the catalog the installed binary
-embeds rather than trusting this list (npm installs exactly one platform
-package, so the `codex-*` glob resolves on CT110 and the Mac alike). The
-installed binary is the authoritative source for the four models that
-matter: their catalog `context_window` is 272,000 and `max_context_window`
-is 872,000.
-
-```sh
-strings "$(dirname "$(readlink -f "$(command -v codex)")")"/../node_modules/@openai/codex-*/vendor/*/bin/codex \
-  | grep -E '^      "(slug|context_window|max_context_window)"'
-```
+Pi and Claude compaction settings remain unchanged. Pi 0.85.1 only exposes a
+reserve, not a per-model absolute threshold. A global 372,000 reserve would
+trigger above 500,000 on an 872,000 model but even at zero usage on Luna's
+272,000 window; it also increases summary output budgets. Claude Code's
+[calculation-window control](https://code.claude.com/docs/en/env-vars) is not
+an exact trigger: in 2.1.272, a 600,000 window with a 20,000 output reserve
+has a 567,000 base threshold after the summary buffer. Model-window clamping,
+percentage overrides and precompute behavior can lower it further. No
+600,000 Claude setting is installed by this policy.
 
 On 2026-09-10, the installed 0.153.4 binary and an isolated, registry-integrity
 verified 0.154.0 platform artifact both advertised **872,000** for Sol, Terra,
@@ -220,13 +237,13 @@ the whole request. Pi's override does not change the selected model or effort.
 **Activation:** run `bash ~/dotfiles/rebuild.sh`. `~/.pi/agent/models.json` is a
 live symlink into the repo, and `~/.codex/config.toml` is patched by a
 home-manager activation step (`bin/codex-set-context-window`) that merges only
-that one key - the file stays machine-owned, so project trust entries, hook
+those three keys - the file stays machine-owned, so project trust entries, hook
 approvals and TUI preferences are untouched, and repeat rebuilds are a no-op.
 An activation step has no removal path the way a declared file does: dropping it
-from `home/common.nix` leaves the key behind, so back the setting out by editing
+from `home/common.nix` leaves the keys behind, so back the policy out by editing
 `~/.codex/config.toml` by hand.
-Both tools read their config at startup, so **start a new session** to pick the
-change up; no model reselection is needed.
+Use a new Codex session after activation to pick up the policy. Pi also reloads
+its models file when opening `/model`; this change does not edit that file.
 
 ## Pi default and supervision models
 

@@ -1,42 +1,54 @@
 #!/usr/bin/env bash
-# Own exactly one setting in the machine-maintained ~/.codex/config.toml:
-# the global `model_context_window`.
+# Own three settings in the machine-maintained ~/.codex/config.toml:
+# global context window, auto-compaction token limit and total counting scope.
 #
 # Codex writes that file itself (project trust entries, hook approvals, TUI
 # preferences), so it must never be replaced or symlinked to a repo file.
-# This performs a narrowly scoped, atomic, idempotent merge of the single
-# owned key and leaves every other line byte-identical.
+# This performs a narrowly scoped, atomic, idempotent merge of the three
+# owned keys and leaves every other line byte-identical.
 #
 # Placement rule: TOML top-level keys must appear before the first table
 # header, so the key is written into (or prepended to) the pre-table region.
 set -euo pipefail
 
-KEY="model_context_window"
-VALUE="${CODEX_MODEL_CONTEXT_WINDOW:-272000}"
+VALUE="${CODEX_MODEL_CONTEXT_WINDOW:-872000}"
+# Preserve the existing window override; the compaction policy stays fixed.
+[[ "$VALUE" =~ ^[1-9][0-9]*$ ]] || { echo "invalid context window: $VALUE" >&2; exit 2; }
 CONFIG="${CODEX_CONFIG_FILE:-${HOME}/.codex/config.toml}"
 
 mkdir -p "$(dirname "$CONFIG")"
 [ -f "$CONFIG" ] || : > "$CONFIG"
 
-new=$(awk -v key="$KEY" -v value="$VALUE" '
-  BEGIN { in_top = 1; done = 0; last_top = 0; n = 0 }
+new=$(awk -v value="$VALUE" '
+  BEGIN {
+    in_top = 1; last_top = 0; n = 0
+    keys[1] = "model_context_window"
+    keys[2] = "model_auto_compact_token_limit"
+    keys[3] = "model_auto_compact_token_limit_scope"
+    values[1] = value; values[2] = "500000"; values[3] = "\"total\""
+  }
+  function missing( k) {
+    for (k = 1; k <= 3; k++) if (!done[k]) print keys[k] " = " values[k]
+  }
   {
     n = NR
     line[NR] = $0
     if (in_top && $0 ~ /^[[:space:]]*\[/) in_top = 0
     if (in_top) {
-      if ($0 ~ "^[[:space:]]*" key "[[:space:]]*=") {
-        line[NR] = key " = " value
-        done = 1
+      for (k = 1; k <= 3; k++) {
+        if ($0 ~ "^[[:space:]]*" keys[k] "[[:space:]]*=") {
+          line[NR] = keys[k] " = " values[k]
+          done[k] = 1
+        }
       }
       if ($0 ~ /[^[:space:]]/) last_top = NR
     }
   }
   END {
-    if (!done && last_top == 0) print key " = " value
+    if (last_top == 0) missing()
     for (i = 1; i <= n; i++) {
       print line[i]
-      if (!done && i == last_top) print key " = " value
+      if (i == last_top) missing()
     }
   }
 ' "$CONFIG")
