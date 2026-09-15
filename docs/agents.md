@@ -210,15 +210,14 @@ documents the global controls. Use a private `codex app-server --stdio
 --strict-config` plus `config/read` for executable schema validation;
 `debug` and `features` do not support strict mode in 0.154.0.
 
-Pi and Claude compaction settings remain unchanged. Pi 0.85.1 only exposes a
+Pi compaction settings remain unchanged. Pi 0.85.1 only exposes a
 reserve, not a per-model absolute threshold. A global 372,000 reserve would
 trigger above 500,000 on an 872,000 model but even at zero usage on Luna's
-272,000 window; it also increases summary output budgets. Claude Code's
-[calculation-window control](https://code.claude.com/docs/en/env-vars) is not
-an exact trigger: in 2.1.272, a 600,000 window with a 20,000 output reserve
-has a 567,000 base threshold after the summary buffer. Model-window clamping,
-percentage overrides and precompute behavior can lower it further. No
-600,000 Claude setting is installed by this policy.
+272,000 window; it also increases summary output budgets. Independently of
+Codex's context policy, the [Claude calculation-window default](#claude-calculation-window)
+adds an absent 600,000 window setting. Its approximate 567,000-587,000 base
+threshold depends on output reservation; model clamping and earlier triggers
+still apply. It is neither an exact trigger nor a guaranteed minimum.
 
 On 2026-09-10, the installed 0.153.4 binary and an isolated, registry-integrity
 verified 0.154.0 platform artifact both advertised **872,000** for Sol, Terra,
