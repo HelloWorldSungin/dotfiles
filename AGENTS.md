@@ -61,8 +61,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `common.nix` and `sungin-ct110.nix` consume them through the `devTools` module
   argument, so the host module owns only its timer and zsh startup wiring.
 - `bin/dev-tools-apply-updates` is the guarded, opt-in companion that applies only
-  the two safe tiers the checker tracks (Firstmate exact fast-forward plus six
-  allowlisted npm-global tools); it delegates detection to the checker, independently
+  Firstmate exact fast-forward and six allowlisted npm-global tools; explicit
+  invocation adds idle-only no-mistakes binary updates and durable one-shot retry
+  obligations (see `docs/dev-tool-versions.md`). It delegates detection to the checker, independently
   re-verifies exact artifacts, refuses when any
   Firstmate worker lane is in flight (a `state/*.meta` file, mirroring
   `firstmate/bin/fm-supervision-lib.sh`), and is packaged on PATH with no timer.

@@ -20,7 +20,7 @@ let
   # runs is the pinned one and keeps its ambient measurement - they are wrapper
   # inputs too, but they are deliberately not in the manifest.
   closureOnlyInputs = {
-    inherit (pkgs) coreutils curl diffutils gawk gnugrep gnused gnutar gzip;
+    inherit (pkgs) coreutils curl diffutils gawk gnugrep gnused gnutar gzip util-linux;
   };
   userEnvInputs = {
     inherit (pkgs) git jq;
@@ -97,7 +97,7 @@ let
       ${builtins.readFile ../bin/dev-tools-apply-updates}
     '';
     bashOptions = [ ]; # Applies each tier independently and handles failures itself.
-    runtimeInputs = pick [ "coreutils" "gawk" "git" "gnugrep" "gnused" "gnutar" "gzip" "jq" "nodejs_22" ]
+    runtimeInputs = pick [ "coreutils" "curl" "gawk" "git" "gnugrep" "gnused" "gnutar" "gzip" "jq" "nodejs_22" "util-linux" ]
       ++ [ checker ];
   };
 

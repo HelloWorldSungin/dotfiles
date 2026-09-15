@@ -427,7 +427,7 @@ pass 'unknown detection source refuses every mutation'
 
 [ ! -s "$LIFECYCLE_LOG" ] || fail 'Herdr or no-mistakes lifecycle command was ever invoked'
 help=$($APPLY --help)
-case "$help" in *'MUST NEVER install, update, invoke, reload, stop, or restart'*) : ;; *) fail 'operator contract omits the runtime-hosting safety boundary' ;; esac
+case "$help" in *'Herdr remains attended-only and is never invoked or changed here.'*) : ;; *) fail 'operator contract omits the runtime-hosting safety boundary' ;; esac
 pass 'Herdr and the shared no-mistakes daemon are absent from apply behavior'
 
 PACKAGED_APPLY="$TMP_ROOT/packaged-dev-tools-apply-updates"
@@ -442,7 +442,7 @@ packaged_help=$("$PACKAGED_APPLY" --help)
 if printf '%s\n' "$packaged_help" | grep -Eq '/nix/store/|env bash'; then
   fail 'the packaged --help leaks wrapper exports or the interpreter line'
 fi
-case "$packaged_help" in *'MUST NEVER install, update, invoke, reload, stop, or restart'*) : ;; *) fail 'the packaged --help omits the runtime-hosting safety boundary' ;; esac
+case "$packaged_help" in *'Herdr remains attended-only and is never invoked or changed here.'*) : ;; *) fail 'the packaged --help omits the runtime-hosting safety boundary' ;; esac
 pass 'the packaged --help prints only the operator contract'
 
 # `tests/*.test.sh` is this repository's only test-discovery convention - there is

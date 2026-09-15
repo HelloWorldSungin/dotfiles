@@ -219,7 +219,7 @@ quota_detail=$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | selec
 
 help=$(run_stripped --help)
 case "$help" in
-  *'MUST NEVER install, update, invoke, reload, stop, or restart'*) : ;;
+  *'Herdr remains attended-only and is never invoked or changed here.'*) : ;;
   *) fail 'a stripped PATH left the packaged --help unable to print the operator contract' ;;
 esac
 pass 'the packaged updater runs entirely from its declared closure'
