@@ -1,54 +1,66 @@
 #!/usr/bin/env bash
-# Own exactly one setting in the machine-maintained ~/.codex/config.toml:
-# the global `model_context_window`.
-#
-# Codex writes that file itself (project trust entries, hook approvals, TUI
-# preferences), so it must never be replaced or symlinked to a repo file.
-# This performs a narrowly scoped, atomic, idempotent merge of the single
-# owned key and leaves every other line byte-identical.
-#
-# Placement rule: TOML top-level keys must appear before the first table
-# header, so the key is written into (or prepended to) the pre-table region.
+# Merge only Codex's three global context settings; preserve all other TOML.
 set -euo pipefail
+python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import tempfile
+import tomllib
 
-KEY="model_context_window"
-VALUE="${CODEX_MODEL_CONTEXT_WINDOW:-272000}"
-CONFIG="${CODEX_CONFIG_FILE:-${HOME}/.codex/config.toml}"
+value = os.environ.get('CODEX_MODEL_CONTEXT_WINDOW') or '872000'
+if not re.fullmatch(r'[1-9][0-9]*', value):
+    raise ValueError(f'invalid context window: {value}')
+path = Path(os.environ.get('CODEX_CONFIG_FILE') or str(Path.home() / '.codex/config.toml'))
+owned = {'model_context_window': int(value),
+         'model_auto_compact_token_limit': 500000,
+         'model_auto_compact_token_limit_scope': 'total'}
+original = path.read_bytes() if path.exists() else b''
+text = original.decode('utf-8')
+current = tomllib.loads(text)  # Refuse malformed TOML before writing anything.
+if all(current.get(key) == value for key, value in owned.items()):
+    raise SystemExit(0)
 
-mkdir -p "$(dirname "$CONFIG")"
-[ -f "$CONFIG" ] || : > "$CONFIG"
+# Find each owned root assignment with the TOML parser, so quoted keys,
+# multiline values, and lookalike assignments inside strings/tables are safe.
+# A complete prefix marks a statement boundary, including standalone comments.
+lines = text.splitlines(keepends=True)
+previous_boundary = 0
+seen = set()
+remove = set()
+prefix = ''
+for end, line in enumerate(lines, 1):
+    prefix += line
+    try:
+        parsed = tomllib.loads(prefix)
+    except tomllib.TOMLDecodeError:
+        continue
+    for key in owned.keys() - seen:
+        if key in parsed:
+            if type(parsed[key]) is not type(owned[key]):
+                raise ValueError(f'{key} has an invalid top-level type')
+            remove.update(range(previous_boundary, end))
+            seen.add(key)
+    previous_boundary = end
 
-new=$(awk -v key="$KEY" -v value="$VALUE" '
-  BEGIN { in_top = 1; done = 0; last_top = 0; n = 0 }
-  {
-    n = NR
-    line[NR] = $0
-    if (in_top && $0 ~ /^[[:space:]]*\[/) in_top = 0
-    if (in_top) {
-      if ($0 ~ "^[[:space:]]*" key "[[:space:]]*=") {
-        line[NR] = key " = " value
-        done = 1
-      }
-      if ($0 ~ /[^[:space:]]/) last_top = NR
-    }
-  }
-  END {
-    if (!done && last_top == 0) print key " = " value
-    for (i = 1; i <= n; i++) {
-      print line[i]
-      if (!done && i == last_top) print key " = " value
-    }
-  }
-' "$CONFIG")
-
-# Idempotence: never rewrite (and never churn the mtime) when nothing changed.
-if printf '%s\n' "$new" | cmp -s - "$CONFIG"; then
-  exit 0
-fi
-
-tmp=$(mktemp "${CONFIG}.XXXXXX")
-trap 'rm -f "$tmp"' EXIT
-printf '%s\n' "$new" > "$tmp"
-chmod --reference="$CONFIG" "$tmp" 2>/dev/null || true
-mv -f "$tmp" "$CONFIG"
-trap - EXIT
+rendered = ''.join(f'{key} = {json.dumps(value)}\n'
+                   for key, value in owned.items())
+rendered += ''.join(line for index, line in enumerate(lines) if index not in remove)
+if tomllib.loads(rendered) != current | owned:
+    raise ValueError('merge changed unrelated TOML')
+path.parent.mkdir(parents=True, exist_ok=True)
+fd, temporary = tempfile.mkstemp(prefix=path.name + '.', dir=path.parent)
+try:
+    with os.fdopen(fd, 'wb') as output:
+        output.write(rendered.encode('utf-8'))
+        output.flush()
+        os.fsync(output.fileno())
+        if path.exists():
+            os.fchmod(output.fileno(), stat.S_IMODE(path.stat().st_mode))
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+PY

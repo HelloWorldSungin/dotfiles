@@ -83,9 +83,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   only the Pi default model/thinking keys and those two pins. See `docs/agents.md`.
 - `~/.codex/config.toml` is machine-maintained (project trust, hook approvals,
   TUI state) and must never be replaced or symlinked to a repo file. Home Manager
-  merges its context key through `bin/codex-set-context-window` and model
-  defaults through `bin/codex-set-model-defaults`; `docs/agents.md` records the
-  GPT long-context values (Sol, Terra, Astra) for both pi and Codex, and the
+  merges three context/compaction keys through `bin/codex-set-context-window`
+  and model/effort defaults through `bin/codex-set-model-defaults`;
+  `docs/agents.md` records the GPT context and compaction policy and the
   command that re-verifies Codex's advertised ceilings against an upgraded
   binary.
 - Nix flakes only read git-tracked files: `git add` any new `bin/`/`home/` file

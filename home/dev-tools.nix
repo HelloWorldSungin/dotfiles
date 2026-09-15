@@ -74,7 +74,7 @@ let
   codexSetContextWindow = pkgs.writeShellApplication {
     name = "codex-set-context-window";
     text = builtins.readFile ../bin/codex-set-context-window;
-    runtimeInputs = pick [ "coreutils" "diffutils" "gawk" ];
+    runtimeInputs = pick [ "python3" ];
   };
 
   codexSetModelDefaults = pkgs.writeShellApplication {

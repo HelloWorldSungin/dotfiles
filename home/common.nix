@@ -91,7 +91,8 @@ in
 
   # --------------------------------------------------- codex context window
   # ~/.codex/config.toml is machine-maintained (project trust entries, hook
-  # approvals, TUI preferences), so home-manager merges its owned keys via
+  # approvals, TUI preferences), so home-manager merges three context policy keys
+  # here and model/effort defaults in the following activation step via
   # an atomic idempotent merge rather than taking over the file.
   home.activation.codexContextWindow =
     lib.hm.dag.entryAfter [ "writeBoundary" ] ''
