@@ -71,6 +71,12 @@ let
     runtimeInputs = pick [ "coreutils" "gnugrep" "nodejs_22" ];
   };
 
+  claudeSetCompactionWindow = pkgs.writeShellApplication {
+    name = "claude-set-compaction-window";
+    text = builtins.readFile ../bin/claude-set-compaction-window;
+    runtimeInputs = pick [ "python3" ];
+  };
+
   codexSetContextWindow = pkgs.writeShellApplication {
     name = "codex-set-context-window";
     text = builtins.readFile ../bin/codex-set-context-window;
@@ -126,7 +132,7 @@ in
   _module.args.devTools = {
     inherit
       closureOnlyInputs userEnvInputs closureManifest pins flakeLock nvimPluginLock
-      checker pinnedInstaller claudeSpendPinned codexSetContextWindow codexSetModelDefaults piSetModelDefaults applyUpdates
+      checker pinnedInstaller claudeSpendPinned claudeSetCompactionWindow codexSetContextWindow codexSetModelDefaults piSetModelDefaults applyUpdates
       skillReviewedUpdates;
   };
 }

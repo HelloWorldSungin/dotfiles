@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Add a default without taking ownership of Claude's machine-maintained settings.
+set -euo pipefail
+python3 - <<'PYTHON'
+import json
+import os
+from pathlib import Path
+import stat
+import tempfile
+
+path = Path(os.environ.get('CLAUDE_CONFIG_DIR', str(Path.home() / '.claude'))) / 'settings.json'
+current = json.loads(path.read_text()) if path.exists() else {}
+if not isinstance(current, dict):
+    raise ValueError('Claude settings must be an object')
+env = current.get('env', {})
+if not isinstance(env, dict):
+    raise ValueError('Claude settings env must be an object')
+# Preserve explicit values, including empty/invalid ones: do not silently repair
+# user policy. A dedicated setting also expresses an existing window choice.
+if 'CLAUDE_CODE_AUTO_COMPACT_WINDOW' in env or 'autoCompactWindow' in current:
+    raise SystemExit(0)
+current['env'] = dict(env, CLAUDE_CODE_AUTO_COMPACT_WINDOW='600000')
+path.parent.mkdir(parents=True, exist_ok=True)
+fd, temporary = tempfile.mkstemp(prefix=path.name + '.', dir=path.parent)
+try:
+    with os.fdopen(fd, 'w') as output:
+        json.dump(current, output, indent=2)
+        output.write('\n')
+        output.flush()
+        os.fsync(output.fileno())
+        if path.exists():
+            os.fchmod(output.fileno(), stat.S_IMODE(path.stat().st_mode))
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+PYTHON

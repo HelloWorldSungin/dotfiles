@@ -15,6 +15,7 @@ in
     checker
     pinnedInstaller
     claudeSpendPinned
+    claudeSetCompactionWindow
   ]) ++ (with pkgs; [
     gh
     lazygit
@@ -88,6 +89,12 @@ in
   # 272,000 default and every built-in model's pricing metadata is preserved.
   # See docs/agents.md.
   home.file.".pi/agent/models.json".source = link "pi/models.json";
+
+  # Claude owns settings.json; add only the absent calculation-window default.
+  home.activation.claudeCompactionWindow =
+    lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      $DRY_RUN_CMD ${devTools.claudeSetCompactionWindow}/bin/claude-set-compaction-window
+    '';
 
   # --------------------------------------------------- codex context window
   # ~/.codex/config.toml is machine-maintained (project trust entries, hook
