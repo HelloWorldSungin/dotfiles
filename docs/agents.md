@@ -239,6 +239,8 @@ live symlink into the repo, and `~/.codex/config.toml` is patched by a
 home-manager activation step (`bin/codex-set-context-window`) that merges only
 those three keys - the file stays machine-owned, so project trust entries, hook
 approvals and TUI preferences are untouched, and repeat rebuilds are a no-op.
+The parser-backed merge preserves quoted keys and multiline instruction values,
+checks that unrelated TOML values survive, and refuses malformed input before writing.
 An activation step has no removal path the way a declared file does: dropping it
 from `home/common.nix` leaves the keys behind, so back the policy out by editing
 `~/.codex/config.toml` by hand.

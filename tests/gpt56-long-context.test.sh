@@ -414,3 +414,71 @@ else
 fi
 
 printf '\nall GPT long-context tests passed\n'
+
+# Exercise real helper entry points against valid TOML syntax that line matching
+# cannot distinguish from owned assignments. Compare the entire parsed document.
+python3 - "$ROOT" "$TMP_ROOT" <<'PYTEST' || fail "parser-backed context preservation regression"
+import itertools
+import os
+from pathlib import Path
+import stat
+import subprocess
+import sys
+import tomllib
+
+root, temporary = map(Path, sys.argv[1:])
+context = root / 'bin/codex-set-context-window'
+defaults = root / 'bin/codex-set-model-defaults'
+source = """
+# Preserve this comment.
+"model_context_window" = 272000
+'model_auto_compact_token_limit' = 123
+"model_auto_compact_token_limit_scope" = '''
+body_after_prefix'''
+developer_instructions = """
+source += '"""\nmodel_context_window = 123\nmodel_auto_compact_token_limit = 42\n'
+source += 'model_auto_compact_token_limit_scope = "body_after_prefix"\n[looks.like.a.table]\n"""\n'
+source += """
+model = "gpt-5.6-sol"
+model_reasoning_effort = "high"
+[profiles.saved]
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
+model_context_window = 272000
+[projects."/example"]
+trust_level = "trusted"
+"""
+original = tomllib.loads(source)
+owned = dict(model_context_window=872000, model_auto_compact_token_limit=500000,
+             model_auto_compact_token_limit_scope='total')
+path = temporary / 'parser-preservation.toml'
+env = dict(os.environ, CODEX_CONFIG_FILE=str(path))
+env.pop('CODEX_MODEL_CONTEXT_WINDOW', None)
+for order in itertools.permutations([context, defaults]):
+    path.write_text(source)
+    path.chmod(0o640)
+    for helper in order:
+        subprocess.run([str(helper)], env=env, check=True)
+    expected = original | owned | dict(model='gpt-6-astra', model_reasoning_effort='low')
+    assert tomllib.loads(path.read_text()) == expected
+    assert '# Preserve this comment.\n' in path.read_text()
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+    before, inode = path.read_bytes(), path.stat().st_ino
+    for helper in order:
+        subprocess.run([str(helper)], env=env, check=True)
+    assert path.read_bytes() == before and path.stat().st_ino == inode
+
+# The context helper alone must preserve model and effort, including overrides.
+path.write_text(source)
+subprocess.run([str(context)], env=env | {'CODEX_MODEL_CONTEXT_WINDOW': '400000'}, check=True)
+assert tomllib.loads(path.read_text()) == original | owned | {'model_context_window': 400000}
+
+for malformed in ['model = "unterminated\n', 'model_context_window = 1\n"model_context_window" = 2\n']:
+    path.write_text(malformed)
+    before, inode = path.read_bytes(), path.stat().st_ino
+    result = subprocess.run([str(context)], env=env, capture_output=True)
+    assert result.returncode != 0
+    assert path.read_bytes() == before and path.stat().st_ino == inode
+print('quoted keys, multiline strings, semantic preservation, both helper orders, override, mode, idempotence and malformed refusal passed')
+PYTEST
+pass "parser-backed context merge preserves valid TOML and refuses malformed input"
