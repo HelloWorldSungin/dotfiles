@@ -245,6 +245,19 @@ from `home/common.nix` leaves the keys behind, so back the policy out by editing
 Use a new Codex session after activation to pick up the policy. Pi also reloads
 its models file when opening `/model`; this change does not edit that file.
 
+## Codex model defaults
+
+`bin/codex-set-model-defaults` merges top-level `model = "gpt-6-astra"`
+and `model_reasoning_effort = "low"` during Home Manager activation. It preserves
+other settings and table-local profile values, and does not rewrite unchanged
+files. `CODEX_CONFIG_FILE` selects an isolated file for testing; otherwise it
+uses `$CODEX_HOME/config.toml` or `~/.codex/config.toml`.
+
+Codex CLI `--model` and `-c model_reasoning_effort='"medium"'` still override
+these defaults for a run, as do explicitly selected profile files. Rebuilds
+restore the managed defaults; existing sessions keep their own selections.
+This activation is ordered after the independent context-window merge.
+
 ## Pi default and supervision models
 
 | Role | Model | Thinking | Owner |
