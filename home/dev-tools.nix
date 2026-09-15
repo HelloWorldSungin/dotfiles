@@ -20,7 +20,7 @@ let
   # runs is the pinned one and keeps its ambient measurement - they are wrapper
   # inputs too, but they are deliberately not in the manifest.
   closureOnlyInputs = {
-    inherit (pkgs) coreutils curl diffutils gawk gnugrep gnused gnutar gzip;
+    inherit (pkgs) coreutils curl diffutils gawk gnugrep gnused gnutar gzip python3;
   };
   userEnvInputs = {
     inherit (pkgs) git jq;
@@ -77,6 +77,12 @@ let
     runtimeInputs = pick [ "coreutils" "diffutils" "gawk" ];
   };
 
+  codexSetModelDefaults = pkgs.writeShellApplication {
+    name = "codex-set-model-defaults";
+    text = builtins.readFile ../bin/codex-set-model-defaults;
+    runtimeInputs = pick [ "python3" ];
+  };
+
   piSetModelDefaults = pkgs.writeShellApplication {
     name = "pi-set-model-defaults";
     text = builtins.readFile ../bin/pi-set-model-defaults;
@@ -120,7 +126,7 @@ in
   _module.args.devTools = {
     inherit
       closureOnlyInputs userEnvInputs closureManifest pins flakeLock nvimPluginLock
-      checker pinnedInstaller claudeSpendPinned codexSetContextWindow piSetModelDefaults applyUpdates
+      checker pinnedInstaller claudeSpendPinned codexSetContextWindow codexSetModelDefaults piSetModelDefaults applyUpdates
       skillReviewedUpdates;
   };
 }
