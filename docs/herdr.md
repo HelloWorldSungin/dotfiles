@@ -73,3 +73,51 @@ server before expecting clean rendering.
 1. Twingate on, SSH app (Termius/Blink/etc.) -> `sungin@192.168.68.110`.
 2. Run `herdr`. Same session, same state, smaller window.
 3. Detach or just close the app - nothing dies.
+
+## Updating from 0.8.2 to 0.9.0
+
+The repository already pins 0.9.0 and its publisher checksums in
+`config/dev-tools-versions.sh`. Confirm the current stable version against
+[Herdr's manifest](https://herdr.dev/latest.json) before any later update.
+The pinned installer installs only when absent; Home Manager activation does
+not upgrade an existing Herdr binary.
+
+Check the installed client and the running server separately:
+
+```sh
+herdr update --help
+herdr status client --json
+herdr status server --json
+```
+
+Repeat server checks for each named session with a trailing `--session NAME`.
+Workers under a Firstmate lab contract must use its guarded helper for these
+commands and all lab lifecycle operations.
+
+**Keep the 0.8.2 client while active servers still run 0.8.2.** The 0.9.0
+client uses protocol 22; the 0.8.2 server uses protocol 20. A named-session
+test confirmed that `pane list` returns `protocol_mismatch` with this pairing.
+Even replacing only the executable would break subsequent fleet CLI calls.
+The compatible-server update behavior described in the
+[0.9.0 release notes](https://github.com/herdrdev/herdr/releases/tag/v0.9.0)
+does not make this older server compatible.
+
+In 0.8.2, `herdr update` refuses to run inside Herdr. Outside Herdr, a plain
+update with a running target asks to stop its sessions and pane processes;
+noninteractive input declines installation. `--handoff` opts into server
+lifecycle changes and is not proof that active work will survive. Do not
+bypass the inside-Herdr guard or accept a stop while fleet work is active.
+
+The [publisher installer](https://herdr.dev/install.sh) supports
+`HERDR_INSTALL_DIR` for staging a checksum-verified binary separately. Its
+inspected installation path downloads and installs the executable without
+starting, stopping, or updating a server. Review the script again before
+using a later revision. Staging does not activate the new version: leave the
+staged directory off the fleet's PATH until client/server compatibility is
+established.
+
+Completing this transition requires an attended server upgrade after active
+work has safely finished, or a separately authorized preservation procedure
+proven for this exact version pair. Stopping the old server exits its pane
+processes; saved layouts and resumable agent histories do not preserve those
+processes. A lab test never authorizes stopping or handing off a live session.
