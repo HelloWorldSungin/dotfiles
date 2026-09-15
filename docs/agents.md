@@ -267,3 +267,60 @@ defaults in `bin/pi-set-model-defaults` to keep one.
 **Activation:** run `bash ~/dotfiles/rebuild.sh`, then start a new Pi session.
 Firstmate reads the pins each time it builds a supervision branch. Like the Codex
 step above, removing the activation step leaves the last written values behind.
+
+## Claude calculation window
+
+`bin/claude-set-compaction-window` adds
+`env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = "600000"` to the machine-owned
+`~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`). It atomically
+merges only an absent default, preserves unrelated settings and permissions,
+and leaves any existing window env entry or top-level `autoCompactWindow`
+untouched, including empty or invalid values. It does not disable compaction,
+change output reserves, or change Pi or Codex settings.
+
+This is a **calculation window**, not an exact trigger or guaranteed minimum.
+The installed Claude Code 2.1.272 resolver bounds a valid env window to
+100000-1000000 and then clamps it to model capacity. At a 600000 effective
+window, its base threshold is 567000 with the maximum 20000 output reservation,
+or 587000 with no output reservation, after the additional 13000 summary
+buffer. A 200000 model with 20000 reserved remains at a 167000 base threshold.
+Percentage overrides can lower this; precompute experiments, reactive
+compaction and other model/account behavior can trigger earlier. These numbers
+are isolated calculations, not a live-account or backend guarantee.
+
+Precedence follows [Claude's environment reference](https://code.claude.com/docs/en/env-vars):
+settings-file `env` values replace inherited shell values. Higher-priority
+settings layers can override the same env key (project/local, CLI settings and
+managed policy according to [settings precedence](https://code.claude.com/docs/en/settings#settings-precedence)).
+A valid window env value wins over the dedicated `autoCompactWindow` setting;
+therefore a higher-layer dedicated setting alone cannot override this env
+default. Override the same env key instead. The helper preserves existing
+user-file explicit settings; it does not inspect or rewrite project or managed
+policy. An existing `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` remains effective.
+
+### Activation and verification
+
+The helper is packaged on PATH and wired into Home Manager activation. For this
+bounded change, after the PR is merged and the intended checkout is fast-forwarded,
+run only `bash ~/dotfiles/bin/claude-set-compaction-window` when applying the
+Claude default is authorized. No blanket Home Manager switch is required for
+that direct invocation; it needs Python 3. A later normally authorized rebuild
+installs the packaged command. Do not activate unrelated pending source changes.
+
+Future Claude launches reading that config directory receive the default, unless
+overridden as above. **Claude can also reapply changed settings-file env entries
+to running sessions.** This is not guaranteed to affect only future sessions;
+if existing sessions must remain untouched, defer the settings write until they
+have ended naturally. No restart, live settings write or Home Manager activation
+was performed during implementation.
+
+`tests/claude-compaction-window.test.sh` exercises the real merge in temporary
+config directories. For installed 2.1.272 evidence, run
+`node tests/fixtures/claude-compaction-probe.cjs /path/to/claude/2.1.272`.
+The probe checks installed schema declarations and executes extracted native
+resolver/reserve/threshold functions against helper-generated fixtures, including
+an explicit override, smaller-model clamping and percentage/precompute lowering.
+Model metadata and decimal parsing are fixture dependencies. It reads the binary
+without editing or launching Claude, makes no model calls, and intentionally
+fails if its version-specific source anchors change. This is source/schema
+inspection plus isolated function execution, not full session ingestion.
