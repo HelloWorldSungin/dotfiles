@@ -38,7 +38,7 @@ TARGET_COMMIT=$(git -C "$SEED" rev-parse HEAD)
 git -C "$SEED" push -q "file://$REMOTE" main
 
 PINS="$TMP_ROOT/pins.sh"
-cp "$ROOT/config/dev-tools-versions.sh" "$PINS"
+sed 's/|latest|publisher|/|3.4.5|sha512-ZGV0ZXJtaW5pc3RpYw==|/g' "$ROOT/config/dev-tools-versions.sh" >"$PINS"
 printf '\nFIRSTMATE_REV=%s\n' "$TARGET_COMMIT" >>"$PINS"
 # shellcheck source=../config/dev-tools-versions.sh
 # shellcheck disable=SC1091

@@ -42,7 +42,7 @@ mkdir -p "$STATE" "$PREFIX/bin" "$FAKEBIN" "$RECEIPTS" "$TMP_ROOT/home"
 GIT_LOG="$TMP_ROOT/git.log"; : >"$GIT_LOG"
 
 write_pins() { # firstmate rev
-  cp "$ROOT/config/dev-tools-versions.sh" "$PINS"
+  sed 's/|latest|publisher|/|1.2.3|sha512-ZGV0ZXJtaW5pc3RpYw==|/g' "$ROOT/config/dev-tools-versions.sh" >"$PINS"
   printf '\nFIRSTMATE_REV=%s\n' "$1" >>"$PINS"
 }
 

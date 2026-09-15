@@ -48,7 +48,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   3. A running herdr does not automatically re-read `config/herdr/config.toml`
      even though the file is a live symlink; use `herdr server reload-config`.
      Never restart the captain's herdr to apply a config - it hosts the live fleet.
-- `config/dev-tools-versions.sh` owns external tool pins and source metadata.
+- `config/dev-tools-versions.sh` owns external tool pins and source policies;
+  `docs/dev-tool-versions.md` explains the axi/Herdr latest-stable exceptions
+  and externally managed WezTerm. Herdr activation remains separately attended.
   The read-only checker lives in `bin/dev-tools-check-updates` and its
   deterministic self-test is in `tests/`. `home/dev-tools.nix` is the single
   owner of every packaged dev-tool derivation (pin artifacts, checker, pinned

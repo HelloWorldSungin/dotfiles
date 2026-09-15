@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the repository's externally distributed tool pins without upgrading
+# Install the repository's externally distributed tool policies without upgrading
 # anything already present. Intended for bootstrap on a fresh user account.
 set -euo pipefail
 
@@ -21,13 +21,15 @@ export PATH="$LOCAL_BIN:$NPM_PREFIX/bin:$PATH"
 
 usage() {
   cat <<'EOF'
-dev-tools-install-pinned - install exact fresh-machine developer-tool pins.
+dev-tools-install-pinned - install fresh-machine developer-tool policies.
 
 Usage: dev-tools-install-pinned [--dry-run] [--only TOOL]
 
 Existing commands and repositories are never upgraded or replaced. Exact npm
 versions are re-verified against their recorded registry integrity before npm
-installs them. Release archives are checked against publisher checksums. Herdr
+installs them. The five axi tools resolve latest stable and its integrity first.
+Herdr resolves its stable manifest asset and checksum. Other release archives
+retain recorded publisher checksums. Herdr
 and no-mistakes are install-if-absent only; this command never starts, stops,
 restarts, reloads, updates, or runs setup hooks for either service.
 
@@ -77,6 +79,16 @@ install_npm_pin() {
     say "skip $name: installed $actual (pin $version; compare with dev-tools-check-updates)"
     return 0
   fi
+  if [ "$version" = latest ]; then
+    [ "$integrity" = publisher ] || { say "refuse $name: moving policy requires publisher integrity discovery" >&2; return 1; }
+    [ "$_channel" = default ] || { say "refuse $name: unsupported moving channel" >&2; return 1; }
+    registry_json=$($NPM_BIN view "$package@latest" version dist.integrity --json) || return 1
+    version=$(printf '%s' "$registry_json" | jq -er '.version | strings') || return 1
+    integrity=$(printf '%s' "$registry_json" | jq -er '."dist.integrity" // .dist.integrity | strings') || return 1
+    printf '%s\n' "$integrity" | grep -Eq '^sha512-[A-Za-z0-9+/]+={0,2}$' || {
+      say "refuse $name: invalid publisher integrity" >&2; return 1;
+    }
+  fi
   safe_version "$version" || { say "refuse $name: unsafe exact version '$version'" >&2; return 1; }
   if [ "$DRY_RUN" -eq 1 ]; then
     say "would install $package@$version (integrity $integrity)"
@@ -103,11 +115,11 @@ platform() {
 }
 
 sha_for() {
-  local wanted=$1 row key tree_sha nm_sha herdr_sha
+  local wanted=$1 row key tree_sha nm_sha
   for row in "${RELEASE_SHA256_PINS[@]}"; do
-    IFS='|' read -r key tree_sha nm_sha herdr_sha <<<"$row"
+    IFS='|' read -r key tree_sha nm_sha <<<"$row"
     [ "$key" = "$PLATFORM" ] || continue
-    case "$wanted" in treehouse) printf '%s\n' "$tree_sha" ;; no-mistakes) printf '%s\n' "$nm_sha" ;; herdr) printf '%s\n' "$herdr_sha" ;; esac
+    case "$wanted" in treehouse) printf '%s\n' "$tree_sha" ;; no-mistakes) printf '%s\n' "$nm_sha" ;; esac
     return 0
   done
   return 1
@@ -168,14 +180,12 @@ install_release_tool() {
 }
 
 install_herdr() {
-  local expected url tmp actual target
+  local expected url tmp actual target json version
   selected herdr || return 0
-  safe_version "$HERDR_VERSION" || { say "refuse herdr: unsafe stable version '$HERDR_VERSION'" >&2; return 1; }
   if command -v herdr >/dev/null 2>&1; then
-    say "skip herdr: installed $(installed_version herdr || printf unknown) (pin $HERDR_VERSION; attended-only)"
+    say "skip herdr: installed $(installed_version herdr || printf unknown) (latest stable policy; attended-only)"
     return 0
   fi
-  expected=$(sha_for herdr) || { say "refuse herdr: unsupported platform $PLATFORM" >&2; return 1; }
   case "$PLATFORM" in
     linux-amd64) target=linux-x86_64 ;;
     linux-arm64) target=linux-aarch64 ;;
@@ -183,20 +193,28 @@ install_herdr() {
     darwin-arm64) target=macos-aarch64 ;;
     *) say "refuse herdr: unsupported platform $PLATFORM" >&2; return 1 ;;
   esac
-  url="https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-${target}"
+  json=$($CURL_BIN -fsSL --connect-timeout 10 --max-time 120 "$HERDR_LATEST_MANIFEST_URL") || return 1
+  version=$(printf '%s' "$json" | jq -er '.version | strings') || return 1
+  safe_version "$version" || { say 'refuse herdr: invalid stable manifest version' >&2; return 1; }
+  url=$(printf '%s' "$json" | jq -er --arg t "$target" '.assets[$t] | strings') || return 1
+  expected=$(printf '%s' "$json" | jq -er --arg t "$target" '.sha256[$t] | strings') || return 1
+  if [ "$url" != "https://github.com/herdrdev/herdr/releases/download/v${version}/herdr-${target}" ] ||
+     ! printf '%s\n' "$expected" | grep -Eq '^[0-9a-f]{64}$'; then
+    say 'refuse herdr: invalid publisher asset or checksum' >&2; return 1
+  fi
   if [ "$DRY_RUN" -eq 1 ]; then
-    say "would install herdr $HERDR_VERSION from $url (sha256 $expected; never start or restart it)"
+    say "would install herdr $version from $url (sha256 $expected; never start or restart it)"
     return 0
   fi
   tmp=$(mktemp "${TMPDIR:-/tmp}/herdr.XXXXXX")
-  fetch "$url" "$tmp"
+  fetch "$url" "$tmp" || { rm -f "$tmp"; return 1; }
   verify_sha256 "$tmp" "$expected" || { rm -f "$tmp"; say 'refuse herdr: publisher checksum mismatch' >&2; return 1; }
   mkdir -p "$LOCAL_BIN"
   $INSTALL_BIN -m 0755 "$tmp" "$LOCAL_BIN/herdr"
   rm -f "$tmp"
   actual=$(installed_version herdr || true)
-  [ "$actual" = "$HERDR_VERSION" ] || { say "refuse herdr: installed version '${actual:-unknown}' != pin $HERDR_VERSION" >&2; return 1; }
-  say "installed herdr $HERDR_VERSION without starting it"
+  [ "$actual" = "$version" ] || { say "refuse herdr: installed version '${actual:-unknown}' != pin $version" >&2; return 1; }
+  say "installed herdr $version without starting it"
 }
 
 install_antigravity() {

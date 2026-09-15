@@ -26,7 +26,9 @@ PINNED_HEAD=$(git -C "$SEED" rev-parse HEAD)
 git -C "$SEED" push -q "file://$REMOTE" main
 
 PINS="$TMP_ROOT/pins.sh"
-cp "$ROOT/config/dev-tools-versions.sh" "$PINS"
+# Exact policy overrides remain supported; the moving policy cases below
+# exercise discovery independently of these existing receipt/rollback tests.
+sed 's/|latest|publisher|/|1.2.3|sha512-ZGV0ZXJtaW5pc3RpYw==|/g' "$ROOT/config/dev-tools-versions.sh" >"$PINS"
 printf '\nFIRSTMATE_REV=%s\n' "$PINNED_HEAD" >>"$PINS"
 # shellcheck source=../config/dev-tools-versions.sh
 # shellcheck disable=SC1091
@@ -72,6 +74,7 @@ for row in "${NPM_TOOL_PINS[@]}"; do
   [ -n "$current" ] || current=unknown
   [ "$name" = quota-axi ] && [ -n "${TEST_QUOTA_CURRENT:-}" ] && current=$TEST_QUOTA_CURRENT
   latest=$pinned
+  [ "$latest" = latest ] && latest=1.2.3
   [ "$name" = quota-axi ] && [ -n "${TEST_STALE_CHECKER_LATEST:-}" ] && latest=$TEST_STALE_CHECKER_LATEST
   item=$(jq -cn --arg name "$name" --arg current "$current" --arg pinned "$pinned" --arg latest "$latest" \
     '{name:$name,current:$current,pinned:$pinned,latest_stable:$latest,status:(if $current==$pinned then "up_to_date" else "drifted" end)}')
@@ -102,12 +105,14 @@ if [ "$1" = view ]; then
     IFS='|' read -r name _command_name candidate pinned integrity guarded _channel <<<"$row"
     [ "$guarded" = yes ] || continue
     [ "$candidate" = "$package" ] || continue
+    if [ "$pinned" = latest ]; then pinned=1.2.3; integrity=sha512-ZGV0ZXJtaW5pc3RpYw==; fi
+    [ "$version" = latest ] && version=$pinned
     if [ "$version" != "$pinned" ]; then
       # The installed prior version, published with its own integrity.
       jq -cn --arg v "$version" --arg i "sha512-prior-$version" '{version:$v,"dist.integrity":$i}'
       exit 0
     fi
-    [ "$name" = "${TEST_BAD_PACKAGE:-}" ] && integrity=sha512-wrong
+    [ "$name" = "${TEST_BAD_PACKAGE:-}" ] && [ "$spec" != "$package@latest" ] && integrity=sha512-wrong
     jq -cn --arg v "$version" --arg i "$integrity" '{version:$v,"dist.integrity":$i}'
     exit 0
   done
@@ -118,6 +123,7 @@ if [ "$1" = install ]; then
   for row in "${NPM_TOOL_PINS[@]}"; do
     IFS='|' read -r _name command_name package pinned _integrity guarded _channel <<<"$row"
     [ "$guarded" = yes ] || continue
+    [ "$pinned" = latest ] && pinned=1.2.3
     [ "$spec" = "$package@$pinned" ] || continue
     mkdir -p "$NPM_CONFIG_PREFIX/bin"
     printf '#!/usr/bin/env bash\nprintf "%s %s\\n"\n' "$command_name" "$pinned" >"$NPM_CONFIG_PREFIX/bin/$command_name"
@@ -446,5 +452,38 @@ for suite in "$ROOT"/tests/*.test.sh; do
   [ -x "$suite" ] || fail "$(basename "$suite") is not directly executable, so tests/*.test.sh discovery cannot run it"
 done
 pass 'every test suite in tests/ can be invoked directly'
+
+# Exercise the repository's moving policy using the same isolated mutation,
+# lane, receipt and reversal machinery as exact overrides above.
+MOVING_PINS="$TMP_ROOT/moving-pins.sh"
+sed 's/|1.2.3|sha512-ZGV0ZXJtaW5pc3RpYw==|/|latest|publisher|/g' "$PINS" >"$MOVING_PINS"
+PINS=$MOVING_PINS
+seed_quota_prior
+: >"$NPM_LOG"
+TEST_STALE_CHECKER_LATEST=9.9.9
+json=$(run_apply --json --dry-run || true)
+unset TEST_STALE_CHECKER_LATEST
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')" = refused ] || fail 'moving policy accepted changed discovery'
+TEST_BAD_PACKAGE=quota-axi
+json=$(run_apply --json --dry-run || true)
+unset TEST_BAD_PACKAGE
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')" = refused ] || fail 'moving policy accepted exact integrity drift'
+printf 'lane\n' >"$STATE/stable-policy.meta"
+json=$(run_apply --json)
+rm "$STATE/stable-policy.meta"
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.status')" = deferred ] || fail 'moving policy ignored active lane'
+! grep -q '^install ' "$NPM_LOG" || fail 'moving policy refusals installed a package'
+json=$(run_apply --json)
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')" = applied ] || fail 'moving stable target was not applied'
+receipt=$(printf '%s' "$json" | jq -r '.receipt.path')
+jq -e '.tools[] | select(.name=="quota-axi") | .target == "1.2.3" and .target_evidence.integrity == "sha512-ZGV0ZXJtaW5pc3RpYw=="' "$receipt" >/dev/null || fail 'stable receipt did not bind exact artifact'
+: >"$NPM_LOG"
+json=$(run_apply --json)
+! grep -q '^install ' "$NPM_LOG" || fail 'stable rerun reinstalled converged tool'
+seed_prefix "$QUOTA_COMMAND" 9.9.9
+json=$(run_apply --json)
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')" = skipped ] || fail 'stable policy downgraded newer installed tool'
+[ ! -s "$LIFECYCLE_LOG" ] || fail 'stable apply invoked runtime-hosting service'
+pass 'moving stable policy binds receipts, rejects changed artifacts, preserves active lanes and avoids downgrades'
 
 printf '\nall dev-tools-apply-updates tests passed\n'
