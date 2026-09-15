@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Merge only Codex's global model/reasoning defaults; preserve all other TOML.
+set -euo pipefail
+python3 - <<'PY'
+import os
+from pathlib import Path
+import stat
+import tempfile
+import tomllib
+
+path = Path(os.environ.get('CODEX_CONFIG_FILE') or
+            str(Path(os.environ.get('CODEX_HOME') or str(Path.home() / '.codex')) / 'config.toml'))
+owned = {'model': 'gpt-6-astra', 'model_reasoning_effort': 'low'}
+original = path.read_bytes() if path.exists() else b''
+text = original.decode('utf-8')
+current = tomllib.loads(text)  # Refuse malformed TOML before writing anything.
+if all(current.get(key) == value for key, value in owned.items()):
+    raise SystemExit(0)
+
+# Find each owned root assignment with the TOML parser, so quoted keys,
+# multiline values, and lookalike assignments inside strings/tables are safe.
+# A complete prefix marks a statement boundary, including standalone comments.
+lines = text.splitlines(keepends=True)
+previous_boundary = 0
+seen = set()
+remove = set()
+prefix = ''
+for end, line in enumerate(lines, 1):
+    prefix += line
+    try:
+        parsed = tomllib.loads(prefix)
+    except tomllib.TOMLDecodeError:
+        continue
+    for key in owned.keys() - seen:
+        if key in parsed:
+            if not isinstance(parsed[key], str):
+                raise ValueError(f'{key} must be a top-level string')
+            remove.update(range(previous_boundary, end))
+            seen.add(key)
+    previous_boundary = end
+
+rendered = ''.join(f'{key} = "{value}"\n' for key, value in owned.items())
+rendered += ''.join(line for index, line in enumerate(lines) if index not in remove)
+if tomllib.loads(rendered) != current | owned:
+    raise ValueError('merge changed unrelated TOML')
+path.parent.mkdir(parents=True, exist_ok=True)
+fd, temporary = tempfile.mkstemp(prefix=path.name + '.', dir=path.parent)
+try:
+    with os.fdopen(fd, 'wb') as output:
+        output.write(rendered.encode('utf-8'))
+        output.flush()
+        os.fsync(output.fileno())
+        if path.exists():
+            os.fchmod(output.fileno(), stat.S_IMODE(path.stat().st_mode))
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+PY
