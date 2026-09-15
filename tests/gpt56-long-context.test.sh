@@ -5,7 +5,7 @@
 #   - the installed Pi package (from the npm prefix) applying them, and its
 #     shouldCompact threshold at contextWindow minus the configured reserve.
 #   - bin/codex-set-context-window: the narrowly scoped, atomic, idempotent
-#     merge of the single owned key into a machine-maintained config.toml.
+#     merge of the three owned keys into a machine-maintained config.toml.
 # No test touches the real ~/.codex or ~/.pi; every case uses a temp file.
 set -u
 
@@ -241,7 +241,7 @@ table_line=$(grep -n '^\[' "$cfg" | head -1 | cut -d: -f1)
 pass "model_context_window is placed in the top-level region"
 
 # Every pre-existing line survives byte-identically, in order.
-after_without_key=$(grep -v '^model_context_window = 872000$' "$cfg")
+after_without_key=$(grep -Ev '^model_(context_window|auto_compact_token_limit|auto_compact_token_limit_scope) = ' "$cfg")
 assert_eq "$after_without_key" "$before" "unrelated config content is preserved verbatim"
 pass "all unrelated and nested TOML content is preserved verbatim"
 
@@ -264,17 +264,43 @@ done
 assert_eq "$(grep -c '^model_context_window' "$cfg")" "1" "the key must not be duplicated"
 pass "repeated merges are idempotent and do not rewrite or duplicate the key"
 
-# An existing stale value is updated in place, not appended: the prior committed
-# default (872000) sitting in the config must be replaced by the current default
-# (272000) on the next merge, with no CODEX_MODEL_CONTEXT_WINDOW override.
-grep -qx 'model_context_window = 872000' "$cfg" \
-  || fail "stale-value fixture must start at 872000"
+# Existing owned values are replaced while unrelated nested keys stay intact.
+sed -i 's/model_context_window = 872000/model_context_window = 272000/; s/model_auto_compact_token_limit = 500000/model_auto_compact_token_limit = 200000/; s/"total"/"body_after_prefix"/' "$cfg"
 env -u CODEX_MODEL_CONTEXT_WINDOW CODEX_CONFIG_FILE="$cfg" "$MERGE" \
-  || fail "merge failed over a stale value"
-assert_eq "$(grep -c '^model_context_window' "$cfg")" "1" "stale value must be replaced, not appended"
-grep -qx 'model_context_window = 272000' "$cfg" \
-  || fail "stale 872000 was not corrected to 272000"
-pass "a stale 872000 value is corrected to the committed 272000 default"
+  || fail "merge failed over stale values"
+for setting in 'model_context_window = 872000' 'model_auto_compact_token_limit = 500000' 'model_auto_compact_token_limit_scope = "total"'; do
+  assert_eq "$(grep -Fxc "$setting" "$cfg")" "1" "stale setting must be replaced: $setting"
+done
+pass "all stale owned settings are replaced with the approved defaults"
+
+# Missing owned keys are filled without changing similarly named nested keys.
+partial="$TMP_ROOT/partial.toml"
+cat > "$partial" <<'TOML'
+model_auto_compact_token_limit = 123
+[example]
+model_auto_compact_token_limit = 456
+model_auto_compact_token_limit_scope = "body_after_prefix"
+TOML
+run_merge "$partial" || fail "partial-key merge failed"
+python3 - "$partial" <<'PYTEST' || fail "partial merge changed nested values or misplaced keys"
+import sys, tomllib
+with open(sys.argv[1], "rb") as f:
+    data = tomllib.load(f)
+assert data["model_context_window"] == 872000
+assert data["model_auto_compact_token_limit"] == 500000
+assert data["model_auto_compact_token_limit_scope"] == "total"
+assert data["example"] == {"model_auto_compact_token_limit": 456,
+                           "model_auto_compact_token_limit_scope": "body_after_prefix"}
+PYTEST
+pass "partial owned settings merge without changing nested keys"
+
+# Invalid override values must fail before creating or changing a config.
+invalid="$TMP_ROOT/invalid.toml"
+if CODEX_CONFIG_FILE="$invalid" CODEX_MODEL_CONTEXT_WINDOW='oops' "$MERGE" 2>/dev/null; then
+  fail "invalid window override was accepted"
+fi
+[ ! -e "$invalid" ] || fail "invalid override created a config"
+pass "invalid window override fails before writing"
 
 # A config.toml that opens directly with a table header still gets valid TOML.
 cfg2="$TMP_ROOT/table-first.toml"
@@ -284,24 +310,22 @@ assert_eq "$(head -1 "$cfg2")" "model_context_window = 872000" \
   "the key must be prepended above a leading table header"
 pass "a table-first config gets the key prepended, keeping it top-level"
 
-# A missing config.toml is created with just the owned key.
+expected_defaults='model_context_window = 872000
+model_auto_compact_token_limit = 500000
+model_auto_compact_token_limit_scope = "total"'
+# A missing config.toml is created with just the owned keys.
 cfg3="$TMP_ROOT/missing/config.toml"
 run_merge "$cfg3" || fail "merge failed on a missing config"
-assert_eq "$(cat "$cfg3")" "model_context_window = 872000" \
-  "a missing config is created containing only the owned key"
-pass "a missing config.toml is created with only the owned key"
+assert_eq "$(cat "$cfg3")" "$expected_defaults" \
+  "a missing config is created containing only the owned keys"
+pass "a missing config.toml is created with only the owned keys"
 
-# The value an activation actually writes is the script's own default: nothing
-# sets CODEX_MODEL_CONTEXT_WINDOW on the rebuild path, and every assertion above
-# pins it. `env -u` keeps that hermetic while covering the committed value -
-# 272000, the installed Codex 0.154.0 raw catalog's default context_window for
-# Sol, Terra, Luna and Astra (each of which advertises max_context_window 872000).
+# Activation writes the approved values without an environment override.
 cfg4="$TMP_ROOT/committed-default/config.toml"
 env -u CODEX_MODEL_CONTEXT_WINDOW CODEX_CONFIG_FILE="$cfg4" "$MERGE" \
   || fail "merge failed with CODEX_MODEL_CONTEXT_WINDOW unset"
-assert_eq "$(cat "$cfg4")" "model_context_window = 272000" \
-  "an activation with an empty environment must write the committed 272000 default"
-pass "the committed default is 272000, the installed Codex catalog's context_window"
+assert_eq "$(cat "$cfg4")" "$expected_defaults" "activation writes all approved defaults"
+pass "committed defaults are 872000 context and 500000 compaction with total scope"
 
 # Astra is covered by that one global key and nothing else. Run the merge over a
 # config that already selects Astra - the case where a per-model window would be
@@ -379,7 +403,7 @@ print(data["projects"]["/home/sungin/firstmate"]["trust_level"])
 print(data["tui"]["theme"]["name"])
 PY
 ) || fail "the merged config is not parseable TOML"
-  assert_eq "$parsed" "272000
+  assert_eq "$parsed" "872000
 gpt-5.6-sol
 True
 trusted
@@ -390,3 +414,71 @@ else
 fi
 
 printf '\nall GPT long-context tests passed\n'
+
+# Exercise real helper entry points against valid TOML syntax that line matching
+# cannot distinguish from owned assignments. Compare the entire parsed document.
+python3 - "$ROOT" "$TMP_ROOT" <<'PYTEST' || fail "parser-backed context preservation regression"
+import itertools
+import os
+from pathlib import Path
+import stat
+import subprocess
+import sys
+import tomllib
+
+root, temporary = map(Path, sys.argv[1:])
+context = root / 'bin/codex-set-context-window'
+defaults = root / 'bin/codex-set-model-defaults'
+source = """
+# Preserve this comment.
+"model_context_window" = 272000
+'model_auto_compact_token_limit' = 123
+"model_auto_compact_token_limit_scope" = '''
+body_after_prefix'''
+developer_instructions = """
+source += '"""\nmodel_context_window = 123\nmodel_auto_compact_token_limit = 42\n'
+source += 'model_auto_compact_token_limit_scope = "body_after_prefix"\n[looks.like.a.table]\n"""\n'
+source += """
+model = "gpt-5.6-sol"
+model_reasoning_effort = "high"
+[profiles.saved]
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
+model_context_window = 272000
+[projects."/example"]
+trust_level = "trusted"
+"""
+original = tomllib.loads(source)
+owned = dict(model_context_window=872000, model_auto_compact_token_limit=500000,
+             model_auto_compact_token_limit_scope='total')
+path = temporary / 'parser-preservation.toml'
+env = dict(os.environ, CODEX_CONFIG_FILE=str(path))
+env.pop('CODEX_MODEL_CONTEXT_WINDOW', None)
+for order in itertools.permutations([context, defaults]):
+    path.write_text(source)
+    path.chmod(0o640)
+    for helper in order:
+        subprocess.run([str(helper)], env=env, check=True)
+    expected = original | owned | dict(model='gpt-6-astra', model_reasoning_effort='low')
+    assert tomllib.loads(path.read_text()) == expected
+    assert '# Preserve this comment.\n' in path.read_text()
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+    before, inode = path.read_bytes(), path.stat().st_ino
+    for helper in order:
+        subprocess.run([str(helper)], env=env, check=True)
+    assert path.read_bytes() == before and path.stat().st_ino == inode
+
+# The context helper alone must preserve model and effort, including overrides.
+path.write_text(source)
+subprocess.run([str(context)], env=env | {'CODEX_MODEL_CONTEXT_WINDOW': '400000'}, check=True)
+assert tomllib.loads(path.read_text()) == original | owned | {'model_context_window': 400000}
+
+for malformed in ['model = "unterminated\n', 'model_context_window = 1\n"model_context_window" = 2\n']:
+    path.write_text(malformed)
+    before, inode = path.read_bytes(), path.stat().st_ino
+    result = subprocess.run([str(context)], env=env, capture_output=True)
+    assert result.returncode != 0
+    assert path.read_bytes() == before and path.stat().st_ino == inode
+print('quoted keys, multiline strings, semantic preservation, both helper orders, override, mode, idempotence and malformed refusal passed')
+PYTEST
+pass "parser-backed context merge preserves valid TOML and refuses malformed input"
