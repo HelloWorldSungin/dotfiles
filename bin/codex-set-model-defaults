@@ -1,22 +1,16 @@
 #!/usr/bin/env bash
-# Merge only Codex's three global context settings; preserve all other TOML.
+# Merge only Codex's global model/reasoning defaults; preserve all other TOML.
 set -euo pipefail
 python3 - <<'PY'
-import json
 import os
 from pathlib import Path
-import re
 import stat
 import tempfile
 import tomllib
 
-value = os.environ.get('CODEX_MODEL_CONTEXT_WINDOW') or '872000'
-if not re.fullmatch(r'[1-9][0-9]*', value):
-    raise ValueError(f'invalid context window: {value}')
-path = Path(os.environ.get('CODEX_CONFIG_FILE') or str(Path.home() / '.codex/config.toml'))
-owned = {'model_context_window': int(value),
-         'model_auto_compact_token_limit': 500000,
-         'model_auto_compact_token_limit_scope': 'total'}
+path = Path(os.environ.get('CODEX_CONFIG_FILE') or
+            str(Path(os.environ.get('CODEX_HOME') or str(Path.home() / '.codex')) / 'config.toml'))
+owned = {'model': 'gpt-6-astra', 'model_reasoning_effort': 'low'}
 original = path.read_bytes() if path.exists() else b''
 text = original.decode('utf-8')
 current = tomllib.loads(text)  # Refuse malformed TOML before writing anything.
@@ -39,14 +33,13 @@ for end, line in enumerate(lines, 1):
         continue
     for key in owned.keys() - seen:
         if key in parsed:
-            if type(parsed[key]) is not type(owned[key]):
-                raise ValueError(f'{key} has an invalid top-level type')
+            if not isinstance(parsed[key], str):
+                raise ValueError(f'{key} must be a top-level string')
             remove.update(range(previous_boundary, end))
             seen.add(key)
     previous_boundary = end
 
-rendered = ''.join(f'{key} = {json.dumps(value)}\n'
-                   for key, value in owned.items())
+rendered = ''.join(f'{key} = "{value}"\n' for key, value in owned.items())
 rendered += ''.join(line for index, line in enumerate(lines) if index not in remove)
 if tomllib.loads(rendered) != current | owned:
     raise ValueError('merge changed unrelated TOML')

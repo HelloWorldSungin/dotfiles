@@ -109,7 +109,7 @@ NIX_PACKAGE_PINS=(
   'gtkwave|gtkwave|3.3.127|user-env' 'coreutils|timeout|9.11|closure' 'curl|curl|8.21.0|closure'
   'gawk|gawk|5.4.1|closure' 'git|git|2.54.0|user-env' 'gnugrep|grep|3.12|closure'
   'gnused|sed|4.10|closure' 'diffutils|diff|3.12|closure' 'gnutar|tar|1.35|closure'
-  'gzip|gzip|1.14|closure' 'util-linux|flock|2.42.2|closure'
+  'gzip|gzip|1.14|closure' 'python3|python3|3.13.15|closure' 'util-linux|flock|2.42.2|closure'
 )
 
 

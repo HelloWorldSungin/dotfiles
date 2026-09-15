@@ -20,7 +20,7 @@ let
   # runs is the pinned one and keeps its ambient measurement - they are wrapper
   # inputs too, but they are deliberately not in the manifest.
   closureOnlyInputs = {
-    inherit (pkgs) coreutils curl diffutils gawk gnugrep gnused gnutar gzip util-linux;
+    inherit (pkgs) coreutils curl diffutils gawk gnugrep gnused gnutar gzip python3 util-linux;
   };
   userEnvInputs = {
     inherit (pkgs) git jq;
@@ -71,10 +71,22 @@ let
     runtimeInputs = pick [ "coreutils" "gnugrep" "nodejs_22" ];
   };
 
+  claudeSetCompactionWindow = pkgs.writeShellApplication {
+    name = "claude-set-compaction-window";
+    text = builtins.readFile ../bin/claude-set-compaction-window;
+    runtimeInputs = pick [ "python3" ];
+  };
+
   codexSetContextWindow = pkgs.writeShellApplication {
     name = "codex-set-context-window";
     text = builtins.readFile ../bin/codex-set-context-window;
-    runtimeInputs = pick [ "coreutils" "diffutils" "gawk" ];
+    runtimeInputs = pick [ "python3" ];
+  };
+
+  codexSetModelDefaults = pkgs.writeShellApplication {
+    name = "codex-set-model-defaults";
+    text = builtins.readFile ../bin/codex-set-model-defaults;
+    runtimeInputs = pick [ "python3" ];
   };
 
   piSetModelDefaults = pkgs.writeShellApplication {
@@ -120,7 +132,7 @@ in
   _module.args.devTools = {
     inherit
       closureOnlyInputs userEnvInputs closureManifest pins flakeLock nvimPluginLock
-      checker pinnedInstaller claudeSpendPinned codexSetContextWindow piSetModelDefaults applyUpdates
+      checker pinnedInstaller claudeSpendPinned claudeSetCompactionWindow codexSetContextWindow codexSetModelDefaults piSetModelDefaults applyUpdates
       skillReviewedUpdates;
   };
 }
