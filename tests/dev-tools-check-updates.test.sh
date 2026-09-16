@@ -43,7 +43,7 @@ cat >"$FAKEBIN/npm" <<'SH'
 set -eu
 printf 'npm %s\n' "$*" >>"$TEST_CALL_LOG"
 [ "${TEST_FAIL_NPM:-0}" = 1 ] && exit 1
-package=$2
+package=${2%@latest}
 field=$3
 # shellcheck source=/dev/null
 source "$TEST_PINS"
@@ -58,6 +58,7 @@ case "$package" in
   claude-spend) version=$CLAUDE_SPEND_VERSION ;;
 esac
 [ "$package" = "${TEST_NPM_PRERELEASE_PACKAGE:-}" ] && version=9.0.0-beta.1
+[ "$version" = latest ] && version=0.9.0
 [ -n "$version" ] || exit 1
 # A retired dist-tag: the registry answers successfully with no value at all.
 if [ "$field" = dist-tags.stable ] && [ "$package" = "${TEST_NPM_NO_STABLE_TAG:-}" ]; then exit 0; fi
@@ -91,10 +92,9 @@ case "$url" in
     ;;
 esac
 if [ "$url" = "$HERDR_LATEST_MANIFEST_URL" ]; then
-  for row in "${RELEASE_SHA256_PINS[@]}"; do IFS='|' read -r key _tree _nm sha <<<"$row"; [ "$key" = linux-amd64 ] && break; done
-  version=${TEST_HERDR_LATEST_VERSION:-$HERDR_VERSION}
+  sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  version=${TEST_HERDR_LATEST_VERSION:-0.9.0}
   asset="https://github.com/herdrdev/herdr/releases/download/v${version}/herdr-linux-x86_64"
-  [ "$version" = "$HERDR_VERSION" ] || sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   jq -cn --arg v "$version" --arg asset "$asset" --arg sha "$sha" '{version:$v,assets:{"linux-x86_64":$asset},sha256:{"linux-x86_64":$sha}}'
   exit 0
 fi
@@ -197,10 +197,12 @@ command_name=${0##*/}
 printf '%s %s\n' "$command_name" "$*" >>"$TEST_CALL_LOG"
 for row in "${NPM_TOOL_PINS[@]}"; do
   IFS='|' read -r _name candidate _package version _integrity _guarded _channel <<<"$row"
+  [ "$version" = latest ] && version=0.9.0
   [ "$candidate" = "$command_name" ] && { printf '%s %s\n' "$command_name" "$version"; exit 0; }
 done
 for row in "${GITHUB_TOOL_PINS[@]}"; do
   IFS='|' read -r _name candidate _repo version _install _apply <<<"$row"
+  [ "$version" = latest ] && version=0.9.0
   [ "$candidate" = "$command_name" ] && { printf '%s %s\n' "$command_name" "$version"; exit 0; }
 done
 for row in "${NIX_PACKAGE_PINS[@]}"; do
@@ -389,12 +391,12 @@ json=$(run_checker --json --force --no-cache)
 unset TEST_NPM_PRERELEASE_PACKAGE TEST_PRERELEASE_REPO
 pass 'stable-channel filters reject npm and GitHub prereleases'
 
-IFS=. read -r herdr_major herdr_minor _ <<<"$HERDR_VERSION"
+IFS=. read -r herdr_major herdr_minor _ <<<"0.9.0"
 IFS=. read -r antigravity_major antigravity_minor _ <<<"$ANTIGRAVITY_VERSION"
 TEST_HERDR_LATEST_VERSION="$herdr_major.$((herdr_minor + 1)).0"
 TEST_ANTIGRAVITY_LATEST_VERSION="$antigravity_major.$((antigravity_minor + 1)).0"
 json=$(run_checker --json --force --no-cache)
-[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="herdr") | [.latest_stable,.status] | join("|")')" = "$TEST_HERDR_LATEST_VERSION|pin_outdated" ] || fail 'newer stable Herdr manifest was hidden as unknown'
+[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="herdr") | [.latest_stable,.status] | join("|")')" = "$TEST_HERDR_LATEST_VERSION|drifted" ] || fail 'newer stable Herdr manifest was hidden as unknown'
 [ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="antigravity") | [.latest_stable,.status] | join("|")')" = "$TEST_ANTIGRAVITY_LATEST_VERSION|pin_outdated" ] || fail 'newer stable Antigravity manifest was hidden as unknown'
 unset TEST_HERDR_LATEST_VERSION TEST_ANTIGRAVITY_LATEST_VERSION
 pass 'newer stable publisher manifests remain visible as pin drift'
@@ -408,11 +410,14 @@ json=$(run_checker --json --force --no-cache)
 for row in 'herdr|0.8.9' 'antigravity|1.0.0'; do
   IFS='|' read -r tool observed <<<"$row"
   entry=$(printf '%s' "$json" | jq -ce --arg n "$tool" '.tools[] | select(.name == $n)')
-  [ "$(printf '%s' "$entry" | jq -r '[.latest_stable,.status] | join("|")')" = "$observed|pin_outdated" ] \
+  expected_status=pin_outdated
+  [ "$tool" = herdr ] && expected_status=drifted
+  [ "$(printf '%s' "$entry" | jq -r '[.latest_stable,.status] | join("|")')" = "$observed|$expected_status" ] \
     || fail "a withdrawn publisher release was not reported as drift for $tool"
   if printf '%s' "$entry" | jq -e '.detail | test("newer")' >/dev/null; then
     fail "$tool claimed the publisher manifest was newer than a pin it never ordered: $(printf '%s' "$entry" | jq -r '.detail')"
   fi
+  [ "$tool" = herdr ] && continue
   printf '%s' "$entry" | jq -e '.detail | test("differs from the recorded")' >/dev/null \
     || fail "$tool did not report the publisher manifest as differing from its pin"
 done

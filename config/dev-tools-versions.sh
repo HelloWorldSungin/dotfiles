@@ -21,7 +21,6 @@ HERDR_LATEST_MANIFEST_URL=https://herdr.dev/latest.json
 
 TREEHOUSE_VERSION=2.3.0
 NO_MISTAKES_VERSION=1.72.0
-HERDR_VERSION=0.9.0
 
 OPENCODE_ACP_VERSION=1.18.30
 OMP_ACP_VERSION=0.1.2
@@ -49,6 +48,8 @@ CI_ACTION_PINS=(
   'nix-installer-action|DeterminateSystems/nix-installer-action|v23|3138316df39ed29be04236d7ffc686fa525866aa'
 )
 
+# Only the five axi tools use latest|publisher: resolve stable at invocation.
+# Other rows retain exact versions and recorded integrity.
 # name|command|package|version|registry-integrity|guarded-apply|stable-channel
 NPM_TOOL_PINS=(
   'claude|claude|@anthropic-ai/claude-code|2.1.236|sha512-sz+7GLMhFcwkN2tZHJIXGgon/g/29WMMV5UNYog9sl4OvdX5q3evM1mcXVQnasP4obP6ueItECMCpSk1MPhTDg==|no|stable'
@@ -56,27 +57,27 @@ NPM_TOOL_PINS=(
   'opencode|opencode|opencode-ai|1.18.30|sha512-oLcOLQE4XzDKy6T5L5d1RdVJvXHXwVlD4hRF5V317JbUQorrl2EyDdGZk5kbgv675J9FXp8usg92MZbEWhh6gQ==|no|default'
   'pi|pi|@earendil-works/pi-coding-agent|0.85.1|sha512-FGRN+OHbWaefBPGaTggAdLjrIHW+s2PzLyglz/5dfLzb9of7uuXMXYC0fJIeZTw+shS32o2cuQ9jF7YSDuL/oQ==|no|default'
   'gnhf|gnhf|gnhf|0.1.49|sha512-HzvxCzLaNZ2ipN7bqkn90f0sVbp4BgHv11RDOJY9fB1HL5cAdrSIDNQvpwjtqsPLRjRoymHnyJpsz2WOynbL2g==|yes|default'
-  'gh-axi|gh-axi|gh-axi|0.1.35|sha512-xxe7ui0548FJ9KF0LTQZWdfm8UYuLRsfSidSEx3Ztu1Eqrn4GMg+oJW7UReG33Wt0+2Vppwl7P6Qcll0KpymTQ==|yes|default'
-  'tasks-axi|tasks-axi|tasks-axi|0.2.5|sha512-FxssEW7+MuUNHWJ7uhdGrRsBDev/Zw5NutUBHcf8r/npG6z9+NfUUIeXdcdDHrC9ixEKOqQ9Uomay2TLpDB6Eg==|yes|default'
-  'quota-axi|quota-axi|quota-axi|0.1.41|sha512-PJEse+te7LteX0tfVpCGzfL8bz6MaLLejx2iClOeT+eoJU7qRMekRRibAx4Bvr4ZFqEP7SjLbJYdU+D3tp0NlA==|yes|default'
-  'chrome-devtools-axi|chrome-devtools-axi|chrome-devtools-axi|0.1.34|sha512-DCLOYmUxs9mDxhv82NKLbSwjfykGRC9kHRocz/Vz45rGxX/kxUbtuvLf1Bxr17V9jINVdsJGGUXGFfnrE51/9w==|yes|default'
-  'lavish-axi|lavish-axi|lavish-axi|0.1.67|sha512-7qU7tF1ShNQEQY3SMceNkIR2T1Iuy3kOvatoOgPwUW1QJuXoi+vzF5NOiDSt7xMfNaKJMNLefY856yylFxOxHg==|yes|default'
+  'gh-axi|gh-axi|gh-axi|latest|publisher|yes|default'
+  'tasks-axi|tasks-axi|tasks-axi|latest|publisher|yes|default'
+  'quota-axi|quota-axi|quota-axi|latest|publisher|yes|default'
+  'chrome-devtools-axi|chrome-devtools-axi|chrome-devtools-axi|latest|publisher|yes|default'
+  'lavish-axi|lavish-axi|lavish-axi|latest|publisher|yes|default'
 )
 
 # name|command|owner/repo|version|install-policy|apply-policy
 GITHUB_TOOL_PINS=(
   'treehouse|treehouse|kunchenguid/treehouse|2.3.0|exact-archive|report-only'
   'no-mistakes|no-mistakes|kunchenguid/no-mistakes|1.72.0|exact-archive|attended-only'
-  'herdr|herdr|herdrdev/herdr|0.9.0|exact-binary|attended-only'
+  'herdr|herdr|herdrdev/herdr|latest|stable-manifest-binary|attended-only'
   'gbrain|gbrain|garrytan/gbrain|0.48.5.0|external-owner|attended-only'
 )
 
-# platform|treehouse-sha256|no-mistakes-sha256|herdr-sha256
+# platform|treehouse-sha256|no-mistakes-sha256
 RELEASE_SHA256_PINS=(
-  'darwin-amd64|349afcc13c2beb20d846eb560a11b30e1a5cab8e2dfb22988a36aa7f213b5881|b82a873be9473670f38abe1d9a21a64877c445307d85dfd8d10dfd8d3e1f90d2|d0c920b2a126a74809fa1491411c9a097a44786cac9c2ca51b818a995581cf16'
-  'darwin-arm64|1cb09bcfa830b4eec5e54beeaa71589adb9c5d828573dda0f5150e2d80cf13d5|c3a38e95e050c30ee303806f22fbdc708f945e28d6b249d8e9540de65becb5c7|32b53df09872628059c789a69f02a6b8e29e14ddf26711421f3463f70c1aef17'
-  'linux-amd64|94fd2b2c20c35aac1ddc2941317890ad82c9916f5ccecbac4a50cda783eed10f|c226b69b8b8115827d2e438ea8b32eaff9b89291a1d2fddc5ef2449017b8d927|4fa1a01158dd8043da92d31b270780b0dcc10603038d9b61cac4d81ab63fb71f'
-  'linux-arm64|408589ba72b58d5e942071ed863a83fd96566cfd1e514945daa59defde528bbb|92f402654bdea845ded9cebca41fd565e2ae654bb81c9ce2282e0a2610df8736|9c8db20fb7e7427b138d5367113f1621ffd319f2f65d6f009e2594029115f0d2'
+  'darwin-amd64|349afcc13c2beb20d846eb560a11b30e1a5cab8e2dfb22988a36aa7f213b5881|b82a873be9473670f38abe1d9a21a64877c445307d85dfd8d10dfd8d3e1f90d2'
+  'darwin-arm64|1cb09bcfa830b4eec5e54beeaa71589adb9c5d828573dda0f5150e2d80cf13d5|c3a38e95e050c30ee303806f22fbdc708f945e28d6b249d8e9540de65becb5c7'
+  'linux-amd64|94fd2b2c20c35aac1ddc2941317890ad82c9916f5ccecbac4a50cda783eed10f|c226b69b8b8115827d2e438ea8b32eaff9b89291a1d2fddc5ef2449017b8d927'
+  'linux-arm64|408589ba72b58d5e942071ed863a83fd96566cfd1e514945daa59defde528bbb|92f402654bdea845ded9cebca41fd565e2ae654bb81c9ce2282e0a2610df8736'
 )
 
 # platform|publisher asset URL|publisher SHA-512

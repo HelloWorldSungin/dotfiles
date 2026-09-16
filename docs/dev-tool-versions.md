@@ -1,7 +1,7 @@
 # Developer and agent tool version ownership
 
 `config/dev-tools-versions.sh` is the machine-readable owner for external tool
-pins. `flake.lock` owns the immutable Nix input revisions, and
+pins and stable source policies. `flake.lock` owns the immutable Nix input revisions, and
 `config/nvim/lazy-lock.json` owns Neovim plugin commits. The pins below were
 verified on 2026-09-10 against each publisher's registry, release feed, or
 manifest. The [audit evidence](tool-updates/2026-09-10/README.md) records the
@@ -12,7 +12,7 @@ A version is stable only when the publisher's stable/default registry
 tag or a non-draft, non-prerelease release says so. Numeric tags containing
 alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
 
-## Exact external pins
+## External pins and stable policies
 
 | Tool | Exact pin | Authority and stable judgment | Fresh install | Apply boundary |
 |---|---:|---|---|---|
@@ -25,14 +25,14 @@ alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
 | Cursor Agent | 2026.09.08-6caf4ff | Version embedded in Cursor's official moving installer | No automated install; observed snapshot only | Report only |
 | Treehouse | 2.3.0 | Latest non-draft, non-prerelease GitHub release | Exact release archive and publisher checksum | Report only |
 | no-mistakes | 1.72.0 | Latest GitHub GA release; 1.73.0 and 1.74.0 prereleases are excluded | Exact release archive and publisher checksum | Attended only |
-| Herdr | 0.9.0 | `herdr.dev/latest.json`; newer preview builds excluded | Exact manifest asset and publisher checksum, only when absent | Attended only |
+| Herdr | Latest stable at invocation | `herdr.dev/latest.json` | Publisher asset and SHA-256, only when absent | Attended compatibility review; activation deferred |
 | GBrain | 0.48.5.0 | Latest non-draft, non-prerelease `garrytan/gbrain` release | Not installed here | Firstmate-owned attended migration |
 | gnhf | 0.1.49 | npm default tag | Exact npm package and registry integrity | Guarded exact apply |
-| gh-axi | 0.1.35 | npm default tag | Exact npm package and registry integrity | Guarded exact apply |
-| tasks-axi | 0.2.5 | npm default tag | Exact npm package and registry integrity | Guarded exact apply |
-| quota-axi | 0.1.41 | npm default tag | Exact npm package and registry integrity | Guarded exact apply |
-| chrome-devtools-axi | 0.1.34 | npm default tag | Exact npm package and registry integrity | Guarded exact apply |
-| lavish-axi | 0.1.67 | npm default tag | Exact npm package and registry integrity | Guarded exact apply |
+| gh-axi | Latest stable at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify exact artifact | Guarded exact apply with receipts |
+| tasks-axi | Latest stable at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify exact artifact | Guarded exact apply with receipts |
+| quota-axi | Latest stable at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify exact artifact | Guarded exact apply with receipts |
+| chrome-devtools-axi | Latest stable at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify exact artifact | Guarded exact apply with receipts |
+| lavish-axi | Latest stable at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify exact artifact | Guarded exact apply with receipts |
 | OpenCode ACP invocation | 1.18.30 | npm default tag | Exact `npx` spec in `config/baby-menu/agents.json` | Report only |
 | OMP ACP invocation | 0.1.2 | npm default tag | Exact `npx` spec in `config/baby-menu/agents.json` | Report only |
 | claude-spend invocation | 1.0.6 | npm default tag | `CLAUDE_SPEND_VERSION` in `config/dev-tools-versions.sh`, read at run time by `bin/claude-spend-pinned` (the `cspend` alias) | Report only |
@@ -73,6 +73,55 @@ Antigravity publishes exact, checksummed assets, so bootstrap can reproduce the
 initial install. Its binary also self-updates during ordinary use and exposes no
 documented disable switch. The checker therefore makes post-install drift
 visible instead of claiming the pin controls the running binary forever.
+
+## Latest stable policy: axi tools, Herdr, WezTerm
+
+Only the five axi npm packages above and Herdr drop repository version locks.
+The `latest|publisher` npm rows select the publisher default tag, reject
+prereleases or missing integrity, and re-query the resolved exact version before
+installation. `dev-tools-install-pinned` retains its command name and
+install-if-absent behavior: an existing command is skipped before discovery,
+including one outside the configured install prefix. A moving-policy dry-run
+performs read-only discovery but installs nothing. Exact rows in a trusted
+`DEV_TOOLS_PINS_FILE` override retain their existing behavior; unrelated pins
+are unchanged.
+
+`dev-tools-apply-updates` independently resolves each moving npm target and
+requires it to match the checker's stable result. It then uses the existing
+exact integrity verification, active-worker protection, prefix observation,
+prior-artifact evidence and mode-0600 receipt path. Receipts bind exact versions
+and integrity for rollback even after the tag moves. A newer numeric installed
+version is left alone; this policy does not automatically downgrade it. No
+background apply timer is added. Busy lanes defer the current invocation; a
+later manual invocation retries. There is no durable retry queue, automatic
+retry hook, cross-session usage authority or admission protocol. no-mistakes
+remains pinned and attended-only.
+
+Herdr uses the top-level version, platform asset URL and SHA-256 from the
+[publisher stable manifest](https://herdr.dev/latest.json), never its preview
+feed or a guessed download fallback. Missing or malformed metadata and checksum
+mismatches fail closed. An existing binary is never replaced by bootstrap, and
+Herdr remains outside the guarded updater's allowlist. Stable selection does
+not prove protocol compatibility or authorize live activation. Complete dotfiles
+work first, then follow the separate attended transition in
+[docs/herdr.md](herdr.md); keep the compatible client on the fleet PATH meanwhile.
+
+WezTerm has no install/version lock in this repository. `home/sungin-mac.nix`
+owns only the configuration link and application PATH. Its external install
+policy is the publisher-supported stable Homebrew cask `wezterm`, documented
+at [WezTerm macOS installation](https://wezterm.org/install/macos.html).
+For a later attended Mac update, use `brew install --cask wezterm` when absent
+or `brew upgrade --cask wezterm` when installed. Homebrew owns release selection,
+checksums and already-current behavior. Do not use `wezterm@nightly`, historical
+cask versions or an unverified direct download. Review any existing external
+pin or nightly installation before that separate operation; dotfiles does not
+alter it or terminate open terminals. No WezTerm installer is added here.
+
+Source inspection on 2026-09-15 confirmed the Herdr manifest schema and
+WezTerm stable cask instructions. npm documents its default `latest` lookup in
+[npm view](https://docs.npmjs.com/cli/v11/commands/npm-view/).
+The isolated installer, checker and guarded-updater suites in `tests/` are the
+behavioral evidence; no live installation or service lifecycle is needed.
 
 ## Nix-owned inventory
 
@@ -210,8 +259,8 @@ Bootstrap invokes it after the exact Nix and Home Manager bootstrap.
 
 1. Fast-forward Firstmate's `main` branch to the exact recorded commit, after
    proving the commit belongs to the freshly read remote branch.
-2. Install the six named npm tools at the exact versions in the pin record,
-   after independently re-reading each exact version and integrity from npm.
+2. Install the five axi tools at resolved stable versions and gnhf at its
+   recorded pin, after independently verifying each exact artifact and integrity.
 
 Both scopes refuse while any Firstmate worker lane exists and recheck that guard
 immediately before mutation; a lane found by that recheck is reported in the

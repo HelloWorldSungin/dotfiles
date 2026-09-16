@@ -76,11 +76,13 @@ server before expecting clean rendering.
 
 ## Updating from 0.8.2 to 0.9.0
 
-The repository already pins 0.9.0 and its publisher checksums in
-`config/dev-tools-versions.sh`. Confirm the current stable version against
-[Herdr's manifest](https://herdr.dev/latest.json) before any later update.
-The pinned installer installs only when absent; Home Manager activation does
-not upgrade an existing Herdr binary.
+The repository selects latest stable from
+[Herdr's manifest](https://herdr.dev/latest.json), including its platform asset
+and publisher SHA-256, without a repository version lock. The installer installs
+only when absent; Home Manager activation does not upgrade an existing Herdr
+binary. Finish dotfiles work before any separately attended live transition.
+Stable selection and staging never authorize activation or establish protocol
+compatibility. The version-pair evidence below remains the migration boundary.
 
 Check the installed client and the running server separately:
 

@@ -4,7 +4,8 @@
 # The only mutable tiers are Firstmate's pinned commit and six explicitly
 # allowlisted npm tools. The checker finds drift, but this command rereads the
 # repository pin and independently verifies the exact remote artifact before
-# applying it. It never follows a moving latest value. Firstmate advances by
+# applying it. The five axi tools resolve latest stable to a verified exact
+# artifact; gnhf retains its repository pin. Firstmate advances by
 # fast-forward ONLY - never a merge commit, rebase, or force.
 #
 # Herdr and no-mistakes are attended-only runtime-hosting tools. This command
@@ -507,6 +508,26 @@ apply_npm() {
     if [ -z "$current" ] || [ "$current" = unknown ]; then
       item=$(tier_json refused 'checker source is unknown; refusing to infer drift' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')")
       results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
+    fi
+    if [ "$pinned" = latest ]; then
+      if [ "$integrity" != publisher ]; then
+        item=$(tier_json refused 'moving policy requires publisher integrity discovery' "$(jq -cn --arg n "$name" '{name:$n}')")
+        results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
+      fi
+      # Bind the moving policy to one exact artifact, then use the existing
+      # integrity, lane, receipt, prefix observation and reversal safeguards.
+      registry_json=$(run_timed "$NETWORK_TIMEOUT" "$NPM_BIN" view "$package@latest" version dist.integrity --json 2>/dev/null || true)
+      pinned=$(printf '%s' "$registry_json" | jq -r '.version // ""' 2>/dev/null || true)
+      integrity=$(printf '%s' "$registry_json" | jq -r '."dist.integrity" // .dist.integrity // ""' 2>/dev/null || true)
+      if ! printf '%s\n' "$pinned" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' ||
+         [ "$pinned" != "$(printf '%s' "$detection" | jq -r --arg n "$name" '.tools[] | select(.name == $n) | .latest_stable')" ]; then
+        item=$(tier_json refused 'stable registry target is invalid or changed since detection' "$(jq -cn --arg n "$name" '{name:$n}')")
+        results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
+      fi
+      if jq -en --arg c "$current" --arg t "$pinned" '($c | split(".") | map(tonumber)) > ($t | split(".") | map(tonumber))' >/dev/null 2>&1; then
+        item=$(tier_json skipped 'installed version is newer than stable; no automatic downgrade' "$(jq -cn --arg n "$name" '{name:$n}')")
+        results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); continue
+      fi
     fi
     if [ "$current" = "$pinned" ]; then
       item=$(tier_json up_to_date "installed version matches exact pin $pinned" "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')")

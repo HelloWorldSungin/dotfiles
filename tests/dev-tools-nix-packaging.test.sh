@@ -132,6 +132,7 @@ for row in "${NPM_TOOL_PINS[@]}"; do
   IFS='|' read -r name command_name _package version integrity guarded _channel <<<"$row"
   [ "$name" = quota-axi ] || continue
   QUOTA_COMMAND=$command_name; QUOTA_VERSION=$version; QUOTA_INTEGRITY=$integrity
+  if [ "$version" = latest ]; then QUOTA_VERSION=1.2.3; QUOTA_INTEGRITY=sha512-ZGV0ZXJtaW5pc3RpYw==; fi
   [ "$guarded" = yes ] || fail 'quota-axi is no longer a guarded pin'
 done
 : "${QUOTA_VERSION:?quota-axi pin missing}"
@@ -167,6 +168,7 @@ cat >"$STUBS/npm" <<SH
 #!$BASH_BIN
 if [ "\$1" = view ]; then
   version=\${2##*@}
+  [ "\$version" = latest ] && version='$QUOTA_VERSION'
   if [ "\$version" = '$QUOTA_VERSION' ]; then integrity='$QUOTA_INTEGRITY'
   else integrity="sha512-prior-\$version"
   fi

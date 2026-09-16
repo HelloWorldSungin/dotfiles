@@ -54,7 +54,7 @@ cat >"$PINS" <<EOF
 TOOLCHAIN_VERIFIED_AT=2026-09-09
 TREEHOUSE_VERSION=2.3.0
 NO_MISTAKES_VERSION=1.72.0
-HERDR_VERSION=0.9.0
+HERDR_LATEST_MANIFEST_URL=https://herdr.dev/latest.json
 ANTIGRAVITY_VERSION=1.1.28
 CURSOR_AGENT_OBSERVED_VERSION=2026.09.08-test
 CURSOR_INSTALLER_URL=https://cursor.invalid/install
@@ -65,7 +65,7 @@ NPM_TOOL_PINS=(
   'demo|demo|demo-package|1.2.3|sha512-ZGV0ZXJtaW5pc3RpYw==|yes|default'
 )
 RELEASE_SHA256_PINS=(
-  'linux-amd64|$TREE_SHA|$NM_SHA|$HERDR_SHA'
+  'linux-amd64|$TREE_SHA|$NM_SHA'
 )
 ANTIGRAVITY_ASSET_PINS=(
   'linux-amd64|https://publisher.invalid/antigravity.tar.gz|$AGY_SHA'
@@ -80,9 +80,13 @@ cat >"$FAKEBIN/npm" <<'SH'
 set -eu
 printf '%s\n' "$*" >>"$TEST_NPM_LOG"
 if [ "$1" = view ]; then
+  [ "${TEST_REGISTRY_FAIL:-0}" = 1 ] && exit 1
   integrity=sha512-ZGV0ZXJtaW5pc3RpYw==
   [ "${TEST_BAD_INTEGRITY:-0}" = 1 ] && integrity=sha512-different
-  jq -cn --arg v 1.2.3 --arg i "$integrity" '{version:$v,"dist.integrity":$i}'
+  if [ "$2" = demo-package@latest ]; then
+    integrity=${TEST_LATEST_INTEGRITY:-sha512-ZGV0ZXJtaW5pc3RpYw==}
+  fi
+  jq -cn --arg v "${TEST_LATEST_VERSION:-1.2.3}" --arg i "$integrity" '{version:$v,"dist.integrity":$i}'
   exit 0
 fi
 if [ "$1" = install ]; then
@@ -109,6 +113,10 @@ done
 case "$url" in
   *treehouse*) cp "$TEST_ASSETS/treehouse.tar.gz" "$output" ;;
   *no-mistakes*) cp "$TEST_ASSETS/no-mistakes.tar.gz" "$output" ;;
+  https://herdr.dev/latest.json)
+    [ "${TEST_MANIFEST_FAIL:-0}" = 1 ] && exit 1
+    jq -cn --arg sha "${TEST_MANIFEST_SHA:-$TEST_HERDR_SHA}" --arg v "${TEST_HERDR_VERSION:-0.9.0}" '{version:$v,assets:{"linux-x86_64":("https://github.com/herdrdev/herdr/releases/download/v"+$v+"/herdr-linux-x86_64")},sha256:{"linux-x86_64":$sha}}'
+    ;;
   *herdr*) cp "$TEST_ASSETS/herdr" "$output" ;;
   *antigravity*) cp "$TEST_ASSETS/antigravity.tar.gz" "$output" ;;
   *cursor*) touch "$TEST_CURSOR_FETCHED"; printf '#!/usr/bin/env bash\nexit 0\n' >"$output" ;;
@@ -135,7 +143,7 @@ run_installer() {
     DEV_TOOLS_INSTALL_CURL_BIN="$FAKEBIN/curl" DEV_TOOLS_INSTALL_NPM_BIN="$FAKEBIN/npm" \
     DEV_TOOLS_INSTALL_GIT_BIN="$FAKEBIN/git" \
     DEV_TOOLS_INSTALL_LOCAL_BIN="$LOCAL_BIN" DEV_TOOLS_UPDATE_NPM_PREFIX="$PREFIX" \
-    TEST_NPM_LOG="$NPM_LOG" TEST_ASSETS="$ASSETS" TEST_CURSOR_FETCHED="$FIXTURE/cursor-fetched" \
+    TEST_HERDR_SHA="$HERDR_SHA" TEST_NPM_LOG="$NPM_LOG" TEST_ASSETS="$ASSETS" TEST_CURSOR_FETCHED="$FIXTURE/cursor-fetched" \
     TEST_BAD_INTEGRITY="${TEST_BAD_INTEGRITY:-0}" TEST_REAL_GIT="$(command -v git)" "$INSTALLER" "$@"
 }
 
@@ -212,6 +220,68 @@ unset TEST_PATH
 [ -x "$LOCAL_BIN/herdr" ] || fail 'herdr was not installed on a shasum-only platform'
 [ -x "$LOCAL_BIN/agy" ] || fail 'agy was not installed on a shasum-only platform'
 pass 'publisher checksums verify on platforms that ship only shasum'
+
+# Moving npm policy uses the publisher's default tag, then verifies the exact
+# artifact again. Existing commands never trigger source discovery.
+SAFE_PINS=$PINS
+PINS="$FIXTURE/stable-pins.sh"
+sed 's/|1.2.3|sha512-ZGV0ZXJtaW5pc3RpYw==|/|latest|publisher|/' "$SAFE_PINS" >"$PINS"
+rm -f "$PREFIX/bin/demo"
+: >"$NPM_LOG"
+run_installer --dry-run --only demo >/dev/null
+[ ! -e "$PREFIX/bin/demo" ] || fail 'stable preview installed a package'
+grep -Fq 'view demo-package@latest' "$NPM_LOG" || fail 'stable preview did not resolve publisher tag'
+run_installer --only demo >/dev/null
+grep -Fq 'install -g demo-package@1.2.3' "$NPM_LOG" || fail 'stable install used a moving npm argument'
+before=$(wc -l <"$NPM_LOG")
+run_installer --only demo >/dev/null
+[ "$(wc -l <"$NPM_LOG")" -eq "$before" ] || fail 'installed stable tool triggered discovery'
+rm -f "$PREFIX/bin/demo"
+for mode in prerelease integrity drift network; do
+  case "$mode" in
+    prerelease) export TEST_LATEST_VERSION=1.2.3-beta.1 ;;
+    integrity) export TEST_LATEST_INTEGRITY=invalid ;;
+    drift) export TEST_LATEST_INTEGRITY=sha512-Y2hhbmdlZA== ;;
+    network) export TEST_REGISTRY_FAIL=1 ;;
+  esac
+  if run_installer --only demo >/dev/null 2>&1; then fail "stable npm accepted $mode"; fi
+  [ ! -e "$PREFIX/bin/demo" ] || fail "stable npm $mode refusal installed a tool"
+  unset TEST_LATEST_VERSION TEST_LATEST_INTEGRITY TEST_REGISTRY_FAIL
+done
+PINS=$SAFE_PINS
+pass 'moving npm selection verifies exact integrity, skips installed tools and fails closed'
+
+# Herdr never replaces an installed client, even if discovery is unavailable.
+make_binary "$LOCAL_BIN/herdr" herdr 0.8.2
+prior_client_sha=$(sha256sum "$LOCAL_BIN/herdr")
+export TEST_MANIFEST_FAIL=1
+run_installer --only herdr >/dev/null
+[ "$(sha256sum "$LOCAL_BIN/herdr")" = "$prior_client_sha" ] || fail 'installed compatible Herdr client was replaced'
+rm -f "$LOCAL_BIN/herdr"
+if run_installer --only herdr >/dev/null 2>&1; then fail 'Herdr accepted manifest failure'; fi
+unset TEST_MANIFEST_FAIL
+for mode in prerelease checksum malformed; do
+  case "$mode" in
+    prerelease) export TEST_HERDR_VERSION=0.10.0-beta.1 ;;
+    checksum) export TEST_MANIFEST_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
+    malformed) export TEST_MANIFEST_SHA=invalid ;;
+  esac
+  if run_installer --only herdr >/dev/null 2>&1; then fail "Herdr accepted $mode"; fi
+  [ ! -e "$LOCAL_BIN/herdr" ] || fail "Herdr $mode refusal replaced client"
+  unset TEST_HERDR_VERSION TEST_MANIFEST_SHA
+done
+run_installer --dry-run --only herdr >/dev/null
+[ ! -e "$LOCAL_BIN/herdr" ] || fail 'Herdr preview installed a client'
+run_installer --only herdr >/dev/null
+! grep -Ev '^--version (herdr|no-mistakes|treehouse)$' "$FIXTURE/tool-calls.log" | grep -q herdr || fail 'Herdr invoked a lifecycle operation'
+rm -f "$LOCAL_BIN/herdr"
+make_binary "$ASSETS/herdr" herdr 0.10.0
+HERDR_SHA=$(sha256sum "$ASSETS/herdr" | awk '{print $1}')
+export TEST_HERDR_VERSION=0.10.0
+run_installer --only herdr >"$FIXTURE/herdr-new-stable.out"
+grep -Fq 'installed herdr 0.10.0' "$FIXTURE/herdr-new-stable.out" || fail 'Herdr remained version locked'
+unset TEST_HERDR_VERSION
+pass 'stable Herdr discovery refuses invalid metadata and checksum failures without lifecycle or replacement'
 
 run_installer --only firstmate >/dev/null
 run_installer --only baby-menu >/dev/null
