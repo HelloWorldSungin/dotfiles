@@ -24,7 +24,7 @@ alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
 | Antigravity CLI | 1.2.0 | Google's per-platform production manifest | Exact publisher asset and SHA-512 from that manifest | Report only; its own self-update remains an upstream limitation |
 | Cursor Agent | 2026.09.08-6caf4ff | Version embedded in Cursor's official moving installer | No automated install; observed snapshot only | Report only |
 | Treehouse | 2.3.0 | Latest non-draft, non-prerelease GitHub release | Exact release archive and publisher checksum | Report only |
-| no-mistakes | 1.72.0 | Bootstrap pin; explicit updates resolve the latest GitHub non-draft, non-prerelease release | Exact uploaded asset and SHA-256 digest | Explicit idle-only binary replacement; activation attended |
+| no-mistakes | 1.72.0 | Latest GitHub GA release; 1.73.0 and 1.74.0 prereleases are excluded | Exact release archive and publisher checksum | Attended only |
 | Herdr | Latest stable at invocation | `herdr.dev/latest.json` | Publisher asset and SHA-256, only when absent | Attended compatibility review; activation deferred |
 | GBrain | 0.48.5.0 | Latest non-draft, non-prerelease `garrytan/gbrain` release | Not installed here | Firstmate-owned attended migration |
 | gnhf | 0.1.49 | npm default tag | Exact npm package and registry integrity | Guarded exact apply |
@@ -92,7 +92,10 @@ exact integrity verification, active-worker protection, prefix observation,
 prior-artifact evidence and mode-0600 receipt path. Receipts bind exact versions
 and integrity for rollback even after the tag moves. A newer numeric installed
 version is left alone; this policy does not automatically downgrade it. No
-background apply timer is added.
+background apply timer is added. Busy lanes defer the current invocation; a
+later manual invocation retries. There is no durable retry queue, automatic
+retry hook, cross-session usage authority or admission protocol. no-mistakes
+remains pinned and attended-only.
 
 Herdr uses the top-level version, platform asset URL and SHA-256 from the
 [publisher stable manifest](https://herdr.dev/latest.json), never its preview
@@ -252,7 +255,7 @@ an existing tool. It also refuses an explicit Cursor install because no exact
 upstream channel exists; a full bootstrap reports and skips that limitation.
 Bootstrap invokes it after the exact Nix and Home Manager bootstrap.
 
-`dev-tools-apply-updates` has two default mutation scopes:
+`dev-tools-apply-updates` has only two mutation scopes:
 
 1. Fast-forward Firstmate's `main` branch to the exact recorded commit, after
    proving the commit belongs to the freshly read remote branch.
@@ -261,9 +264,8 @@ Bootstrap invokes it after the exact Nix and Home Manager bootstrap.
 
 Both scopes refuse while any Firstmate worker lane exists and recheck that guard
 immediately before mutation; a lane found by that recheck is reported in the
-result's `worker_guard`, not only in the tier it deferred. Herdr, GBrain, Nix,
-agent harnesses, and Baby Menu are never apply targets. The default invocation
-also excludes no-mistakes; explicit invocation adds its binary only.
+result's `worker_guard`, not only in the tier it deferred. Herdr, no-mistakes,
+GBrain, Nix, agent harnesses, and Baby Menu are never apply targets.
 
 Dry-run installs and merges nothing, and writes nothing to the Firstmate
 checkout - no ref, object, index, `FETCH_HEAD`, or configuration - and does not
@@ -409,9 +411,8 @@ directory is the operator's and its mode is never changed. The recorded prior, t
 rewritten to match the machine. A reversal whose append fails is reported as
 `receipt.status: stale` and exits non-zero even though the machine state was
 restored, so stale evidence is never mistaken for completion. Herdr, the shared
-no-mistakes daemon lifecycle, and GBrain remain outside both directions.
-Explicit no-mistakes receipts restore a checksum-verified prior binary through
-the same attended rollback command, with a fresh authoritative usage check.
+no-mistakes daemon, GBrain, and every other runtime-hosting tool remain outside
+both directions.
 
 ## Attended runtime upgrade sequence
 
@@ -422,9 +423,9 @@ the same attended rollback command, with a fresh authoritative usage check.
    the guarded apply if its independently verified exact versions are correct.
    Keep the receipt path it prints; reversing either tier is attended and starts
    from `dev-tools-apply-updates --rollback <receipt>`.
-4. Use the explicit integration below for an idle no-mistakes binary update.
-   Daemon activation remains a separate attended operation; this updater never
-   starts, stops, reloads, or restarts it.
+4. Upgrade no-mistakes separately in an attended window. Confirm there is no
+   active shared-daemon work before touching its binary or daemon, then validate
+   the installed version against the pin.
 5. Upgrade Herdr separately in an attended window using its publisher-owned
    update flow. Review client/server compatibility and release notes first, and
    verify the live fleet is clear before any server lifecycle action.
@@ -432,40 +433,3 @@ the same attended rollback command, with a fresh authoritative usage check.
    compatibility, migration, smoke-test, evaluation, and rollback procedure.
 7. Re-run the read-only checker. Any unknown source, version mismatch, or
    prerelease result is a refusal to declare convergence.
-
-
-## Explicit invocation and durable retry
-
-`dev-tools-apply-updates --explicit --json` records update intent before checking
-stable releases. `--resume --json` attempts the remaining obligations once.
-Both extend the existing updater, preserving exact artifact verification,
-Firstmate active-lane protection, private receipts and attended rollback.
-No-mistakes uses the publisher GitHub stable release API and the selected
-uploaded asset's SHA-256 digest. Its prior binary is preserved privately and
-checksummed in the same receipt before atomic replacement. Bootstrap retains
-its existing install-if-absent pin; explicit updates select current stable.
-A newer installed version is preserved, with an unresolved obligation.
-
-The caller must supply an absolute `DEV_TOOLS_APPLY_USAGE_BIN` executable that
-accepts a tool name and returns one JSON object with `schema_version: 1`,
-`status: "idle" | "busy" | "unknown"`, and a string `detail`. This reader must
-cover all users of the installation, including services and active no-mistakes
-runs after worker exit. Missing, invalid, failed or timed-out readers defer
-updates. The updater asks again after artifact and receipt work, immediately
-before mutation. Herdr is never an update target here.
-
-`DEV_TOOLS_APPLY_RECEIPT_DIR/obligations.json` is private and atomically replaced.
-Busy, unknown, failed and interrupted work remains across retries. Successful
-convergence removes the relevant obligation. Linux `flock` serializes explicit
-attempts and releases ownership on process death; platforms without `flock`
-refuse explicit invocation. One installation must use one stable state directory.
-The legacy invocation retains its existing behavior; the Firstmate hook must
-use `--explicit` and `--resume` to get authoritative usage checks and retries.
-
-Firstmate owns the usage reader and event-driven resume after users finish,
-including restart recovery. Dotfiles installs no timer or background service.
-Exit 0 can include deferred work; inspect `obligations.remaining` and per-tool
-statuses. Exit 1 means refusal/failure; exit 2 means invalid input or unusable
-state. A retry re-discovers and verifies the release, installed state and
-integrity rather than trusting a saved target. The delegation interface is in
-[data/dotfiles-stable-tool-policy/integration-contract.md](../data/dotfiles-stable-tool-policy/integration-contract.md).

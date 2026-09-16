@@ -35,8 +35,8 @@ for row in "${GITHUB_TOOL_PINS[@]}"; do
   row_version=$version
   [ "$repo" = kunchenguid/no-mistakes ] || fail "no-mistakes repository is $repo"
   [ "$install_policy" = exact-archive ] || fail "no-mistakes install policy is $install_policy"
-  # This is the default/bootstrap policy. Explicit idle-only updates have a
-  # separate behavior suite and never activate the shared daemon.
+  # Attended-only is what keeps the guarded updater and any timer from ever
+  # touching a binary the shared daemon is running out of.
   [ "$apply_policy" = attended-only ] || fail "no-mistakes apply policy is $apply_policy"
 done
 [ -n "$row_version" ] || fail 'GITHUB_TOOL_PINS has no no-mistakes row'
@@ -65,8 +65,8 @@ doc_row=$(grep -E '^\| no-mistakes \|' "$DOC") || fail 'docs/dev-tool-versions.m
 doc_version=$(printf '%s' "$doc_row" | awk -F'|' '{gsub(/ /,"",$3); print $3}')
 [ "$doc_version" = "$NO_MISTAKES_VERSION" ] ||
   fail "docs/dev-tool-versions.md says $doc_version but the pin says $NO_MISTAKES_VERSION"
-printf '%s' "$doc_row" | grep -q 'activation attended' ||
-  fail 'docs/dev-tool-versions.md no longer records no-mistakes activation as attended'
+printf '%s' "$doc_row" | grep -q 'Attended only' ||
+  fail 'docs/dev-tool-versions.md no longer records no-mistakes as attended only'
 # A row that still names the pinned version as excluded would contradict itself.
 if printf '%s' "$doc_row" | grep -q "$NO_MISTAKES_VERSION prerelease"; then
   fail "docs/dev-tool-versions.md excludes $NO_MISTAKES_VERSION as a prerelease while pinning it"

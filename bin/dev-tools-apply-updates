@@ -8,8 +8,8 @@
 # artifact; gnhf retains its repository pin. Firstmate advances by
 # fast-forward ONLY - never a merge commit, rebase, or force.
 #
-# Herdr remains attended-only and is never invoked or changed here. Explicit
-# invocation can replace an idle no-mistakes binary, without daemon activation. Nix,
+# Herdr and no-mistakes are attended-only runtime-hosting tools. This command
+# MUST NEVER install, update, invoke, reload, stop, or restart either one. Nix,
 # GBrain, harness CLIs, Baby Menu, and other report-only tools are also excluded.
 #
 # Every real mutation is preceded by a mode-0600 receipt, written atomically
@@ -84,15 +84,7 @@
 # append fails is reported as a stale receipt and exits non-zero, so stale
 # evidence is never mistaken for completion.
 #
-# Explicit integration: --explicit durably requests stable updates, including
-# no-mistakes; --resume retries outstanding obligations once. Both require an
-# absolute DEV_TOOLS_APPLY_USAGE_BIN returning authoritative usage JSON
-# (schema_version:1, status:idle|busy|unknown, detail:string) for its tool argument.
-# Unknown usage defers. No schedules or service lifecycle operations are created.
-# Linux flock serializes explicit attempts; use one receipt directory per install.
-#
 # Usage: dev-tools-apply-updates [--dry-run] [--json]
-#        dev-tools-apply-updates --explicit|--resume [--json]
 #        dev-tools-apply-updates --rollback <receipt> [--attended] [--json]
 set -u
 
@@ -118,12 +110,6 @@ SHA256_BIN=${DEV_TOOLS_APPLY_SHA256_BIN:-$(command -v sha256sum >/dev/null 2>&1 
 RECEIPT_DIR=${DEV_TOOLS_APPLY_RECEIPT_DIR:-${XDG_STATE_HOME:-${HOME:-.}/.local/state}/dev-tools-apply-updates}
 TIMEOUT_SECONDS=${DEV_TOOLS_APPLY_TIMEOUT_SECONDS:-120}
 NETWORK_TIMEOUT=${DEV_TOOLS_UPDATE_NETWORK_TIMEOUT_SECONDS:-15}
-USAGE_REQUIRED=0
-EXPLICIT=0
-RESUME=0
-USAGE_BIN=${DEV_TOOLS_APPLY_USAGE_BIN:-}
-OBLIGATIONS='[]'
-OBLIGATION_PATH="$RECEIPT_DIR/obligations.json"
 MODE=human
 DRY_RUN=0
 ATTENDED=0
@@ -134,8 +120,6 @@ usage() { sed -n '/^# dev-tools-apply-updates - /,/^set -u$/s/^# \{0,1\}//p' "$0
 die() { printf 'dev-tools-apply-updates: %s\n' "$1" >&2; exit "${2:-2}"; }
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --explicit) EXPLICIT=1 ;;
-    --resume) EXPLICIT=1; RESUME=1 ;;
     --json) MODE=json ;;
     --dry-run|-n) DRY_RUN=1 ;;
     --attended) ATTENDED=1 ;;
@@ -145,9 +129,6 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
-if [ "$EXPLICIT" -eq 1 ] && { [ "$ROLLBACK_MODE" -eq 1 ] || [ "$DRY_RUN" -eq 1 ]; }; then
-  die '--explicit/--resume cannot be combined with --rollback or --dry-run'
-fi
 if [ "$ROLLBACK_MODE" -eq 1 ]; then
   [ -n "$ROLLBACK_RECEIPT" ] || die '--rollback needs a receipt path'
   [ "$DRY_RUN" -eq 0 ] || die '--dry-run does not apply to --rollback; omit --attended to check without performing'
@@ -215,9 +196,8 @@ detect_workers() {
 RECEIPT_PATH="$RECEIPT_DIR/apply-$(date -u +%Y%m%dT%H%M%SZ)-$$.json"
 RECEIPT_WRITTEN=0
 RECEIPT_STALE=0
-RECEIPT_DOC=$(jq -cn --argjson usage_required "$EXPLICIT" --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg path "$RECEIPT_PATH" '{
+RECEIPT_DOC=$(jq -cn --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg path "$RECEIPT_PATH" '{
   schema_version: 1,
-  usage_authority_required: ($usage_required == 1),
   tool: "dev-tools-apply-updates",
   created_at: $created,
   path: $path,
@@ -467,7 +447,6 @@ apply_firstmate() {
   [ -d "$FIRSTMATE_PATH/.git" ] || { set_tier skipped 'Firstmate checkout unavailable'; return; }
   current=$($GIT_BIN -C "$FIRSTMATE_PATH" rev-parse HEAD 2>/dev/null || printf unknown)
   if [ "$current" = "$pinned" ]; then set_tier up_to_date "already at pinned commit $pinned" "$(jq -cn --arg p "$pinned" --arg l "$latest" '{pinned:$p,latest:$l}')"; return; fi
-  if [ "$EXPLICIT" -eq 1 ] && ! usage_idle firstmate; then set_tier deferred "$USE_DETAIL"; return; fi
   branch=$($GIT_BIN -C "$FIRSTMATE_PATH" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
   [ "$branch" = main ] || { set_tier skipped "Firstmate must be on main, found '${branch:-detached}'"; return; }
   if ! $GIT_BIN -C "$FIRSTMATE_PATH" diff --quiet --ignore-submodules -- 2>/dev/null ||
@@ -506,9 +485,6 @@ apply_firstmate() {
       target_evidence:{kind:"git-commit",repository:$repo,remote_head:$head,contained_in_remote_main:true},
       status:"pending"}')
   receipt_put "$entry" || { set_tier refused 'could not write the mutation receipt; refusing to mutate'; return; }
-  if [ "$EXPLICIT" -eq 1 ] && ! usage_idle firstmate; then
-    receipt_settle "$entry" deferred; set_tier deferred "$USE_DETAIL"; return
-  fi
   if run_timed "$TIMEOUT_SECONDS" "$GIT_BIN" -C "$FIRSTMATE_PATH" merge --ff-only "$pinned" >/dev/null 2>&1; then
     receipt_settle "$entry" applied
     set_tier applied "fast-forwarded main to exact pin $pinned" "$(jq -cn --arg p "$pinned" '{pinned:$p}')"
@@ -522,7 +498,6 @@ apply_npm() {
   local detection=$1 results='[]' name spec command_name package pinned integrity registry_json verified_version verified_integrity
   local current observed installed item any=0 failed=0 refused=0 deferred=0 prior_evidence entry
   for name in $(printf '%s' "$ALLOWLIST_NPM_JSON" | jq -r '.[]'); do
-    requested "$name" || continue
     spec=$(pin_for_npm "$name" || true)
     if [ -z "$spec" ]; then
       item=$(tier_json refused 'allowlisted name has no guarded repository pin' "$(jq -cn --arg n "$name" '{name:$n}')")
@@ -559,10 +534,6 @@ apply_npm() {
       results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); continue
     fi
     any=1
-    if [ "$EXPLICIT" -eq 1 ] && ! usage_idle "$name"; then
-      item=$(tier_json deferred "$USE_DETAIL" "$(jq -cn --arg n "$name" '{name:$n}')"); deferred=1
-      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); continue
-    fi
     if ! npm_reversible_version "$pinned" ||
        ! printf '%s\n' "$integrity" | grep -Eq '^sha512-[A-Za-z0-9+/]+={0,2}$'; then
       item=$(tier_json refused 'unsafe exact version or integrity pin' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')")
@@ -627,12 +598,6 @@ apply_npm() {
         status:"pending"}')
     if ! receipt_put "$entry"; then
       item=$(tier_json refused 'could not write the mutation receipt; refusing to mutate' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')"); refused=1
-    elif [ "$EXPLICIT" -eq 1 ] && { observe_npm "$command_name"; [ "$NPM_OBSERVED" != "$observed" ]; }; then
-      receipt_settle "$entry" deferred
-      item=$(tier_json refused 'installed version changed during verification' "$(jq -cn --arg n "$name" '{name:$n}')"); refused=1
-    elif [ "$EXPLICIT" -eq 1 ] && ! usage_idle "$name"; then
-      receipt_settle "$entry" deferred
-      item=$(tier_json deferred "$USE_DETAIL" "$(jq -cn --arg n "$name" '{name:$n}')"); deferred=1
     elif run_timed "$TIMEOUT_SECONDS" env NPM_CONFIG_PREFIX="$NPM_PREFIX" "$NPM_BIN" install -g "$package@$pinned" >/dev/null 2>&1; then
       observe_npm "$command_name"
       installed=$NPM_OBSERVED
@@ -676,7 +641,7 @@ receipt_reconcile() {
 receipt_settle_tiers() {
   RECEIPT_DOC=$(printf '%s' "$RECEIPT_DOC" | jq -c '
     def rank: {"rollback_failed":0,"failed":1,"pending":2,"applied":3,"reconciled_at_prior":4,"rolled_back":5}[.] // 3;
-    reduce ["firstmate","npm_global","release_binary"][] as $tier (.;
+    reduce ["firstmate","npm_global"][] as $tier (.;
       ((.tools // []) | map(select(.tier == $tier))) as $entries
       | if ($entries | length) == 0 then .
         else .tiers[$tier].status = ($entries | min_by(.status | rank) | .status)
@@ -789,7 +754,6 @@ rollback_firstmate() {
   [ "$(observe_firstmate)" = "$target" ] || { set_tier refused 'the checkout left the recorded applied commit during the preflight'; return; }
   refusal=$(preflight_firstmate_refusal "$entry")
   [ -z "$refusal" ] || { set_tier refused "$refusal"; return; }
-  if [ "$USAGE_REQUIRED" -eq 1 ] && ! usage_idle firstmate; then set_tier refused "$USE_DETAIL"; return; fi
   if run_timed "$TIMEOUT_SECONDS" "$GIT_BIN" -C "$FIRSTMATE_PATH" reset --hard "$prior" >/dev/null 2>&1 &&
      [ "$(observe_firstmate)" = "$prior" ]; then
     receipt_reconcile "$entry" "$prior" at_target rolled_back
@@ -822,7 +786,6 @@ rollback_npm() {
   [ "$NPM_OBSERVED" = "$target" ] || { set_tier refused 'the installed version left the recorded applied version during the preflight'; return; }
   refusal=$(preflight_npm_refusal "$entry")
   [ -z "$refusal" ] || { set_tier refused "$refusal"; return; }
-  if [ "$USAGE_REQUIRED" -eq 1 ] && ! usage_idle "$(printf '%s' "$entry" | jq -r '.name')"; then set_tier refused "$USE_DETAIL"; return; fi
   if run_timed "$TIMEOUT_SECONDS" env NPM_CONFIG_PREFIX="$NPM_PREFIX" "$NPM_BIN" install -g "$source" >/dev/null 2>&1; then
     observe_npm "$command_name"
     installed=$NPM_OBSERVED
@@ -858,7 +821,7 @@ rollback_preflight() {
     refusal=
     phase=
     case "$tier" in
-      firstmate|npm_global|release_binary) ;;
+      firstmate|npm_global) ;;
       *) phase=foreign ;;
     esac
     if [ -z "$phase" ]; then
@@ -870,7 +833,6 @@ rollback_preflight() {
     if [ -z "$phase" ]; then
       unreadable='the current state of this tool is absent or unreadable'
       case "$tier" in
-        release_binary) observed=$(observe_release "$entry") ;;
         firstmate) observed=$(observe_firstmate) ;;
         npm_global)
           observe_npm "$(printf '%s' "$entry" | jq -r '.command // ""')"
@@ -891,14 +853,10 @@ rollback_preflight() {
         refusal='a Firstmate worker lane is in flight'
       else
         case "$tier" in
-          release_binary) refusal=$(preflight_release_refusal "$entry") ;;
           firstmate) refusal=$(preflight_firstmate_refusal "$entry") ;;
           npm_global) refusal=$(preflight_npm_refusal "$entry") ;;
         esac
       fi
-    fi
-    if [ "$phase" = at_target ] && [ -z "$refusal" ] && [ "$USAGE_REQUIRED" -eq 1 ]; then
-      usage_idle "$name" || refusal=$USE_DETAIL
     fi
     if [ "$phase" = unreconcilable ] || { [ -n "$refusal" ] && [ "$refusal" != 'a Firstmate worker lane is in flight' ]; }; then
       case "$UNRECONCILABLE_TIERS" in *" $tier "*) : ;; *) UNRECONCILABLE_TIERS="$UNRECONCILABLE_TIERS$tier " ;; esac
@@ -915,10 +873,6 @@ rollback_main() {
   doc=$(jq -ce '.' "$ROLLBACK_RECEIPT" 2>/dev/null) || die "receipt is not readable JSON: $ROLLBACK_RECEIPT"
   printf '%s' "$doc" | jq -e '.schema_version == 1 and .tool == "dev-tools-apply-updates" and (.tools|type=="array")' >/dev/null 2>&1 ||
     die "receipt is not a dev-tools-apply-updates receipt: $ROLLBACK_RECEIPT"
-  if [ "$(printf '%s' "$doc" | jq -r '.usage_authority_required // false')" = true ]; then
-    USAGE_REQUIRED=1
-    [ "$ATTENDED" -eq 0 ] || update_lock
-  fi
   RECEIPT_PATH=$ROLLBACK_RECEIPT
   RECEIPT_DOC=$doc
   detect_workers
@@ -947,7 +901,6 @@ rollback_main() {
             fi
           else
             case "$tier" in
-              release_binary) rollback_release "$entry" ;;
               firstmate) rollback_firstmate "$entry" ;;
               npm_global) rollback_npm "$entry" ;;
             esac
@@ -986,206 +939,13 @@ rollback_main() {
   return "$bad"
 }
 
-# Explicit requests persist intent before discovery or mutation. flock is held
-# for the entire attempt and is released by the kernel even after SIGKILL.
-requested() {
-  [ "$EXPLICIT" -eq 0 ] || printf '%s' "$OBLIGATIONS" | jq -e --arg n "$1" 'index($n) != null' >/dev/null
-}
-usage_idle() {
-  local reply
-  USE_DETAIL='usage authority unavailable or unknown'
-  detect_workers
-  [ "$WG_STATUS" = clear ] || { USE_DETAIL=$WG_DETAIL; return 1; }
-  case "$USAGE_BIN" in /*) ;; *) return 1 ;; esac
-  [ -x "$USAGE_BIN" ] || return 1
-  reply=$(run_timed "$NETWORK_TIMEOUT" "$USAGE_BIN" "$1" 2>/dev/null) || return 1
-  printf '%s' "$reply" | jq -se 'length == 1 and (.[0] | .schema_version == 1 and
-    (.status == "idle" or .status == "busy" or .status == "unknown") and (.detail|type == "string"))' >/dev/null 2>&1 || return 1
-  USE_DETAIL=$(printf '%s' "$reply" | jq -r '.detail')
-  [ "$(printf '%s' "$reply" | jq -r '.status')" = idle ]
-}
-obligations_write() {
-  local tmp
-  tmp=$(mktemp "$RECEIPT_DIR/.obligations.XXXXXX") || return 1
-  chmod 600 "$tmp" && jq -n --argjson names "$OBLIGATIONS" \
-    '{schema_version:1,tools:$names}' >"$tmp" && mv -f "$tmp" "$OBLIGATION_PATH" && return 0
-  rm -f "$tmp"
-  return 1
-}
-update_lock() {
-  command -v flock >/dev/null 2>&1 || die 'explicit updates require flock for crash-safe serialization'
-  if [ ! -d "$RECEIPT_DIR" ]; then
-    (umask 077; mkdir -p "$RECEIPT_DIR") || die 'cannot create updater state'
-  fi
-  # This same installation must always use this same state directory.
-  exec 9>"$RECEIPT_DIR/update.lock" || die 'cannot open updater lock'
-  flock -n 9 || die 'another update attempt owns the updater lock'
-}
-explicit_setup() {
-  update_lock
-  if [ -e "$OBLIGATION_PATH" ]; then
-    OBLIGATIONS=$(jq -ce 'select(.schema_version == 1) | .tools |
-      select(type == "array" and all(.[]; . == "firstmate" or . == "no-mistakes" or
-        . == "chrome-devtools-axi" or . == "gh-axi" or . == "gnhf" or
-        . == "lavish-axi" or . == "quota-axi" or . == "tasks-axi")) | unique' "$OBLIGATION_PATH") || die 'invalid obligations; preserving state'
-  fi
-  if [ "$RESUME" -eq 0 ]; then
-    OBLIGATIONS=$(jq -cn --argjson old "$OBLIGATIONS" --argjson npm "$ALLOWLIST_NPM_JSON" '$old + $npm + ["firstmate","no-mistakes"] | unique')
-  fi
-  obligations_write || die 'cannot persist update intent'
-}
-obligations_settle() {
-  local completed
-  completed=$(jq -cn --argjson f "$FIRSTMATE" --argjson n "$NPM" --argjson nm "$NO_MISTAKES" '
-    def complete: .status == "applied" or .status == "up_to_date";
-    [($f | select(complete) | "firstmate"),
-     ($n.packages // [] | .[] | select(complete) | .name),
-     ($nm | select(complete) | "no-mistakes")]') || return 1
-  OBLIGATIONS=$(jq -cn --argjson old "$OBLIGATIONS" --argjson completed "$completed" '$old - $completed') || return 1
-  obligations_write
-}
-
-# Release assets are selected from the publisher API, never a constructed
-# download URL. GitHub's uploaded-asset SHA-256 digest authenticates the bytes.
-LOCAL_BIN=${DEV_TOOLS_UPDATE_LOCAL_BIN:-${HOME:-.}/.local/bin}
-CURL_BIN=${DEV_TOOLS_UPDATE_CURL_BIN:-curl}
-release_evidence() {
-  local selector=$1 doc tag platform asset
-  platform=${DEV_TOOLS_UPDATE_PLATFORM:-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)}
-  case "$platform" in *-x86_64) platform=${platform%-x86_64}-amd64 ;; *-aarch64) platform=${platform%-aarch64}-arm64 ;; esac
-  case "$platform" in linux-amd64|linux-arm64|darwin-amd64|darwin-arm64) ;; *) return 1 ;; esac
-  doc=$(run_timed "$NETWORK_TIMEOUT" "$CURL_BIN" -fsSL --proto '=https' --proto-redir '=https' \
-    --connect-timeout 5 --max-time "$NETWORK_TIMEOUT" \
-    "https://api.github.com/repos/kunchenguid/no-mistakes/releases/$selector") || return 1
-  tag=$(printf '%s' "$doc" | jq -er 'select(.draft == false and .prerelease == false) | .tag_name | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))') || return 1
-  [ "$selector" = latest ] || [ "$selector" = "tags/$tag" ] || return 1
-  asset="no-mistakes-$tag-$platform.tar.gz"
-  printf '%s' "$doc" | jq -ce --arg tag "$tag" --arg asset "$asset" '
-    [.assets[] | select(.name == $asset)] | select(length == 1) | .[0] |
-    select(.digest | test("^sha256:[0-9a-f]{64}$")) |
-    select(.browser_download_url == ("https://github.com/kunchenguid/no-mistakes/releases/download/" + $tag + "/" + $asset)) |
-    {kind:"github-release",version:($tag|ltrimstr("v")),url:.browser_download_url,checksum:("sha256-" + (.digest|ltrimstr("sha256:")))}'
-}
-release_download() {
-  local evidence=$1 destination=$2
-  run_timed "$TIMEOUT_SECONDS" "$CURL_BIN" -fsSL --proto '=https' --proto-redir '=https' \
-    --connect-timeout 5 --max-time "$TIMEOUT_SECONDS" \
-    "$(printf '%s' "$evidence" | jq -r '.url')" -o "$destination" || return 1
-  [ "$(file_checksum "$destination")" = "$(printf '%s' "$evidence" | jq -r '.checksum')" ]
-}
-apply_no_mistakes() {
-  local evidence target prior entry tmp binary backup checksum current_checksum exact staged
-  requested no-mistakes || { set_tier skipped 'no pending no-mistakes obligation'; return; }
-  usage_idle no-mistakes || { set_tier deferred "$USE_DETAIL"; return; }
-  binary="$LOCAL_BIN/no-mistakes"
-  [ -f "$binary" ] && [ ! -L "$binary" ] && [ -x "$binary" ] || { set_tier refused 'no-mistakes must be a regular owned executable'; return; }
-  [ -O "$binary" ] && [ -O "$LOCAL_BIN" ] || { set_tier refused 'no-mistakes install is owned by another user'; return; }
-  current_checksum=$(file_checksum "$binary") || { set_tier refused 'cannot read installed binary'; return; }
-  prior=$(run_timed "$NETWORK_TIMEOUT" "$binary" --version 2>/dev/null | grep -Eo "$NPM_OBSERVED_TOKEN_RE" | head -1)
-  npm_reversible_version "$prior" || { set_tier refused 'no-mistakes installed version unknown'; return; }
-  evidence=$(release_evidence latest) || { set_tier refused 'stable no-mistakes release evidence unavailable'; return; }
-  target=$(printf '%s' "$evidence" | jq -r '.version')
-  if [ "$target" = "$prior" ]; then set_tier up_to_date "no-mistakes already at stable $target"; return; fi
-  if jq -en --arg c "$prior" --arg t "$target" '($c|split(".")|map(tonumber)) > ($t|split(".")|map(tonumber))' >/dev/null; then
-    set_tier refused 'installed no-mistakes is newer than stable; refusing downgrade'; return
-  fi
-  exact=$(release_evidence "tags/v$target") || { set_tier refused 'exact release unavailable'; return; }
-  [ "$exact" = "$evidence" ] || { set_tier refused 'release evidence changed during verification'; return; }
-  tmp=$(mktemp -d "$RECEIPT_DIR/.release.XXXXXX") || { set_tier refused 'cannot stage release'; return; }
-  if ! release_download "$evidence" "$tmp/archive" ||
-     ! "$TAR_BIN" -xOzf "$tmp/archive" no-mistakes >"$tmp/binary" || [ ! -s "$tmp/binary" ]; then
-    rm -rf "$tmp"; set_tier refused 'release archive failed integrity or binary extraction'; return
-  fi
-  chmod 700 "$tmp/binary"
-  if [ "$(run_timed "$NETWORK_TIMEOUT" "$tmp/binary" --version 2>/dev/null | grep -Eo "$NPM_OBSERVED_TOKEN_RE" | head -1)" != "$target" ]; then
-    rm -rf "$tmp"; set_tier refused 'staged binary version differs from release'; return
-  fi
-  checksum=$(file_checksum "$tmp/binary")
-  backup="$RECEIPT_PATH.no-mistakes.prior"
-  if ! (umask 077; cat "$binary" >"$backup"); then
-    rm -rf "$tmp"; set_tier refused 'cannot preserve prior binary for rollback'; return
-  fi
-  if [ "$(file_checksum "$backup")" != "$current_checksum" ]; then
-    rm -rf "$tmp"; set_tier refused 'installed binary changed during release verification'; return
-  fi
-  entry=$(jq -cn --arg prior "$prior" --arg target "$target" --arg path "$binary" \
-    --arg backup "$backup" --arg checksum "$current_checksum" --arg target_checksum "$checksum" --argjson evidence "$evidence" \
-    '{tier:"release_binary",name:"no-mistakes",prior:$prior,target:$target,path:$path,
-      prior_evidence:{kind:"local-binary",path:$backup,checksum:$checksum},
-      target_evidence:($evidence + {binary_checksum:$target_checksum}),status:"pending"}')
-  if ! receipt_put "$entry"; then rm -rf "$tmp"; set_tier refused 'cannot record release mutation'; return; fi
-  staged=$(mktemp "$LOCAL_BIN/.no-mistakes.XXXXXX") || { rm -rf "$tmp"; set_tier refused 'cannot stage atomic replacement'; return; }
-  if ! cp "$tmp/binary" "$staged" || ! chmod 755 "$staged"; then
-    rm -rf "$tmp"; rm -f "$staged"; set_tier refused 'cannot stage atomic replacement'; return
-  fi
-  rm -rf "$tmp"
-  if [ "$(file_checksum "$binary")" != "$current_checksum" ]; then
-    rm -f "$staged"; set_tier refused 'installed no-mistakes changed during verification'; return
-  fi
-  if ! usage_idle no-mistakes; then
-    rm -f "$staged"; receipt_settle "$entry" deferred; set_tier deferred "$USE_DETAIL"; return
-  fi
-  if mv -f "$staged" "$binary" && [ "$(file_checksum "$binary")" = "$checksum" ]; then
-    receipt_settle "$entry" applied; set_tier applied "installed stable no-mistakes $target; activation remains attended"
-  else
-    rm -f "$staged"; receipt_settle "$entry" failed; set_tier failed 'no-mistakes replacement failed'
-  fi
-}
-
-observe_release() {
-  local entry=$1 path checksum
-  path=$(printf '%s' "$entry" | jq -r '.path // ""')
-  [ "$path" = "$LOCAL_BIN/no-mistakes" ] && [ -f "$path" ] && [ ! -L "$path" ] || return 0
-  checksum=$(file_checksum "$path") || return 0
-  if [ "$checksum" = "$(printf '%s' "$entry" | jq -r '.prior_evidence.checksum')" ]; then
-    printf '%s' "$entry" | jq -r '.prior'
-  elif [ "$checksum" = "$(printf '%s' "$entry" | jq -r '.target_evidence.binary_checksum')" ]; then
-    printf '%s' "$entry" | jq -r '.target'
-  fi
-}
-preflight_release_refusal() {
-  local entry=$1 backup
-  [ "$(printf '%s' "$entry" | jq -r '.name')" = no-mistakes ] || { printf 'unsupported release binary'; return; }
-  [ "$(printf '%s' "$entry" | jq -r '.path')" = "$LOCAL_BIN/no-mistakes" ] || { printf 'release binary ownership path differs'; return; }
-  backup=$(printf '%s' "$entry" | jq -r '.prior_evidence.path')
-  [ -f "$backup" ] && [ ! -L "$backup" ] &&
-    [ "$(file_checksum "$backup")" = "$(printf '%s' "$entry" | jq -r '.prior_evidence.checksum')" ] || { printf 'prior binary backup failed integrity'; return; }
-  usage_idle no-mistakes || printf '%s' "$USE_DETAIL"
-}
-rollback_release() {
-  local entry=$1 refusal staged backup prior
-  if [ "$ATTENDED" -eq 0 ]; then set_tier ready 'attended rollback would restore the preserved binary without activation'; return; fi
-  refusal=$(preflight_release_refusal "$entry")
-  [ -z "$refusal" ] || { set_tier refused "$refusal"; return; }
-  [ "$(observe_release "$entry")" = "$(printf '%s' "$entry" | jq -r '.target')" ] || { set_tier refused 'release binary changed during preflight'; return; }
-  backup=$(printf '%s' "$entry" | jq -r '.prior_evidence.path')
-  prior=$(printf '%s' "$entry" | jq -r '.prior')
-  staged=$(mktemp "$LOCAL_BIN/.no-mistakes.XXXXXX") || { set_tier refused 'cannot stage rollback'; return; }
-  if ! cp "$backup" "$staged" || ! chmod 755 "$staged" ||
-     [ "$(file_checksum "$staged")" != "$(printf '%s' "$entry" | jq -r '.prior_evidence.checksum')" ]; then
-    rm -f "$staged"; set_tier refused 'cannot verify staged rollback'; return
-  fi
-  usage_idle no-mistakes || { rm -f "$staged"; set_tier refused "$USE_DETAIL"; return; }
-  if mv -f "$staged" "$LOCAL_BIN/no-mistakes" && [ "$(observe_release "$entry")" = "$prior" ]; then
-    receipt_reconcile "$entry" "$prior" at_target rolled_back
-    set_tier rolled_back 'restored preserved no-mistakes binary without activation'
-  else
-    rm -f "$staged"; receipt_reconcile "$entry" "$(observe_release "$entry")" at_target rollback_failed
-    set_tier failed 'release binary rollback failed'
-  fi
-}
-
 # --------------------------------------------------------------------- main
 
 if ! command -v jq >/dev/null 2>&1; then die 'jq is required'; fi
-if [ "$EXPLICIT" -eq 1 ]; then explicit_setup; fi
 if [ "$ROLLBACK_MODE" -eq 1 ]; then rollback_main; exit $?; fi
 
 detect_workers
-if [ "$EXPLICIT" -eq 1 ] && [ "$OBLIGATIONS" = '[]' ]; then
-  FIRSTMATE=$(tier_json skipped 'no pending Firstmate obligation')
-  NPM=$(tier_json skipped 'no pending npm obligations' '{"packages":[]}')
-elif [ "$WG_STATUS" = active ]; then
+if [ "$WG_STATUS" = active ]; then
   FIRSTMATE=$(tier_json deferred 'workers active')
   NPM=$(tier_json deferred 'workers active' "$(jq -cn --argjson allow "$ALLOWLIST_NPM_JSON" '{allowlist:$allow,packages:[]}')")
 else
@@ -1194,36 +954,24 @@ else
     FIRSTMATE=$(tier_json refused 'checker output unknown or invalid; refusing all mutations')
     NPM=$(tier_json refused 'checker output unknown or invalid; refusing all mutations' "$(jq -cn --argjson allow "$ALLOWLIST_NPM_JSON" '{allowlist:$allow,packages:[]}')")
   else
-    if requested firstmate; then apply_firstmate "$DETECTION"; FIRSTMATE=$TIER
-    else FIRSTMATE=$(tier_json skipped 'no pending Firstmate obligation'); fi
+    apply_firstmate "$DETECTION"; FIRSTMATE=$TIER
     apply_npm "$DETECTION"; NPM=$TIER
-  fi
-fi
-
-NO_MISTAKES=$(tier_json skipped 'requires explicit invocation')
-if [ "$EXPLICIT" -eq 1 ]; then
-  apply_no_mistakes; NO_MISTAKES=$TIER
-  if [ "$RECEIPT_STALE" -eq 0 ]; then
-    obligations_settle || die 'could not settle durable obligations; retry preserves unfinished intent'
   fi
 fi
 
 if [ "$RECEIPT_WRITTEN" -eq 1 ]; then
   RECEIPT_DOC=$(printf '%s' "$RECEIPT_DOC" | jq -c \
     --arg f "$(printf '%s' "$FIRSTMATE" | jq -r '.status')" --arg n "$(printf '%s' "$NPM" | jq -r '.status')" \
-    --arg nm "$(printf '%s' "$NO_MISTAKES" | jq -r '.status')" \
-    '.tiers.firstmate.status = $f | .tiers.npm_global.status = $n | .tiers.release_binary.status = $nm')
+    '.tiers.firstmate.status = $f | .tiers.npm_global.status = $n')
   receipt_write || RECEIPT_STALE=1
 fi
 
 RESULT=$(jq -cn --argjson dry "$DRY_RUN" --arg status "$WG_STATUS" --argjson count "$WG_COUNT" --arg detail "$WG_DETAIL" \
   --argjson firstmate "$FIRSTMATE" --argjson npm "$NPM" \
   --arg receipt_path "$RECEIPT_PATH" --arg receipt_status "$(receipt_status)" \
-  --argjson nm "$NO_MISTAKES" --argjson obligations "$OBLIGATIONS" --arg obligations_path "$OBLIGATION_PATH" \
   --argjson rollback "$(printf '%s' "$RECEIPT_DOC" | jq -c '.rollback')" \
   '{schema_version:3,dry_run:($dry==1),worker_guard:{status:$status,in_flight:$count,detail:$detail},
-    tiers:{firstmate:$firstmate,npm_global:$npm,release_binary:$nm},
-    obligations:{path:$obligations_path,remaining:$obligations},
+    tiers:{firstmate:$firstmate,npm_global:$npm},
     receipt:{path:$receipt_path,status:$receipt_status,rollback:$rollback}}')
 
 if [ "$MODE" = json ]; then printf '%s\n' "$RESULT" | jq .
