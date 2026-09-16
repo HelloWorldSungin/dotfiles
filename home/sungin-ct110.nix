@@ -32,6 +32,13 @@ in
       if [ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
         . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
       fi
+
+      # Default Firstmate's operational home only when FM_HOME is unset.
+      # An explicit empty value is set, not unset, and is preserved so a
+      # session or secondmate can keep a different home without fighting this.
+      if [ -z "''${FM_HOME+x}" ]; then
+        export FM_HOME=/home/sungin/firstmate-upstream
+      fi
     '';
     initContent = ''
       if [[ -o login ]]; then

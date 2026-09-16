@@ -53,6 +53,9 @@ documentation of what's installed. Key ideas:
   its attribute name at https://search.nixos.org/packages and add it here.
 - `programs.zsh = { ... }` - home-manager writes ~/.zshrc for you from this.
   Same for starship, fzf, git. You never edit those rc files by hand.
+  CT110's `programs.zsh.envExtra` also defaults `FM_HOME` to
+  `/home/sungin/firstmate-upstream` only when the variable is unset; an
+  explicit empty value or per-session/secondmate override is left alone.
 - `mkOutOfStoreSymlink` (the `link` helper at the top) - the important
   trick. Normal home-manager files are read-only copies in /nix/store.
   Configs we want to edit live (nvim, herdr) are instead symlinked back to
