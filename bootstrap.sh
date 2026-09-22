@@ -101,7 +101,7 @@ elif [ -x "$ZSH_PATH" ]; then
   fi
 fi
 
-step "4/6 herdr (session layer, exact install-if-absent pin)"
+step "4/6 herdr (session layer, stable manifest, install-if-absent)"
 "$PINNED_INSTALLER" --only herdr
 
 step "5/6 agent harnesses (fast-moving CLIs)"

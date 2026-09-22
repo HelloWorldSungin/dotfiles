@@ -17,17 +17,17 @@ alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
 | Tool | Exact pin | Authority and stable judgment | Fresh install | Apply boundary |
 |---|---:|---|---|---|
 | Determinate Nix Installer | 3.22.3 | Determinate GitHub GA release, with v3.22.0 prerelease excluded | Versioned installer URL plus recorded installer SHA-256 | Report only |
-| Claude Code | 2.1.280 | Exact npm package published as `latest` on 2026-09-22. The `stable` dist-tag is still 2.1.267, so this row is not a stable-channel selection. Guarded apply stays off | Exact npm package and registry integrity, install-if-absent | Report only |
-| Codex | 0.154.0 | Official npm default tag and matching GA release; suffixed alpha builds excluded | Exact npm package and registry integrity | Report only |
-| OpenCode 1 | 1.18.30 | Official npm default tag and matching GA release; OpenCode 2 beta and snapshots excluded | Exact npm package and registry integrity | Report only |
-| Pi | 0.85.1 | `@earendil-works/pi-coding-agent` default tag. The retired Mario Zechner package is not the fleet distribution | Exact npm package and registry integrity | Report only |
-| Antigravity CLI | 1.2.0 | Google's per-platform production manifest | Exact publisher asset and SHA-512 from that manifest | Report only; its own self-update remains an upstream limitation |
+| Claude Code | Latest at invocation | npm default `latest` tag, not the `stable` dist-tag. Numeric stable only; guarded apply stays off | Resolve version and integrity, then verify the exact artifact. Install-if-absent | Report only |
+| Codex | Latest at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify the exact artifact. Install-if-absent | Report only |
+| OpenCode | Latest at invocation | npm default `latest` tag; suffixed beta and snapshot versions are refused | Resolve version and integrity, then verify the exact artifact. Install-if-absent | Report only |
+| Pi | Latest at invocation | `@earendil-works/pi-coding-agent` default tag. The retired Mario Zechner package is not the fleet distribution | Resolve version and integrity, then verify the exact artifact. Install-if-absent | Report only |
+| Antigravity CLI | Latest production manifest at invocation | Google's per-platform production manifest | Publisher asset and SHA-512 from that manifest. Install-if-absent | Report only; its own self-update remains an upstream limitation |
 | Cursor Agent | 2026.09.08-6caf4ff | Version embedded in Cursor's official moving installer | No automated install; observed snapshot only | Report only |
 | Treehouse | 2.3.0 | Latest non-draft, non-prerelease GitHub release | Exact release archive and publisher checksum | Report only |
 | no-mistakes | 1.72.0 | Latest GitHub GA release; 1.73.0 and 1.74.0 prereleases are excluded | Exact release archive and publisher checksum | Attended only |
 | Herdr | Latest stable at invocation | `herdr.dev/latest.json` | Publisher asset and SHA-256, only when absent | Attended compatibility review; activation deferred |
 | GBrain | 0.48.5.0 | Latest non-draft, non-prerelease `garrytan/gbrain` release | Not installed here | Firstmate-owned attended migration |
-| gnhf | 0.1.49 | npm default tag | Exact npm package and registry integrity | Guarded exact apply |
+| gnhf | Latest at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify the exact artifact | Guarded exact apply with receipts |
 | gh-axi | Latest stable at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify exact artifact | Guarded exact apply with receipts |
 | tasks-axi | Latest stable at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify exact artifact | Guarded exact apply with receipts |
 | quota-axi | Latest stable at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify exact artifact | Guarded exact apply with receipts |
@@ -54,15 +54,16 @@ Manager release branches. Exact repository and package identifiers live beside
 the values in `config/dev-tools-versions.sh`, so the checker does not infer an
 owner from an executable name.
 
-Claude Code's exact pin is 2.1.280, the package `version` npm publishes as
-`latest` (checked 2026-09-22). The publisher `stable` dist-tag remains 2.1.267,
-so this pin is not labeled stable-channel. The row's channel field is `default`
-only so the checker compares the pin with `npm view version` (that latest
-package) instead of reporting a permanent mismatch against the older `stable`
-tag. That field change is this row alone. Guarded apply stays `no`.
+Claude Code selects npm's default `latest` tag (`npm view version`), not the
+publisher `stable` dist-tag. Those tags are not the same channel: `stable` can
+lag the package npm publishes as `latest`. The row's channel field stays
+`default` so neither the checker nor the installer reads `dist-tags.stable`.
+A prerelease or missing integrity is refused. Guarded apply stays `no`.
 `dev-tools-install-pinned` still skips Claude when any `claude` command is
 already present, so a native install is not overwritten and a newer binary is
-not downgraded. The guarded updater cannot mutate Claude Code.
+not downgraded. The guarded updater cannot mutate Claude Code. Codex, OpenCode,
+and Pi use the same install-if-absent latest selection and stay off the
+guarded updater, so a running harness is not replaced.
 
 The Cursor CLI is already an intentional beta dependency in this repository.
 Cursor documents only a moving installer and auto-update commands, with no
@@ -78,17 +79,24 @@ initial install. Its binary also self-updates during ordinary use and exposes no
 documented disable switch. The checker therefore makes post-install drift
 visible instead of claiming the pin controls the running binary forever.
 
-## Latest stable policy: axi tools, Herdr, WezTerm
+## Latest stable policy: Firstmate developer tools
 
-Only the five axi npm packages above and Herdr drop repository version locks.
-The `latest|publisher` npm rows select the publisher default tag, reject
-prereleases or missing integrity, and re-query the resolved exact version before
-installation. `dev-tools-install-pinned` retains its command name and
-install-if-absent behavior: an existing command is skipped before discovery,
-including one outside the configured install prefix. A moving-policy dry-run
-performs read-only discovery but installs nothing. Exact rows in a trusted
-`DEV_TOOLS_PINS_FILE` override retain their existing behavior; unrelated pins
-are unchanged.
+Firstmate npm tools select the publisher default tag at invocation:
+`claude`, `codex`, `opencode`, `pi`, `gnhf`, `gh-axi`, `tasks-axi`,
+`quota-axi`, `chrome-devtools-axi`, and `lavish-axi`. The `latest|publisher`
+rows reject prereleases, a non-default channel, or missing integrity, then
+re-query the resolved exact version before installation. Receipts still bind
+that exact version and integrity. `dev-tools-install-pinned` retains its
+command name and install-if-absent behavior: an existing command is skipped
+before discovery, including one outside the configured install prefix. A
+moving-policy dry-run performs read-only discovery but installs nothing.
+Exact rows in a trusted `DEV_TOOLS_PINS_FILE` override retain their existing
+behavior; unrelated pins are unchanged.
+
+Antigravity fresh installs read Google's production manifest for that
+platform, then require its asset URL and SHA-512. An existing `agy` command
+is left in place. Herdr keeps its publisher stable manifest and attended
+boundary. Cursor remains the beta-only exception below.
 
 `dev-tools-apply-updates` independently resolves each moving npm target and
 requires it to match the checker's stable result. It then uses the existing
@@ -120,6 +128,22 @@ checksums and already-current behavior. Do not use `wezterm@nightly`, historical
 cask versions or an unverified direct download. Review any existing external
 pin or nightly installation before that separate operation; dotfiles does not
 alter it or terminate open terminals. No WezTerm installer is added here.
+
+## Remaining exact selections
+
+These stay exact because a supported latest channel would drop verification,
+move a code root that can hold local commits, or leave the Firstmate tool
+surface:
+
+| Selection | Reason |
+|---|---|
+| Cursor Agent | Beta only. Upstream publishes a moving installer and auto-update, with no stable or exact-version selector and no publisher checksum. The checker records the observed snapshot and never runs the installer. |
+| Firstmate source | Exact audited commit. Guarded apply fast-forwards only to that commit after proving it is on authoritative `main`. A checkout that is ahead, diverged, or dirty is refused. Latest selection does not reset, rebase, or discard local commits. |
+| Treehouse and no-mistakes | GitHub latest does not publish a checksum the existing archive installer can bind. Recorded release SHA-256 stays the verification receipt, so it also stays the selection. no-mistakes stays attended-only; this policy never starts or restarts its daemon. |
+| GBrain | Excluded. No upgrade, patch, or dream path is selected here. The report-only row stays at its recorded release. |
+| Baby Menu, Kun loader, Matt Pocock skills | Baby Menu is a detached release checkout and an existing repository is never moved. Kun and Matt stay on the reviewed adopt path; Matt live bytes belong to Claude marketplace autoUpdate. |
+| OpenCode ACP, OMP ACP, claude-spend | Launch and wrapper specs. `npx` has no integrity re-check in this repository, so those specs stay exact while the OpenCode CLI install resolves latest. |
+| Nixpkgs, Home Manager, Nix installer, CI action SHAs, Neovim plugins | OS and base packages, workflow action commits, and editor plugins. Not Firstmate developer-tool selection. `flake.lock` is unchanged. |
 
 Source inspection on 2026-09-15 confirmed the Herdr manifest schema and
 WezTerm stable cask instructions. npm documents its default `latest` lookup in
@@ -263,8 +287,9 @@ Bootstrap invokes it after the exact Nix and Home Manager bootstrap.
 
 1. Fast-forward Firstmate's `main` branch to the exact recorded commit, after
    proving the commit belongs to the freshly read remote branch.
-2. Install the five axi tools at resolved stable versions and gnhf at its
-   recorded pin, after independently verifying each exact artifact and integrity.
+2. Install the five axi tools and gnhf at resolved stable versions, after
+   independently verifying each exact artifact and integrity. Harness CLIs
+   are not in this scope.
 
 Both scopes refuse while any Firstmate worker lane exists and recheck that guard
 immediately before mutation; a lane found by that recheck is reported in the

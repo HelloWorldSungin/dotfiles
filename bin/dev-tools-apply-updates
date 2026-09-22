@@ -4,9 +4,10 @@
 # The only mutable tiers are Firstmate's pinned commit and six explicitly
 # allowlisted npm tools. The checker finds drift, but this command rereads the
 # repository pin and independently verifies the exact remote artifact before
-# applying it. The five axi tools resolve latest stable to a verified exact
-# artifact; gnhf retains its repository pin. Firstmate advances by
-# fast-forward ONLY - never a merge commit, rebase, or force.
+# applying it. Allowlisted npm tools marked latest|publisher, including gnhf
+# and the axi tools, resolve latest stable to a verified exact artifact.
+# Firstmate advances by fast-forward ONLY to its audited commit - never a
+# merge commit, rebase, force, or discard of local commits.
 #
 # Herdr and no-mistakes are attended-only runtime-hosting tools. This command
 # MUST NEVER install, update, invoke, reload, stop, or restart either one. Nix,

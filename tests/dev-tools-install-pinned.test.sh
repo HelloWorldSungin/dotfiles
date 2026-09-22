@@ -55,7 +55,7 @@ TOOLCHAIN_VERIFIED_AT=2026-09-09
 TREEHOUSE_VERSION=2.3.0
 NO_MISTAKES_VERSION=1.72.0
 HERDR_LATEST_MANIFEST_URL=https://herdr.dev/latest.json
-ANTIGRAVITY_VERSION=1.1.28
+ANTIGRAVITY_MANIFEST_URL_PREFIX=https://antigravity-cli-auto-updater.invalid/manifests
 CURSOR_AGENT_OBSERVED_VERSION=2026.09.08-test
 CURSOR_INSTALLER_URL=https://cursor.invalid/install
 CURSOR_INSTALLER_SHA256=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
@@ -66,9 +66,6 @@ NPM_TOOL_PINS=(
 )
 RELEASE_SHA256_PINS=(
   'linux-amd64|$TREE_SHA|$NM_SHA'
-)
-ANTIGRAVITY_ASSET_PINS=(
-  'linux-amd64|https://publisher.invalid/antigravity.tar.gz|$AGY_SHA'
 )
 EOF
 
@@ -118,6 +115,11 @@ case "$url" in
     jq -cn --arg sha "${TEST_MANIFEST_SHA:-$TEST_HERDR_SHA}" --arg v "${TEST_HERDR_VERSION:-0.9.0}" '{version:$v,assets:{"linux-x86_64":("https://github.com/herdrdev/herdr/releases/download/v"+$v+"/herdr-linux-x86_64")},sha256:{"linux-x86_64":$sha}}'
     ;;
   *herdr*) cp "$TEST_ASSETS/herdr" "$output" ;;
+  *antigravity-cli-auto-updater*)
+    [ "${TEST_AGY_MANIFEST_FAIL:-0}" = 1 ] && exit 1
+    jq -cn --arg sha "${TEST_AGY_SHA:-$TEST_AGY_SHA_DEFAULT}" --arg v "${TEST_AGY_VERSION:-1.1.28}" \
+      '{version:$v,url:("https://storage.googleapis.com/antigravity-public/antigravity-cli/"+$v+"-test/linux-x64/cli_linux_x64.tar.gz"),sha512:$sha}'
+    ;;
   *antigravity*) cp "$TEST_ASSETS/antigravity.tar.gz" "$output" ;;
   *cursor*) touch "$TEST_CURSOR_FETCHED"; printf '#!/usr/bin/env bash\nexit 0\n' >"$output" ;;
   *) exit 1 ;;
@@ -143,7 +145,7 @@ run_installer() {
     DEV_TOOLS_INSTALL_CURL_BIN="$FAKEBIN/curl" DEV_TOOLS_INSTALL_NPM_BIN="$FAKEBIN/npm" \
     DEV_TOOLS_INSTALL_GIT_BIN="$FAKEBIN/git" \
     DEV_TOOLS_INSTALL_LOCAL_BIN="$LOCAL_BIN" DEV_TOOLS_UPDATE_NPM_PREFIX="$PREFIX" \
-    TEST_HERDR_SHA="$HERDR_SHA" TEST_NPM_LOG="$NPM_LOG" TEST_ASSETS="$ASSETS" TEST_CURSOR_FETCHED="$FIXTURE/cursor-fetched" \
+    TEST_HERDR_SHA="$HERDR_SHA" TEST_AGY_SHA_DEFAULT="$AGY_SHA" TEST_NPM_LOG="$NPM_LOG" TEST_ASSETS="$ASSETS" TEST_CURSOR_FETCHED="$FIXTURE/cursor-fetched" \
     TEST_BAD_INTEGRITY="${TEST_BAD_INTEGRITY:-0}" TEST_REAL_GIT="$(command -v git)" "$INSTALLER" "$@"
 }
 
@@ -251,6 +253,39 @@ done
 PINS=$SAFE_PINS
 pass 'moving npm selection verifies exact integrity, skips installed tools and fails closed'
 
+# The stable dist-tag is not a supported moving selector. Claude uses the
+# default latest tag for this reason; a stable channel must fail closed.
+PINS="$FIXTURE/stable-channel-pins.sh"
+sed "s/|default'/|stable'/" "$FIXTURE/stable-pins.sh" >"$PINS"
+rm -f "$PREFIX/bin/demo"
+if run_installer --only demo >/dev/null 2>&1; then fail 'moving npm accepted the stable dist-tag channel'; fi
+[ ! -e "$PREFIX/bin/demo" ] || fail 'stable-channel refusal installed a tool'
+PINS=$SAFE_PINS
+pass 'moving npm selection refuses the stable dist-tag channel'
+
+# Antigravity follows the production manifest. An installed binary is never
+# replaced, and bad metadata or checksums install nothing.
+prior_agy_sha=$(sha256sum "$LOCAL_BIN/agy")
+export TEST_AGY_MANIFEST_FAIL=1
+run_installer --only agy >/dev/null
+[ "$(sha256sum "$LOCAL_BIN/agy")" = "$prior_agy_sha" ] || fail 'installed Antigravity client was replaced'
+rm -f "$LOCAL_BIN/agy"
+if run_installer --only agy >/dev/null 2>&1; then fail 'Antigravity accepted manifest failure'; fi
+unset TEST_AGY_MANIFEST_FAIL
+for mode in prerelease checksum malformed; do
+  case "$mode" in
+    prerelease) export TEST_AGY_VERSION=1.2.0-beta.1 ;;
+    checksum) export TEST_AGY_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
+    malformed) export TEST_AGY_VERSION=1.1.28; export TEST_AGY_SHA=invalid ;;
+  esac
+  if run_installer --only agy >/dev/null 2>&1; then fail "Antigravity accepted $mode"; fi
+  [ ! -e "$LOCAL_BIN/agy" ] || fail "Antigravity $mode refusal installed a client"
+  unset TEST_AGY_VERSION TEST_AGY_SHA
+done
+run_installer --only agy >/dev/null
+[ -x "$LOCAL_BIN/agy" ] || fail 'Antigravity manifest install did not restore the client'
+pass 'Antigravity manifest selection skips installed clients and fails closed'
+
 # Herdr never replaces an installed client, even if discovery is unavailable.
 make_binary "$LOCAL_BIN/herdr" herdr 0.8.2
 prior_client_sha=$(sha256sum "$LOCAL_BIN/herdr")
@@ -288,8 +323,11 @@ run_installer --only baby-menu >/dev/null
 [ "$(git -C "$FIXTURE/home/firstmate" rev-parse HEAD)" = "$FIRSTMATE_TEST_REV" ] || fail 'Firstmate clone did not use the exact commit'
 [ "$(git -C "$FIXTURE/home/baby-menu" rev-parse HEAD)" = "$BABY_MENU_TEST_REV" ] || fail 'Baby Menu clone did not use the exact release commit'
 [ "$(git -C "$FIXTURE/home/firstmate" symbolic-ref --short HEAD)" = main ] || fail 'Firstmate exact clone did not preserve the guarded-update branch'
+git -C "$FIXTURE/home/firstmate" -c user.email=tests@example.invalid -c user.name=tests commit -qm 'local commit' --allow-empty
+local_head=$(git -C "$FIXTURE/home/firstmate" rev-parse HEAD)
 run_installer --only firstmate >/dev/null
-pass 'source repositories install exact commits atomically and idempotently'
+[ "$(git -C "$FIXTURE/home/firstmate" rev-parse HEAD)" = "$local_head" ] || fail 'Firstmate install discarded a local commit'
+pass 'source repositories install exact commits atomically and idempotently and do not discard local commits'
 
 if run_installer --only cursor-agent >/dev/null 2>&1; then fail 'unpinable Cursor install was accepted'; fi
 [ ! -e "$FIXTURE/cursor-fetched" ] || fail 'moving Cursor installer was fetched or executed'

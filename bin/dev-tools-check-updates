@@ -252,7 +252,7 @@ check_herdr() {
 }
 
 check_antigravity() {
-  local current latest json url detail='' key asset_suffix row pin_key expected_url expected_sha manifest_url manifest_sha
+  local current latest json url detail='' key asset_suffix manifest_url manifest_sha
   current=$(installed_command_version agy || printf unknown)
   case "$PLATFORM" in
     linux-amd64) key=linux_amd64; asset_suffix=/linux-x64/cli_linux_x64.tar.gz ;;
@@ -261,34 +261,21 @@ check_antigravity() {
     darwin-arm64) key=darwin_arm64; asset_suffix=/darwin-arm/cli_mac_arm64.tar.gz ;;
     *) key=unsupported; asset_suffix=unsupported ;;
   esac
-  url="https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/$key.json"
+  url="${ANTIGRAVITY_MANIFEST_URL_PREFIX:-}/$key.json"
   json=$(run_timed "$NETWORK_TIMEOUT" "$CURL_BIN" -fsSL --connect-timeout 5 --max-time "$NETWORK_TIMEOUT" "$url" 2>/dev/null || true)
   latest=$(printf '%s' "$json" | jq -er '.version | select(type == "string")' 2>/dev/null || true)
-  expected_url=''; expected_sha=''
-  for row in "${ANTIGRAVITY_ASSET_PINS[@]}"; do
-    IFS='|' read -r pin_key expected_url expected_sha <<<"$row"
-    [ "$pin_key" = "$PLATFORM" ] && break
-    expected_url=''; expected_sha=''
-  done
   manifest_url=$(printf '%s' "$json" | jq -r '.url // ""' 2>/dev/null || true)
   manifest_sha=$(printf '%s' "$json" | jq -r '.sha512 // ""' 2>/dev/null || true)
   if ! stable_version "$latest"; then latest=unknown; detail='publisher production manifest did not expose a stable version'
-  elif [ -z "$expected_url" ] ||
-       ! printf '%s\n' "$manifest_sha" | grep -Eq '^[0-9a-f]{128}$'; then
+  elif [ "$key" = unsupported ] || ! printf '%s\n' "$manifest_sha" | grep -Eq '^[0-9a-f]{128}$'; then
     latest=unknown; detail='publisher production manifest asset or checksum is invalid for this platform'
   else
     case "$manifest_url" in
       "https://storage.googleapis.com/antigravity-public/antigravity-cli/${latest}-"*"$asset_suffix") ;;
       *) latest=unknown; detail='publisher production manifest asset is invalid for this platform' ;;
     esac
-    if [ "$latest" != unknown ] && [ "$latest" = "$ANTIGRAVITY_VERSION" ] &&
-       { [ "$manifest_url" != "$expected_url" ] || [ "$manifest_sha" != "$expected_sha" ]; }; then
-      latest=unknown; detail='publisher production manifest asset or checksum differs from the recorded pin'
-    elif [ "$latest" != unknown ] && [ "$latest" != "$ANTIGRAVITY_VERSION" ]; then
-      detail='publisher production manifest differs from the recorded pin'
-    fi
   fi
-  tool_json antigravity google-production-manifest "$current" "$ANTIGRAVITY_VERSION" "$latest" exact-manifest-asset report-only "$detail"
+  tool_json antigravity google-production-manifest "$current" latest "$latest" stable-manifest-asset report-only "$detail"
 }
 
 check_cursor() {

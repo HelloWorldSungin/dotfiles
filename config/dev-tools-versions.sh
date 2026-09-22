@@ -13,7 +13,9 @@ NIXPKGS_REV=d58a46e3bc02d91ebe04667f8397752a749c0024
 HOME_MANAGER_CHANNEL=26.05
 HOME_MANAGER_REV=fd0956c99c41ae3c13a73a638f1f7e963aebc4ab
 
-ANTIGRAVITY_VERSION=1.2.0
+# Google's per-platform production manifest. Version and SHA-512 are read at
+# invocation; this prefix is not a version pin.
+ANTIGRAVITY_MANIFEST_URL_PREFIX=https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests
 CURSOR_AGENT_OBSERVED_VERSION=2026.09.08-6caf4ff
 CURSOR_INSTALLER_URL=https://cursor.com/install
 CURSOR_INSTALLER_SHA256=8513e9f949576d7ced2a2a582252626cc86235437c2749bf93c886f1d5fdb203
@@ -48,15 +50,16 @@ CI_ACTION_PINS=(
   'nix-installer-action|DeterminateSystems/nix-installer-action|v23|3138316df39ed29be04236d7ffc686fa525866aa'
 )
 
-# Only the five axi tools use latest|publisher: resolve stable at invocation.
-# Other rows retain exact versions and recorded integrity.
+# latest|publisher rows resolve the npm default tag at invocation, then bind
+# that exact version and integrity. channel=default is the latest tag, never
+# the separate stable dist-tag. Guarded apply stays off for harness CLIs.
 # name|command|package|version|registry-integrity|guarded-apply|stable-channel
 NPM_TOOL_PINS=(
-  'claude|claude|@anthropic-ai/claude-code|2.1.280|sha512-EZlX8jqNf+e7q9v+UoPbLYAbEGth7aDbcTytHzPYYohbP/fCfrjboCbcv85ZYGEq1Rq7Amm8hXLhuCKxLsabwA==|no|default'
-  'codex|codex|@openai/codex|0.154.0|sha512-FV/x1OHXYv/ifjf3mXj9ThTTAWcUZN6cGIRQRhRxkKNOPuImu1WW0c8ev1vUkE9XGH90dEnYG1tBjIkxRikg0w==|no|default'
-  'opencode|opencode|opencode-ai|1.18.30|sha512-oLcOLQE4XzDKy6T5L5d1RdVJvXHXwVlD4hRF5V317JbUQorrl2EyDdGZk5kbgv675J9FXp8usg92MZbEWhh6gQ==|no|default'
-  'pi|pi|@earendil-works/pi-coding-agent|0.85.1|sha512-FGRN+OHbWaefBPGaTggAdLjrIHW+s2PzLyglz/5dfLzb9of7uuXMXYC0fJIeZTw+shS32o2cuQ9jF7YSDuL/oQ==|no|default'
-  'gnhf|gnhf|gnhf|0.1.49|sha512-HzvxCzLaNZ2ipN7bqkn90f0sVbp4BgHv11RDOJY9fB1HL5cAdrSIDNQvpwjtqsPLRjRoymHnyJpsz2WOynbL2g==|yes|default'
+  'claude|claude|@anthropic-ai/claude-code|latest|publisher|no|default'
+  'codex|codex|@openai/codex|latest|publisher|no|default'
+  'opencode|opencode|opencode-ai|latest|publisher|no|default'
+  'pi|pi|@earendil-works/pi-coding-agent|latest|publisher|no|default'
+  'gnhf|gnhf|gnhf|latest|publisher|yes|default'
   'gh-axi|gh-axi|gh-axi|latest|publisher|yes|default'
   'tasks-axi|tasks-axi|tasks-axi|latest|publisher|yes|default'
   'quota-axi|quota-axi|quota-axi|latest|publisher|yes|default'
@@ -78,14 +81,6 @@ RELEASE_SHA256_PINS=(
   'darwin-arm64|1cb09bcfa830b4eec5e54beeaa71589adb9c5d828573dda0f5150e2d80cf13d5|c3a38e95e050c30ee303806f22fbdc708f945e28d6b249d8e9540de65becb5c7'
   'linux-amd64|94fd2b2c20c35aac1ddc2941317890ad82c9916f5ccecbac4a50cda783eed10f|c226b69b8b8115827d2e438ea8b32eaff9b89291a1d2fddc5ef2449017b8d927'
   'linux-arm64|408589ba72b58d5e942071ed863a83fd96566cfd1e514945daa59defde528bbb|92f402654bdea845ded9cebca41fd565e2ae654bb81c9ce2282e0a2610df8736'
-)
-
-# platform|publisher asset URL|publisher SHA-512
-ANTIGRAVITY_ASSET_PINS=(
-  'linux-amd64|https://storage.googleapis.com/antigravity-public/antigravity-cli/1.2.0-5210873191596032/linux-x64/cli_linux_x64.tar.gz|d190b25a04ed2a03b0587838476494ae59d0d324ee6373263cabe584352c254f9051f3689c79ac4add8817ff6eb34b11694acd77002c55e91bd1d28b6dfdae22'
-  'linux-arm64|https://storage.googleapis.com/antigravity-public/antigravity-cli/1.2.0-5210873191596032/linux-arm/cli_linux_arm64.tar.gz|5ad72fba8c8e915c59c5505dc99116058352b8eba7f141d7ed220256788bada30df8b5af65c0d931ff10bbc661c0f5fe83931c58071fe3063a809bbeda7f59f9'
-  'darwin-amd64|https://storage.googleapis.com/antigravity-public/antigravity-cli/1.2.0-5210873191596032/darwin-x64/cli_mac_x64.tar.gz|a69a9253add7765f826b51e080005efff9e09b303aebc4f56a08fad29396d9e4ab49f549f0dfb5b686403a5ffb62031f34d65f98da6929fa4fbeb43c64f641b9'
-  'darwin-arm64|https://storage.googleapis.com/antigravity-public/antigravity-cli/1.2.0-5210873191596032/darwin-arm/cli_mac_arm64.tar.gz|7ca4c9d044adc76a1a7b0d5e73fa8b3dc0d56e9e8417f72a747e9bf9ff9783f7a57722c602c2fbb9b5bf5967e4b5568e4f62270480df499fa25ab971c8c2a886'
 )
 
 # package|version-command|version|evidence-class. Nixpkgs 26.05 at NIXPKGS_REV
