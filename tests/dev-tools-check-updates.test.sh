@@ -330,7 +330,8 @@ if printf '%s\n' "$action_refs" | grep -Evq '@[0-9a-f]{40}$'; then
 fi
 [ "$(acp_launch_version "$ROOT/config/baby-menu/agents.json" opencode opencode-ai)" = "$OPENCODE_ACP_VERSION" ] || fail 'the OpenCode agent launches a different opencode-ai version than the manifest'
 [ "$(acp_launch_version "$ROOT/config/baby-menu/agents.json" omp omp-acp)" = "$OMP_ACP_VERSION" ] || fail 'the OMP agent launches a different omp-acp version than the manifest'
-grep -Fq 'npm view @anthropic-ai/claude-code dist-tags.stable --json' "$CALL_LOG" || fail 'Claude did not use its authoritative stable dist-tag'
+grep -Fq 'npm view @anthropic-ai/claude-code version --json' "$CALL_LOG" || fail 'Claude did not use the npm default version field'
+! grep -Fq 'npm view @anthropic-ai/claude-code dist-tags.stable --json' "$CALL_LOG" || fail 'Claude was compared with the stable dist-tag'
 grep -Fq 'herdr --version' "$CALL_LOG" || fail 'Herdr installed version was not surveyed'
 ! grep -Eq 'herdr (update|server|setup|restart|reload|stop|start)' "$CALL_LOG" || fail 'checker drove Herdr lifecycle behavior'
 ! grep -Eq 'no-mistakes (daemon|update|setup|restart|reload|stop|start)' "$CALL_LOG" || fail 'checker drove no-mistakes lifecycle behavior'
@@ -441,22 +442,21 @@ printf '%s' "$quota" | jq -e '.detail | test("registry lookup failed")' >/dev/nu
 unset TEST_FAIL_NPM
 pass 'unknown publication sources remain explicitly unknown'
 
-# A registry that answers with no `stable` dist-tag at all is a different cause
-# from a registry that could not be reached, and the row says which it was.
+# Claude's row reads npm's default version field. An empty `stable` dist-tag
+# must not make that exact pin unknown.
 TEST_NPM_NO_STABLE_TAG=@anthropic-ai/claude-code
 json=$(run_checker --json --force --no-cache)
 claude_entry=$(printf '%s' "$json" | jq -ce '.tools[] | select(.name=="claude")')
-[ "$(printf '%s' "$claude_entry" | jq -r '[.latest_stable,.status] | join("|")')" = 'unknown|unknown' ] \
-  || fail 'a retired stable dist-tag was not refused as unknown'
-printf '%s' "$claude_entry" | jq -e '.detail | test("publishes no usable version")' >/dev/null \
-  || fail "a retired stable dist-tag was not reported as an empty channel: $(printf '%s' "$claude_entry" | jq -r '.detail')"
-if printf '%s' "$claude_entry" | jq -e '.detail | test("lookup failed")' >/dev/null; then
-  fail 'a successful registry answer was reported as a registry lookup failure'
-fi
-grep -Fq 'npm view @anthropic-ai/claude-code dist-tags.stable --json' "$CALL_LOG" \
-  || fail 'the retired-dist-tag case never reached the stable channel'
+[ "$(printf '%s' "$claude_entry" | jq -r '.source')" = npm-default-dist-tag ] \
+  || fail 'Claude source was not the npm default version field'
+[ "$(printf '%s' "$claude_entry" | jq -r '[.pinned,.latest_stable,.status,.apply_policy] | join("|")')" = '2.1.280|2.1.280|up_to_date|report-only' ] \
+  || fail "Claude pin was not the exact default-tag package: $(printf '%s' "$claude_entry" | jq -c '{pinned,latest_stable,status,apply_policy}')"
+grep -Fq 'npm view @anthropic-ai/claude-code version --json' "$CALL_LOG" \
+  || fail 'the default-tag case never read npm version'
+! grep -Fq 'npm view @anthropic-ai/claude-code dist-tags.stable --json' "$CALL_LOG" \
+  || fail 'the default-tag case queried the stable dist-tag'
 unset TEST_NPM_NO_STABLE_TAG
-pass 'a stable channel that publishes nothing is refused as an empty channel, not a lookup failure'
+pass 'Claude follows the npm default version field and ignores an empty stable tag'
 
 health=$(run_checker --health --json)
 [ "$(printf '%s' "$health" | jq -r '.checks.chrome_devtools_headless.status')" = healthy ] || fail 'healthy browser flags failed'

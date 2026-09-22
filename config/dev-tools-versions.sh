@@ -52,7 +52,7 @@ CI_ACTION_PINS=(
 # Other rows retain exact versions and recorded integrity.
 # name|command|package|version|registry-integrity|guarded-apply|stable-channel
 NPM_TOOL_PINS=(
-  'claude|claude|@anthropic-ai/claude-code|2.1.236|sha512-sz+7GLMhFcwkN2tZHJIXGgon/g/29WMMV5UNYog9sl4OvdX5q3evM1mcXVQnasP4obP6ueItECMCpSk1MPhTDg==|no|stable'
+  'claude|claude|@anthropic-ai/claude-code|2.1.280|sha512-EZlX8jqNf+e7q9v+UoPbLYAbEGth7aDbcTytHzPYYohbP/fCfrjboCbcv85ZYGEq1Rq7Amm8hXLhuCKxLsabwA==|no|default'
   'codex|codex|@openai/codex|0.154.0|sha512-FV/x1OHXYv/ifjf3mXj9ThTTAWcUZN6cGIRQRhRxkKNOPuImu1WW0c8ev1vUkE9XGH90dEnYG1tBjIkxRikg0w==|no|default'
   'opencode|opencode|opencode-ai|1.18.30|sha512-oLcOLQE4XzDKy6T5L5d1RdVJvXHXwVlD4hRF5V317JbUQorrl2EyDdGZk5kbgv675J9FXp8usg92MZbEWhh6gQ==|no|default'
   'pi|pi|@earendil-works/pi-coding-agent|0.85.1|sha512-FGRN+OHbWaefBPGaTggAdLjrIHW+s2PzLyglz/5dfLzb9of7uuXMXYC0fJIeZTw+shS32o2cuQ9jF7YSDuL/oQ==|no|default'
