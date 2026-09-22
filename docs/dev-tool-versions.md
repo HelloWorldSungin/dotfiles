@@ -54,16 +54,32 @@ Manager release branches. Exact repository and package identifiers live beside
 the values in `config/dev-tools-versions.sh`, so the checker does not infer an
 owner from an executable name.
 
-Claude Code selects npm's default `latest` tag (`npm view version`), not the
-publisher `stable` dist-tag. Those tags are not the same channel: `stable` can
-lag the package npm publishes as `latest`. The row's channel field stays
-`default` so neither the checker nor the installer reads `dist-tags.stable`.
-A prerelease or missing integrity is refused. Guarded apply stays `no`.
-`dev-tools-install-pinned` still skips Claude when any `claude` command is
-already present, so a native install is not overwritten and a newer binary is
-not downgraded. The guarded updater cannot mutate Claude Code. Codex, OpenCode,
-and Pi use the same install-if-absent latest selection and stay off the
-guarded updater, so a running harness is not replaced.
+Claude Code is the channel exception. It selects npm's default `latest` tag
+(`npm view version`), not the publisher `stable` dist-tag. Those tags differ:
+on 2026-09-22 `latest` was 2.1.280 and `stable` was 2.1.267. The row's channel
+field stays `default` so neither the checker nor the installer reads
+`dist-tags.stable`. A prerelease or missing integrity is refused. Guarded
+apply stays `no`. `dev-tools-install-pinned` still skips Claude when any
+`claude` command is already present, so a native install is not overwritten
+and a newer binary is not downgraded. The guarded updater cannot mutate
+Claude Code.
+
+Codex, OpenCode, Pi, gnhf, and the axi tools use that same default `latest`
+tag because it is their official stable release. Codex publishes `alpha` on
+other tags; OpenCode publishes `beta`, `next`, and `dev` on other tags; Pi's
+only other tag is `legacy-node20`. None of those packages has a separate
+`stable` dist-tag. Numeric prerelease versions are refused, so a preview tag
+is not selected. They stay install-if-absent. Codex, OpenCode, and Pi stay
+off the guarded updater, so a running harness is not replaced. gnhf is
+allowlisted and follows the existing receipt path.
+
+Pi also carries a temporary prompt-loss patch outside this repository. This
+policy does not freeze Pi's version: selection stays latest stable. It also
+does not install over an existing `pi`, so the patch survives bootstrap and
+the guarded updater. A later live replacement is allowed only after an
+isolated compatibility check shows that patch still works on the resolved
+version. That check is the removal condition for the live-update hold. It is
+not a permanent pin.
 
 The Cursor CLI is already an intentional beta dependency in this repository.
 Cursor documents only a moving installer and auto-update commands, with no
@@ -131,19 +147,19 @@ alter it or terminate open terminals. No WezTerm installer is added here.
 
 ## Remaining exact selections
 
-These stay exact because a supported latest channel would drop verification,
-move a code root that can hold local commits, or leave the Firstmate tool
-surface:
+An exact pin stays only for a compatibility or safety reason, and each one
+names the condition that removes it. Official latest stable is the default
+for the Firstmate tools above.
 
-| Selection | Reason |
-|---|---|
-| Cursor Agent | Beta only. Upstream publishes a moving installer and auto-update, with no stable or exact-version selector and no publisher checksum. The checker records the observed snapshot and never runs the installer. |
-| Firstmate source | Exact audited commit. Guarded apply fast-forwards only to that commit after proving it is on authoritative `main`. A checkout that is ahead, diverged, or dirty is refused. Latest selection does not reset, rebase, or discard local commits. |
-| Treehouse and no-mistakes | GitHub latest does not publish a checksum the existing archive installer can bind. Recorded release SHA-256 stays the verification receipt, so it also stays the selection. no-mistakes stays attended-only; this policy never starts or restarts its daemon. |
-| GBrain | Excluded. No upgrade, patch, or dream path is selected here. The report-only row stays at its recorded release. |
-| Baby Menu, Kun loader, Matt Pocock skills | Baby Menu is a detached release checkout and an existing repository is never moved. Kun and Matt stay on the reviewed adopt path; Matt live bytes belong to Claude marketplace autoUpdate. |
-| OpenCode ACP, OMP ACP, claude-spend | Launch and wrapper specs. `npx` has no integrity re-check in this repository, so those specs stay exact while the OpenCode CLI install resolves latest. |
-| Nixpkgs, Home Manager, Nix installer, CI action SHAs, Neovim plugins | OS and base packages, workflow action commits, and editor plugins. Not Firstmate developer-tool selection. `flake.lock` is unchanged. |
+| Selection | Reason | Removal condition |
+|---|---|---|
+| Cursor Agent | Beta only. Upstream publishes a moving installer and auto-update, with no stable or exact-version selector and no publisher checksum. The checker records the observed snapshot and never runs the installer. | Remove when Cursor publishes a stable exact-version artifact and a publisher checksum the existing checker can verify. |
+| Firstmate source | Exact audited commit. Guarded apply fast-forwards only to that commit after proving it is on authoritative `main`. A checkout that is ahead, diverged, or dirty is refused. Latest selection does not reset, rebase, or discard local commits. | Remove when that checkout is a clean fast-forward of upstream `main` and no local commits remain. Until then the target stays the audited commit. |
+| Treehouse and no-mistakes | GitHub latest does not publish a checksum the existing archive installer can bind. Recorded release SHA-256 stays the verification receipt, so it also stays the selection. no-mistakes stays attended-only; this policy never starts or restarts its daemon. | Remove a tool's exact archive pin when its non-prerelease latest release publishes a checksum this installer already knows how to verify. no-mistakes also stays attended while its daemon can still be serving a live validation. |
+| GBrain | Excluded. No upgrade, patch, or dream path is selected here. The report-only row stays at its recorded release. | Remove only through Firstmate's own migration procedure, not through this updater. |
+| Baby Menu, Kun loader, Matt Pocock skills | Baby Menu is a detached release checkout and an existing repository is never moved. Kun and Matt stay on the reviewed adopt path; Matt live bytes belong to Claude marketplace autoUpdate. | Remove when that existing adopt path can resolve a non-prerelease latest and verify it without writing live skill stores or moving a checkout that already exists. |
+| OpenCode ACP, OMP ACP, claude-spend | Launch and wrapper specs. `npx` has no integrity re-check in this repository, so those specs stay exact while the OpenCode CLI install resolves latest. | Remove when the launch path re-verifies registry integrity the way `dev-tools-install-pinned` does. |
+| Nixpkgs, Home Manager, Nix installer, CI action SHAs, Neovim plugins | OS and base packages, workflow action commits, and editor plugins. Not Firstmate developer-tool selection. `flake.lock` is unchanged. Model defaults are unchanged. | Remove only in a change whose scope is that lock, workflow, or package set. This policy does not edit them. |
 
 Source inspection on 2026-09-15 confirmed the Herdr manifest schema and
 WezTerm stable cask instructions. npm documents its default `latest` lookup in
