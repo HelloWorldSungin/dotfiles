@@ -44,7 +44,10 @@ cat > "$case_dir/agent/settings.json" <<'JSON'
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.6-sol",
   "defaultThinkingLevel": "high",
-  "modelThinkingLevels": { "zai/glm-5.2": "max" }
+  "modelThinkingLevels": { "zai/glm-5.2": "max" },
+  "sessionDir": ".pi/sessions",
+  "compaction": { "enabled": true, "reserveTokens": 16384, "keepRecentTokens": 20000 },
+  "branchSummary": { "reserveTokens": 8192, "skipPrompt": true }
 }
 JSON
 run_merge "$case_dir" || fail "merge into an existing settings.json failed"
@@ -54,7 +57,10 @@ assert_eq "$(jq -r '.defaultModel' "$settings")" "gpt-6-astra" "defaultModel"
 assert_eq "$(jq -r '.defaultThinkingLevel' "$settings")" "low" "defaultThinkingLevel"
 assert_eq "$(jq -r '.lastChangelogVersion' "$settings")" "0.85.1" "unrelated key preserved"
 assert_eq "$(jq -r '.modelThinkingLevels["zai/glm-5.2"]' "$settings")" "max" "per-model override preserved"
-pass "settings.json gets gpt-6-astra/low and keeps every other key"
+assert_eq "$(jq -r '.sessionDir' "$settings")" ".pi/sessions" "session directory preserved"
+assert_eq "$(jq -c '.compaction' "$settings")" '{"enabled":true,"reserveTokens":16384,"keepRecentTokens":20000}' "compaction preserved"
+assert_eq "$(jq -c '.branchSummary' "$settings")" '{"reserveTokens":8192,"skipPrompt":true}' "branch summary preserved"
+pass "settings.json gets gpt-6-astra/low and keeps session, compaction, and branch keys"
 
 assert_eq "$(cat "$case_dir/firstmate/config/supervision-branch-model")" \
   "openai-codex/gpt-5.6-luna" "supervision model pin"

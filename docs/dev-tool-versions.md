@@ -17,7 +17,7 @@ alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
 | Tool | Exact pin | Authority and stable judgment | Fresh install | Apply boundary |
 |---|---:|---|---|---|
 | Determinate Nix Installer | 3.22.3 | Determinate GitHub GA release, with v3.22.0 prerelease excluded | Versioned installer URL plus recorded installer SHA-256 | Report only |
-| Claude Code | 2.1.236 | Official npm `stable` dist-tag. The moving `latest` 2.1.267 is separate; existing newer installs are not downgraded | Exact npm package and registry integrity | Report only |
+| Claude Code | 2.1.280 | Exact npm package published as `latest` on 2026-09-22. The `stable` dist-tag is still 2.1.267, so this row is not a stable-channel selection. Guarded apply stays off | Exact npm package and registry integrity, install-if-absent | Report only |
 | Codex | 0.154.0 | Official npm default tag and matching GA release; suffixed alpha builds excluded | Exact npm package and registry integrity | Report only |
 | OpenCode 1 | 1.18.30 | Official npm default tag and matching GA release; OpenCode 2 beta and snapshots excluded | Exact npm package and registry integrity | Report only |
 | Pi | 0.85.1 | `@earendil-works/pi-coding-agent` default tag. The retired Mario Zechner package is not the fleet distribution | Exact npm package and registry integrity | Report only |
@@ -54,11 +54,15 @@ Manager release branches. Exact repository and package identifiers live beside
 the values in `config/dev-tools-versions.sh`, so the checker does not infer an
 owner from an executable name.
 
-Claude Code keeps the publisher's `stable` channel for exact fresh installs.
-At this audit it still selects 2.1.236, while the installed 2.1.267 is newer.
-The approved stable-channel recommendation does not authorize downgrading that
-live installation to the older stable-channel version. Leave it in place for the attended
-channel transition; the guarded updater cannot mutate Claude Code.
+Claude Code's exact pin is 2.1.280, the package `version` npm publishes as
+`latest` (checked 2026-09-22). The publisher `stable` dist-tag remains 2.1.267,
+so this pin is not labeled stable-channel. The row's channel field is `default`
+only so the checker compares the pin with `npm view version` (that latest
+package) instead of reporting a permanent mismatch against the older `stable`
+tag. That field change is this row alone. Guarded apply stays `no`.
+`dev-tools-install-pinned` still skips Claude when any `claude` command is
+already present, so a native install is not overwritten and a newer binary is
+not downgraded. The guarded updater cannot mutate Claude Code.
 
 The Cursor CLI is already an intentional beta dependency in this repository.
 Cursor documents only a moving installer and auto-update commands, with no
