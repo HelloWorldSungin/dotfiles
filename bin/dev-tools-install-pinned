@@ -27,11 +27,14 @@ Usage: dev-tools-install-pinned [--dry-run] [--only TOOL]
 
 Existing commands and repositories are never upgraded or replaced. Exact npm
 versions are re-verified against their recorded registry integrity before npm
-installs them. The five axi tools resolve latest stable and its integrity first.
-Herdr resolves its stable manifest asset and checksum. Other release archives
-retain recorded publisher checksums. Herdr
-and no-mistakes are install-if-absent only; this command never starts, stops,
-restarts, reloads, updates, or runs setup hooks for either service.
+installs them. Firstmate npm tools marked latest|publisher resolve the default
+tag and its integrity first, rejecting prereleases and a non-default channel.
+Herdr resolves its stable manifest asset and checksum. Antigravity resolves
+Google's production manifest and SHA-512. Other release archives retain
+recorded publisher checksums. Herdr and no-mistakes are install-if-absent
+only; this command never starts, stops, restarts, reloads, updates, or runs
+setup hooks for either service. An existing Firstmate checkout is left in
+place, including one with local commits.
 
 Cursor is the sole unpinnable exception: upstream offers only a moving beta
 installer and auto-update channel. This command never runs that installer.
@@ -218,33 +221,45 @@ install_herdr() {
 }
 
 install_antigravity() {
-  local row key url expected tmp archive
+  local key asset_suffix json version url expected tmp archive actual
   selected agy || selected antigravity || return 0
-  safe_version "$ANTIGRAVITY_VERSION" || { say "refuse agy: unsafe stable version '$ANTIGRAVITY_VERSION'" >&2; return 1; }
   if command -v agy >/dev/null 2>&1; then
-    say "skip agy: installed $(installed_version agy || printf unknown) (pin $ANTIGRAVITY_VERSION)"
+    say "skip agy: installed $(installed_version agy || printf unknown) (latest production manifest; report-only)"
     return 0
   fi
-  url=''; expected=''
-  for row in "${ANTIGRAVITY_ASSET_PINS[@]}"; do
-    IFS='|' read -r key url expected <<<"$row"
-    [ "$key" = "$PLATFORM" ] && break
-    url=''; expected=''
-  done
-  [ -n "$url" ] || { say "refuse agy: unsupported platform $PLATFORM" >&2; return 1; }
+  case "$PLATFORM" in
+    linux-amd64) key=linux_amd64; asset_suffix=/linux-x64/cli_linux_x64.tar.gz ;;
+    linux-arm64) key=linux_arm64; asset_suffix=/linux-arm/cli_linux_arm64.tar.gz ;;
+    darwin-amd64) key=darwin_amd64; asset_suffix=/darwin-x64/cli_mac_x64.tar.gz ;;
+    darwin-arm64) key=darwin_arm64; asset_suffix=/darwin-arm/cli_mac_arm64.tar.gz ;;
+    *) say "refuse agy: unsupported platform $PLATFORM" >&2; return 1 ;;
+  esac
+  [ -n "${ANTIGRAVITY_MANIFEST_URL_PREFIX:-}" ] || { say 'refuse agy: production manifest URL is unset' >&2; return 1; }
+  json=$($CURL_BIN -fsSL --connect-timeout 10 --max-time 120 "${ANTIGRAVITY_MANIFEST_URL_PREFIX%/}/$key.json") || return 1
+  version=$(printf '%s' "$json" | jq -er '.version | strings') || return 1
+  safe_version "$version" || { say 'refuse agy: invalid production manifest version' >&2; return 1; }
+  url=$(printf '%s' "$json" | jq -er '.url | strings') || return 1
+  expected=$(printf '%s' "$json" | jq -er '.sha512 | strings') || return 1
+  case "$url" in
+    "https://storage.googleapis.com/antigravity-public/antigravity-cli/${version}-"*"$asset_suffix") ;;
+    *) say 'refuse agy: invalid publisher asset' >&2; return 1 ;;
+  esac
+  printf '%s\n' "$expected" | grep -Eq '^[0-9a-f]{128}$' || { say 'refuse agy: invalid publisher checksum' >&2; return 1; }
   if [ "$DRY_RUN" -eq 1 ]; then
-    say "would install agy $ANTIGRAVITY_VERSION from publisher manifest asset (sha512 $expected)"
+    say "would install agy $version from publisher manifest asset (sha512 $expected)"
     return 0
   fi
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/antigravity-install.XXXXXX")
   archive="$tmp/agy.tar.gz"
-  fetch "$url" "$archive"
+  fetch "$url" "$archive" || { rm -rf "$tmp"; return 1; }
   verify_sha512 "$archive" "$expected" || { rm -rf "$tmp"; say 'refuse agy: publisher checksum mismatch' >&2; return 1; }
   $TAR_BIN -xzf "$archive" -C "$tmp" antigravity
   mkdir -p "$LOCAL_BIN"
   $INSTALL_BIN -m 0755 "$tmp/antigravity" "$LOCAL_BIN/agy"
   rm -rf "$tmp"
-  say "installed agy $ANTIGRAVITY_VERSION"
+  actual=$(installed_version agy || true)
+  [ "$actual" = "$version" ] || { say "refuse agy: installed version '${actual:-unknown}' != manifest $version" >&2; return 1; }
+  say "installed agy $version"
 }
 
 install_cursor_unavailable() {

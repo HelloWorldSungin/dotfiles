@@ -43,7 +43,8 @@ cat >"$FAKEBIN/npm" <<'SH'
 set -eu
 printf 'npm %s\n' "$*" >>"$TEST_CALL_LOG"
 [ "${TEST_FAIL_NPM:-0}" = 1 ] && exit 1
-package=${2%@latest}
+spec=$2
+package=${spec%@latest}
 field=$3
 # shellcheck source=/dev/null
 source "$TEST_PINS"
@@ -52,7 +53,8 @@ for row in "${NPM_TOOL_PINS[@]}"; do
   IFS='|' read -r _name _command candidate candidate_version _integrity _guarded _channel <<<"$row"
   [ "$candidate" = "$package" ] && version=$candidate_version
 done
-case "$package" in
+# npx specs are separate from a moving CLI row for the same package name.
+case "$spec" in
   opencode-ai) version=$OPENCODE_ACP_VERSION ;;
   omp-acp) version=$OMP_ACP_VERSION ;;
   claude-spend) version=$CLAUDE_SPEND_VERSION ;;
@@ -100,10 +102,9 @@ if [ "$url" = "$HERDR_LATEST_MANIFEST_URL" ]; then
 fi
 case "$url" in
   *antigravity-cli-auto-updater*)
-    for row in "${ANTIGRAVITY_ASSET_PINS[@]}"; do IFS='|' read -r key asset sha <<<"$row"; [ "$key" = linux-amd64 ] && break; done
-    version=${TEST_ANTIGRAVITY_LATEST_VERSION:-$ANTIGRAVITY_VERSION}
-    asset=${asset/$ANTIGRAVITY_VERSION/$version}
-    [ "$version" = "$ANTIGRAVITY_VERSION" ] || sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    version=${TEST_ANTIGRAVITY_LATEST_VERSION:-1.2.0}
+    sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    asset="https://storage.googleapis.com/antigravity-public/antigravity-cli/${version}-test/linux-x64/cli_linux_x64.tar.gz"
     jq -cn --arg v "$version" --arg asset "$asset" --arg sha "$sha" '{version:$v,url:$asset,sha512:$sha}'
     exit 0
     ;;
@@ -213,7 +214,7 @@ for row in "${NIX_PACKAGE_PINS[@]}"; do
     exit 0
   fi
 done
-[ "$command_name" = agy ] && { printf 'agy %s\n' "$ANTIGRAVITY_VERSION"; exit 0; }
+[ "$command_name" = agy ] && { printf 'agy %s\n' "${TEST_AGY_INSTALLED:-1.2.0}"; exit 0; }
 [ "$command_name" = cursor-agent ] && { printf 'cursor-agent %s\n' "$CURSOR_AGENT_OBSERVED_VERSION"; exit 0; }
 [ "$command_name" = nix ] && { printf 'nix (Determinate Nix %s) 2.34.8\n' "$NIX_INSTALLER_VERSION"; exit 0; }
 exit 1
@@ -330,7 +331,7 @@ if printf '%s\n' "$action_refs" | grep -Evq '@[0-9a-f]{40}$'; then
 fi
 [ "$(acp_launch_version "$ROOT/config/baby-menu/agents.json" opencode opencode-ai)" = "$OPENCODE_ACP_VERSION" ] || fail 'the OpenCode agent launches a different opencode-ai version than the manifest'
 [ "$(acp_launch_version "$ROOT/config/baby-menu/agents.json" omp omp-acp)" = "$OMP_ACP_VERSION" ] || fail 'the OMP agent launches a different omp-acp version than the manifest'
-grep -Fq 'npm view @anthropic-ai/claude-code version --json' "$CALL_LOG" || fail 'Claude did not use the npm default version field'
+grep -Fq 'npm view @anthropic-ai/claude-code@latest version --json' "$CALL_LOG" || fail 'Claude did not use the npm default version field'
 ! grep -Fq 'npm view @anthropic-ai/claude-code dist-tags.stable --json' "$CALL_LOG" || fail 'Claude was compared with the stable dist-tag'
 grep -Fq 'herdr --version' "$CALL_LOG" || fail 'Herdr installed version was not surveyed'
 ! grep -Eq 'herdr (update|server|setup|restart|reload|stop|start)' "$CALL_LOG" || fail 'checker drove Herdr lifecycle behavior'
@@ -393,12 +394,11 @@ unset TEST_NPM_PRERELEASE_PACKAGE TEST_PRERELEASE_REPO
 pass 'stable-channel filters reject npm and GitHub prereleases'
 
 IFS=. read -r herdr_major herdr_minor _ <<<"0.9.0"
-IFS=. read -r antigravity_major antigravity_minor _ <<<"$ANTIGRAVITY_VERSION"
 TEST_HERDR_LATEST_VERSION="$herdr_major.$((herdr_minor + 1)).0"
-TEST_ANTIGRAVITY_LATEST_VERSION="$antigravity_major.$((antigravity_minor + 1)).0"
+TEST_ANTIGRAVITY_LATEST_VERSION=1.3.0
 json=$(run_checker --json --force --no-cache)
 [ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="herdr") | [.latest_stable,.status] | join("|")')" = "$TEST_HERDR_LATEST_VERSION|drifted" ] || fail 'newer stable Herdr manifest was hidden as unknown'
-[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="antigravity") | [.latest_stable,.status] | join("|")')" = "$TEST_ANTIGRAVITY_LATEST_VERSION|pin_outdated" ] || fail 'newer stable Antigravity manifest was hidden as unknown'
+[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="antigravity") | [.latest_stable,.status,.pinned] | join("|")')" = "$TEST_ANTIGRAVITY_LATEST_VERSION|drifted|latest" ] || fail 'newer stable Antigravity manifest was hidden as unknown'
 unset TEST_HERDR_LATEST_VERSION TEST_ANTIGRAVITY_LATEST_VERSION
 pass 'newer stable publisher manifests remain visible as pin drift'
 
@@ -411,16 +411,11 @@ json=$(run_checker --json --force --no-cache)
 for row in 'herdr|0.8.9' 'antigravity|1.0.0'; do
   IFS='|' read -r tool observed <<<"$row"
   entry=$(printf '%s' "$json" | jq -ce --arg n "$tool" '.tools[] | select(.name == $n)')
-  expected_status=pin_outdated
-  [ "$tool" = herdr ] && expected_status=drifted
-  [ "$(printf '%s' "$entry" | jq -r '[.latest_stable,.status] | join("|")')" = "$observed|$expected_status" ] \
+  [ "$(printf '%s' "$entry" | jq -r '[.latest_stable,.status] | join("|")')" = "$observed|drifted" ] \
     || fail "a withdrawn publisher release was not reported as drift for $tool"
-  if printf '%s' "$entry" | jq -e '.detail | test("newer")' >/dev/null; then
+  if printf '%s' "$entry" | jq -e '(.detail // "") | test("newer")' >/dev/null; then
     fail "$tool claimed the publisher manifest was newer than a pin it never ordered: $(printf '%s' "$entry" | jq -r '.detail')"
   fi
-  [ "$tool" = herdr ] && continue
-  printf '%s' "$entry" | jq -e '.detail | test("differs from the recorded")' >/dev/null \
-    || fail "$tool did not report the publisher manifest as differing from its pin"
 done
 unset TEST_HERDR_LATEST_VERSION TEST_ANTIGRAVITY_LATEST_VERSION
 pass 'a publisher release below the pin is reported as drift without asserting a direction'
@@ -449,12 +444,22 @@ json=$(run_checker --json --force --no-cache)
 claude_entry=$(printf '%s' "$json" | jq -ce '.tools[] | select(.name=="claude")')
 [ "$(printf '%s' "$claude_entry" | jq -r '.source')" = npm-default-dist-tag ] \
   || fail 'Claude source was not the npm default version field'
-[ "$(printf '%s' "$claude_entry" | jq -r '[.pinned,.latest_stable,.status,.apply_policy] | join("|")')" = '2.1.280|2.1.280|up_to_date|report-only' ] \
-  || fail "Claude pin was not the exact default-tag package: $(printf '%s' "$claude_entry" | jq -c '{pinned,latest_stable,status,apply_policy}')"
-grep -Fq 'npm view @anthropic-ai/claude-code version --json' "$CALL_LOG" \
+[ "$(printf '%s' "$claude_entry" | jq -r '[.pinned,.latest_stable,.status,.apply_policy] | join("|")')" = 'latest|0.9.0|up_to_date|report-only' ] \
+  || fail "Claude did not resolve the default latest tag: $(printf '%s' "$claude_entry" | jq -c '{pinned,latest_stable,status,apply_policy}')"
+grep -Fq 'npm view @anthropic-ai/claude-code@latest version --json' "$CALL_LOG" \
   || fail 'the default-tag case never read npm version'
 ! grep -Fq 'npm view @anthropic-ai/claude-code dist-tags.stable --json' "$CALL_LOG" \
   || fail 'the default-tag case queried the stable dist-tag'
+for harness in codex opencode pi; do
+  [ "$(printf '%s' "$json" | jq -r --arg n "$harness" '.tools[] | select(.name==$n) | [.pinned,.apply_policy] | join("|")')" = 'latest|report-only' ] \
+    || fail "$harness is not a report-only latest selection"
+done
+[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="gnhf") | [.pinned,.apply_policy] | join("|")')" = 'latest|guarded-exact' ] \
+  || fail 'gnhf is not a guarded latest selection'
+[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="cursor-agent") | [.latest_stable,.install_policy] | join("|")')" = 'unavailable|unavailable-unpinnable' ] \
+  || fail 'Cursor was not left as the beta-only exception'
+[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name=="nix:git") | .pinned')" = 2.54.0 ] \
+  || fail 'a Nix package pin was replaced by latest selection'
 unset TEST_NPM_NO_STABLE_TAG
 pass 'Claude follows the npm default version field and ignores an empty stable tag'
 

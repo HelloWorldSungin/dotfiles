@@ -37,7 +37,7 @@ be. A fresh machine needs each login once after `bootstrap.sh`.
 - **firstmate** - the orchestrator; the one agent you actually talk to
 
 Each gets installed and learned one at a time. `bootstrap.sh` installs them
-through `bin/dev-tools-install-pinned` at the exact versions recorded in
+through `bin/dev-tools-install-pinned` using the latest-stable policies in
 `config/dev-tools-versions.sh` - see [dev-tool-versions.md](dev-tool-versions.md).
 
 ## Global skills
