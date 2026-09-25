@@ -82,7 +82,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   documents, and is packaged on PATH with no timer. See `docs/agents.md`.
 - `~/.pi/agent/settings.json` and Firstmate's `config/supervision-branch-*` pins
   are machine-written too; `bin/pi-set-model-defaults` (activation step) merges
-  only the Pi default model/thinking keys and those two pins. See `docs/agents.md`.
+  only the Pi default model/thinking keys and those two pins, and
+  `bin/pi-set-compaction-reserve` merges only the three openai-codex compaction
+  reserves. See `docs/agents.md`.
 - `~/.codex/config.toml` is machine-maintained (project trust, hook approvals,
   TUI state) and must never be replaced or symlinked to a repo file. Home Manager
   merges three context/compaction keys through `bin/codex-set-context-window`
