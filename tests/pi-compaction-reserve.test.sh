@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Behavior tests for bin/pi-set-compaction-reserve: the atomic, idempotent merge
-# of three per-model compaction reserves into a machine-maintained settings.json,
+# of four per-model compaction reserves into a machine-maintained settings.json,
 # then the installed Pi package's resolved trigger
-# (contextTokens > contextWindow - reserveTokens) for those models and for a
-# model that must keep the ordinary reserve.
+# (contextTokens > contextWindow - reserveTokens) for those models and for
+# models that must keep the ordinary reserve.
 # No test touches the real ~/.pi; every case uses a temp file.
 set -u
 
@@ -46,7 +46,8 @@ cat > "$settings" <<'JSON'
     "reserveTokens": 20000,
     "keepRecentTokens": 8000,
     "modelOverrides": {
-      "openai-codex/gpt-5.6-luna": { "reserveTokens": 4096 },
+      "openai-codex/gpt-5.6-luna": { "reserveTokens": 4096, "keepRecentTokens": 5000 },
+      "openai/gpt-5.6-luna": { "reserveTokens": 4096 },
       "openai-codex/gpt-6-astra": { "keepRecentTokens": 3000 }
     }
   },
@@ -60,18 +61,22 @@ assert_eq "$(jq -r '.defaultModel' "$settings")" "gpt-6-astra" "default model pr
 assert_eq "$(jq -r '.compaction.enabled' "$settings")" "true" "compaction.enabled preserved"
 assert_eq "$(jq -r '.compaction.reserveTokens' "$settings")" "20000" "ordinary reserve preserved"
 assert_eq "$(jq -r '.compaction.keepRecentTokens' "$settings")" "8000" "ordinary keepRecentTokens preserved"
-assert_eq "$(jq -r '.compaction.modelOverrides["openai-codex/gpt-5.6-luna"].reserveTokens' "$settings")" \
-  "4096" "unrelated model override preserved"
+assert_eq "$(jq -r '.compaction.modelOverrides["openai/gpt-5.6-luna"].reserveTokens' "$settings")" \
+  "4096" "same model id on another provider left alone"
+assert_eq "$(jq -r '.compaction.modelOverrides["openai-codex/gpt-5.6-luna"].keepRecentTokens' "$settings")" \
+  "5000" "Luna keepRecentTokens preserved"
 assert_eq "$(jq -r '.compaction.modelOverrides["openai-codex/gpt-6-astra"].keepRecentTokens' "$settings")" \
   "3000" "same-model keepRecentTokens preserved"
 for model in openai-codex/gpt-5.6-sol openai-codex/gpt-5.6-terra openai-codex/gpt-6-astra; do
   assert_eq "$(jq -r --arg m "$model" '.compaction.modelOverrides[$m].reserveTokens' "$settings")" \
     "372000" "$model reserveTokens"
 done
+assert_eq "$(jq -r '.compaction.modelOverrides["openai-codex/gpt-5.6-luna"].reserveTokens' "$settings")" \
+  "122000" "openai-codex/gpt-5.6-luna reserveTokens"
 assert_eq "$(jq -c '.branchSummary' "$settings")" '{"reserveTokens":8192,"skipPrompt":true}' "branch summary preserved"
 [ "$(stat -c %i "$settings")" != "$inode_before" ] \
   || fail "the merge did not rewrite the settings, so a no-op cannot be distinguished"
-pass "owned reserves are 372000 and unrelated settings survive"
+pass "owned reserves are 372000 and 122000 (Luna) and unrelated settings survive"
 
 # ------------------------------------------------------------- idempotence
 inode1=$(stat -c %i "$settings")
@@ -87,7 +92,7 @@ pass "repeat runs are a no-op"
 fresh="$TMP_ROOT/fresh/settings.json"
 run_merge "$fresh" || fail "merge into an absent settings.json failed"
 assert_eq "$(jq -c '.' "$fresh")" \
-  '{"compaction":{"modelOverrides":{"openai-codex/gpt-5.6-sol":{"reserveTokens":372000},"openai-codex/gpt-5.6-terra":{"reserveTokens":372000},"openai-codex/gpt-6-astra":{"reserveTokens":372000}}}}' \
+  '{"compaction":{"modelOverrides":{"openai-codex/gpt-5.6-sol":{"reserveTokens":372000},"openai-codex/gpt-5.6-terra":{"reserveTokens":372000},"openai-codex/gpt-6-astra":{"reserveTokens":372000},"openai-codex/gpt-5.6-luna":{"reserveTokens":122000}}}}' \
   "fresh settings.json"
 pass "absent settings.json is created with only the owned reserves"
 
@@ -133,8 +138,13 @@ const runtime = await ModelRuntime.create({
   allowModelNetwork: false,
 });
 const manager = SettingsManager.create(agentDir, agentDir);
-const targets = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-6-astra"];
-const owned = new Set(targets.map((id) => `openai-codex/${id}`));
+const targets = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-6-astra", "gpt-5.6-luna"];
+const owned = {
+  "openai-codex/gpt-5.6-sol": 372000,
+  "openai-codex/gpt-5.6-terra": 372000,
+  "openai-codex/gpt-6-astra": 372000,
+  "openai-codex/gpt-5.6-luna": 122000,
+};
 const rows = [];
 for (const model of runtime.getModels()) {
   const settings = manager.getCompactionSettings(model);
@@ -153,13 +163,13 @@ for (const model of runtime.getModels()) {
 }
 const byKey = Object.fromEntries(rows.map((row) => [row.key, row]));
 const drift = rows.filter((row) => {
-  if (owned.has(row.key)) return row.reserveTokens !== 372000;
-  if (row.key === "openai-codex/gpt-5.6-luna") return row.reserveTokens !== 4096;
+  if (row.key in owned) return row.reserveTokens !== owned[row.key];
+  if (row.key === "openai/gpt-5.6-luna") return row.reserveTokens !== 4096;
   return row.reserveTokens !== 20000;
 }).map((row) => row.key);
 process.stdout.write(JSON.stringify({
   targets: Object.fromEntries(targets.map((id) => [id, byKey[`openai-codex/${id}`]])),
-  luna: byKey["openai-codex/gpt-5.6-luna"],
+  otherLuna: byKey["openai/gpt-5.6-luna"],
   drift: drift.slice(0, 8),
   driftCount: drift.length,
 }));
@@ -172,29 +182,37 @@ fi
 python3 - "$probe_json" <<'PY' || fail "Pi trigger assertions failed"
 import json, sys
 d = json.load(open(sys.argv[1]))
+expected = {
+    "gpt-5.6-sol": (872000, 372000, 500000),
+    "gpt-5.6-terra": (872000, 372000, 500000),
+    "gpt-6-astra": (872000, 372000, 500000),
+    "gpt-5.6-luna": (272000, 122000, 150000),
+}
+assert set(d["targets"]) == set(expected), d["targets"]
 for model_id, row in d["targets"].items():
-    assert row["window"] == 872000, (model_id, row)
-    assert row["reserveTokens"] == 372000, (model_id, row)
-    assert row["threshold"] == 500000, (model_id, row)
+    window, reserve, threshold = expected[model_id]
+    assert row["window"] == window, (model_id, row)
+    assert row["reserveTokens"] == reserve, (model_id, row)
+    assert row["threshold"] == threshold, (model_id, row)
     assert row["compactAtThreshold"] is False, (model_id, row)
     assert row["compactAtPlusOne"] is True, (model_id, row)
     assert row["compactAtOne"] is False, (model_id, row)
     assert row["enabled"] is True, (model_id, row)
 assert d["targets"]["gpt-6-astra"]["keepRecentTokens"] == 3000
 assert d["targets"]["gpt-5.6-sol"]["keepRecentTokens"] == 8000
-luna = d["luna"]
-assert luna["window"] == 272000, luna
-assert luna["reserveTokens"] == 4096, luna
-assert luna["threshold"] == 272000 - 4096, luna
-assert luna["compactAtOne"] is False, luna
-assert luna["compactAtThreshold"] is False, luna
-assert luna["compactAtPlusOne"] is True, luna
+assert d["targets"]["gpt-5.6-luna"]["keepRecentTokens"] == 5000
+other = d["otherLuna"]
+assert other["reserveTokens"] == 4096, other
+assert other["threshold"] == other["window"] - 4096, other
+assert other["compactAtThreshold"] is False, other
+assert other["compactAtPlusOne"] is True, other
 assert d["driftCount"] == 0, d
 PY
-pass "Pi triggers the three models above 500000 and leaves every other model on its ordinary reserve"
+pass "Pi triggers the three 872000 models above 500000, Luna above 150000, and leaves every other model on its ordinary reserve"
 
 # A settings file with no ordinary reserve still leaves non-targets on 16384,
-# including Luna and a model whose window is smaller than 372000.
+# including a model whose window is smaller than 372000, while a fresh file
+# alone puts Luna's trigger above 150000.
 plain="$TMP_ROOT/plain"
 mkdir -p "$plain"
 cp "$MODELS_JSON" "$plain/models.json"
@@ -217,6 +235,7 @@ const owned = new Set([
   "openai-codex/gpt-5.6-sol",
   "openai-codex/gpt-5.6-terra",
   "openai-codex/gpt-6-astra",
+  "openai-codex/gpt-5.6-luna",
 ]);
 const bad = [];
 let luna = null;
@@ -236,13 +255,13 @@ python3 - "$plain_json" <<'PY' || fail "plain-reserve assertions failed"
 import json, sys
 d = json.load(open(sys.argv[1]))
 assert d["luna"]["window"] == 272000, d["luna"]
-assert d["luna"]["reserveTokens"] == 16384, d["luna"]
-assert d["luna"]["threshold"] == 255616, d["luna"]
+assert d["luna"]["reserveTokens"] == 122000, d["luna"]
+assert d["luna"]["threshold"] == 150000, d["luna"]
 assert d["luna"]["compactAtOne"] is False, d["luna"]
 assert d["small"]["window"] == 8192, d["small"]
 assert d["small"]["reserveTokens"] == 16384, d["small"]
 assert d["badCount"] == 0, d
 PY
-pass "without an ordinary reserve, Luna and other models stay on the built-in 16384"
+pass "without an ordinary reserve, Luna triggers above 150000 and other models stay on the built-in 16384"
 
 printf '\nall Pi compaction reserve tests passed\n'
