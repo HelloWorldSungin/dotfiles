@@ -153,7 +153,7 @@ opts Codex into that larger window and a 500,000-token compaction threshold.
 
 | Harness | Mechanism | Effective policy |
 |---------|-----------|------------------|
-| Pi | `pi/models.json` context window, plus `bin/pi-set-compaction-reserve` merging `compaction.modelOverrides` | 872,000 for `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-6-astra`, with `reserveTokens` 372000 so auto-compaction triggers above 500,000. Luna keeps 272,000 and the built-in 16,384 reserve. |
+| Pi | `pi/models.json` context window, plus `bin/pi-set-compaction-reserve` merging `compaction.modelOverrides` | 872,000 for `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-6-astra`, with `reserveTokens` 372000 so auto-compaction triggers above 500,000. `gpt-5.6-luna` keeps its built-in 272,000 window with `reserveTokens` 122000, so it triggers above 150,000. |
 | Codex | `bin/codex-set-context-window` atomically merges three global keys into machine-maintained `~/.codex/config.toml` | `model_context_window = 872000`, `model_auto_compact_token_limit = 500000`, `model_auto_compact_token_limit_scope = "total"`. Native catalog clamping remains active. |
 
 Codex's 872,000 is its catalog window ceiling, with **828,400 usable tokens**
@@ -213,15 +213,17 @@ documents the global controls. Use a private `codex app-server --stdio
 Pi 0.87.0 resolves `compaction.modelOverrides` by exact `provider/modelId`
 before the ordinary reserve (`getCompactionSettings`). The owned keys are
 `openai-codex/gpt-5.6-sol`, `openai-codex/gpt-5.6-terra`, and
-`openai-codex/gpt-6-astra`, each with `reserveTokens` 372000. A global 372,000
-reserve is not used: every model whose window is at or below that reserve,
-including Luna at 272,000, would compact on the first token. Models outside
-those three keys keep the ordinary reserve, or the built-in 16,384 when it is
-absent, so Luna triggers above 255,616. The same model id on another provider
-is a different key and is left alone. `reserveTokens` also sizes the
+`openai-codex/gpt-6-astra`, each with `reserveTokens` 372000, plus
+`openai-codex/gpt-5.6-luna` with `reserveTokens` 122000 on its built-in
+272,000 window, so Luna triggers above **150,000**. A global 372,000
+reserve is not used: every model whose window is at or below that reserve
+would compact on the first token. Models outside those four keys keep the
+ordinary reserve, or the built-in 16,384 when it is absent. The same model id
+on another provider is a different key and is left alone. `reserveTokens` also sizes the
 summarizer's output budget as `min(floor(0.8 * reserveTokens), model.maxTokens)`;
-for these models that cap is the model's own 128,000 `maxTokens`.
-`bin/pi-set-compaction-reserve` merges only those three fields into
+for the three 872,000 models that cap is the model's own 128,000 `maxTokens`,
+and for Luna it is 97,600.
+`bin/pi-set-compaction-reserve` merges only those four fields into
 machine-owned `~/.pi/agent/settings.json` and refuses malformed JSON or a
 non-object override rather than replacing it. Independently of
 Codex's context policy, the [Claude calculation-window default](#claude-calculation-window)
@@ -245,7 +247,7 @@ the whole request. Pi's override does not change the selected model or effort.
 
 **Activation:** run `bash ~/dotfiles/rebuild.sh`. `~/.pi/agent/models.json` is a
 live symlink into the repo. Pi compaction reserves are applied by the activation
-step `bin/pi-set-compaction-reserve`, which merges only the three model reserves
+step `bin/pi-set-compaction-reserve`, which merges only the four model reserves
 into machine-owned `~/.pi/agent/settings.json`. For that bounded change alone,
 after the checkout is fast-forwarded, run
 `bash ~/dotfiles/bin/pi-set-compaction-reserve` instead of a full rebuild when
@@ -292,7 +294,7 @@ three settings keys and rewrites the two pins in Firstmate's own format (one
 line, mode `0600`, atomic replace), leaves every other key untouched, skips the
 pins on a host with no `~/firstmate/config`, and does nothing on a repeat
 rebuild. The following activation step, `bin/pi-set-compaction-reserve`, merges
-the three compaction reserves described above and also leaves every other key
+the four compaction reserves described above and also leaves every other key
 untouched. `tests/pi-model-defaults.test.sh` and
 `tests/pi-compaction-reserve.test.sh` check that Pi resolves each result.
 
