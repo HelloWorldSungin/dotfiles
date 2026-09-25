@@ -1,0 +1,458 @@
+#!/usr/bin/env bash
+# Merge only the captain's Claude agent policy into ~/.no-mistakes/config.yaml;
+# preserve every other key and every comment.
+#
+# no-mistakes reads and writes that file itself, so this is a surgical,
+# comment-preserving merge of exactly four settings rather than a managed file:
+#
+#   agent: claude                       (top-level, single entry)
+#   review_agents.reviewer.agent: claude
+#   review_agents.fixer.agent: claude
+#   agent_args_override.claude: [--model, claude-opus-5-5, --effort, low]
+#
+# Idempotent: when all four already match, the file is never rewritten (same
+# bytes, same inode). An absent or empty file (fresh machine) gets a minimal
+# file with just these keys. Any shape the merge cannot edit confidently -
+# duplicate keys, tab indentation, block or multi-line flow values where a
+# scalar belongs - is refused with a nonzero exit and no write.
+#
+# NO_MISTAKES_CONFIG_FILE selects an isolated file for testing. Pure Python
+# stdlib: no YAML library is required and none preserves comments anyway.
+set -euo pipefail
+python3 - <<'PY'
+import os
+import re
+import stat
+import sys
+import tempfile
+from pathlib import Path
+
+AGENT = 'claude'
+CLAUDE_ARGS = ['--model', 'claude-opus-5-5', '--effort', 'low']
+
+path = Path(os.environ.get('NO_MISTAKES_CONFIG_FILE') or
+            str(Path.home() / '.no-mistakes' / 'config.yaml'))
+
+
+def fail(message):
+    print(f'no-mistakes-set-agent-policy: {path}: {message}', file=sys.stderr)
+    sys.exit(1)
+
+
+# ---------------------------------------------------------------- line model
+
+KEY_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_-]*)\s*:(?:\s+(.*))?$')
+
+
+def key_match(line):
+    """Match a mapping key line at any indentation."""
+    return KEY_RE.match(line.lstrip(' '))
+
+
+def classify(line):
+    """Return (kind, indent): kind is blank, comment, or content."""
+    if not line.strip():
+        return 'blank', 0
+    stripped = line.lstrip(' ')
+    indent = len(line) - len(stripped)
+    if stripped.startswith('#'):
+        return 'comment', indent
+    if '\t' in line[:indent]:
+        fail('tab indentation is not supported')
+    return 'content', indent
+
+
+def span_end(lines, key_index):
+    """First index after key_index not belonging to the key's block value:
+    blank lines, comments, and more-indented content all belong to the value."""
+    indent = classify(lines[key_index])[1]
+    j = key_index + 1
+    while j < len(lines):
+        kind, line_indent = classify(lines[j])
+        if kind == 'content' and line_indent <= indent:
+            break
+        j += 1
+    return j
+
+
+def top_keys(lines):
+    """Locate every top-level mapping key: (name, key_index, span_end)."""
+    keys = []
+    i = 0
+    while i < len(lines):
+        kind, indent = classify(lines[i])
+        if kind != 'content':
+            i += 1
+            continue
+        if indent != 0:
+            fail(f'line {i + 1}: unexpected indented content outside any mapping value')
+        match = key_match(lines[i])
+        if not match:
+            fail(f'line {i + 1}: not a mapping key: {lines[i]!r}')
+        keys.append((match.group(1), i, span_end(lines, i)))
+        i = keys[-1][2]
+    return keys
+
+
+def children(lines, key_index, end):
+    """Mapping children directly under a key: (name, key_index, span_end)."""
+    parent_indent = classify(lines[key_index])[1]
+    result = []
+    child_indent = None
+    i = key_index + 1
+    while i < end:
+        kind, indent = classify(lines[i])
+        if kind != 'content':
+            i += 1
+            continue
+        if child_indent is None:
+            if indent <= parent_indent:
+                fail(f'line {i + 1}: content under-dented inside its parent')
+            child_indent = indent
+        if indent != child_indent:
+            fail(f'line {i + 1}: inconsistent indentation inside one mapping')
+        match = key_match(lines[i])
+        if not match:
+            fail(f'line {i + 1}: not a mapping key: {lines[i]!r}')
+        sub_end = span_end(lines, i)
+        result.append((match.group(1), i, sub_end))
+        i = sub_end
+    return result, (child_indent if child_indent is not None else parent_indent + 2)
+
+
+def one(mapping, name, lines):
+    """The single child named `name`, refusing ambiguous duplicates."""
+    found = [entry for entry in mapping if entry[0] == name]
+    if len(found) > 1:
+        fail(f'duplicate {name!r} key at lines ' +
+             ', '.join(str(entry[1] + 1) for entry in found))
+    return found[0] if found else None
+
+
+# ------------------------------------------------------------ value parsing
+
+def split_inline(rest):
+    """Split a key line's inline value into (token, comment). token None means
+    no inline value. Quoted tokens are unquoted; plain scalars are cut at an
+    inline comment. Anything ambiguous raises via fail()."""
+    if rest is None or not rest.strip():
+        return None, None
+    text = rest.strip()
+    if text[0] in '|>':
+        fail(f'block scalars are not supported: {text!r}')
+    if text[0] in '\'"':
+        quote = text[0]
+        end = 1
+        while True:
+            end = text.find(quote, end)
+            if end < 0:
+                fail(f'unbalanced quote in value {text!r}')
+            if quote == "'" and text[end:end + 2] == "''":
+                end += 2
+                continue
+            if quote == '"' and text[end - 1] == '\\':
+                end += 1
+                continue
+            break
+        value = text[1:end]
+        if quote == "'":
+            value = value.replace("''", "'")
+        tail = text[end + 1:].strip()
+        if tail and not tail.startswith('#'):
+            fail(f'unexpected text after quoted value: {tail!r}')
+        return value, tail or None
+    if text[0] in '[{':
+        closer = ']' if text[0] == '[' else '}'
+        depth = 0
+        end = None
+        for index, char in enumerate(text):
+            if char in '[{':
+                depth += 1
+            elif char in ']}':
+                depth -= 1
+                if depth == 0:
+                    end = index
+                    break
+            elif char in '\'"':
+                fail(f'quoted flow item is not supported: {text!r}')
+        if end is None:
+            fail(f'multi-line flow value is not supported: {text!r}')
+        inner = text[1:end].strip()
+        items = tuple(item.strip() for item in inner.split(',')) if inner else ()
+        tail = text[end + 1:].strip()
+        if tail and not tail.startswith('#'):
+            fail(f'unexpected text after flow value: {tail!r}')
+        return items, tail or None
+    value, _, comment = text.partition(' #')
+    value = value.strip()
+    if not value:
+        fail(f'value missing before comment: {text!r}')
+    return value, ('#' + comment) if comment else None
+
+
+def parse_items(lines, start, end):
+    """Sequence items among the content lines of a block span, normalized.
+    Returns None when any content line is not a plain sequence item."""
+    items = []
+    for index in range(start, end):
+        kind, _ = classify(lines[index])
+        if kind != 'content':
+            continue
+        text = lines[index].strip()
+        if not (text == '-' or text.startswith('- ')):
+            return None
+        token, comment = split_inline(text[1:].strip())
+        if token is None or isinstance(token, tuple):
+            return None
+        items.append(token)
+    return tuple(items)
+
+
+# ------------------------------------------------------------- extraction
+
+def extract(lines):
+    """Current values of the four owned settings; None when absent."""
+    found = {'agent': None, 'reviewer_agent': None,
+             'fixer_agent': None, 'claude_args': None}
+
+    top = top_keys(lines)
+    agent = one(top, 'agent', lines)
+    if agent is not None:
+        _, index, end = agent
+        rest = key_match(lines[index]).group(2)
+        token, _ = split_inline(rest)
+        if token is None and any(classify(lines[j])[0] == 'content'
+                                 for j in range(index + 1, end)):
+            fail(f'line {index + 1}: agent has a block value, expected a scalar')
+        found['agent'] = token
+
+    review = one(top, 'review_agents', lines)
+    if review is not None:
+        _, index, end = review
+        rest = key_match(lines[index]).group(2)
+        if rest and rest.strip():
+            fail(f'line {index + 1}: review_agents must be a block mapping')
+        roles, _ = children(lines, index, end)
+        for role, field in (('reviewer', 'reviewer_agent'), ('fixer', 'fixer_agent')):
+            entry = one(roles, role, lines)
+            if entry is None:
+                continue
+            _, role_index, role_end = entry
+            rest = key_match(lines[role_index]).group(2)
+            if rest and rest.strip():
+                fail(f'line {role_index + 1}: {role} must be a block mapping')
+            role_keys, _ = children(lines, role_index, role_end)
+            agent_key = one(role_keys, 'agent', lines)
+            if agent_key is None:
+                continue
+            _, agent_index, agent_end = agent_key
+            token, _ = split_inline(key_match(lines[agent_index]).group(2))
+            if token is None and any(classify(lines[j])[0] == 'content'
+                                     for j in range(agent_index + 1, agent_end)):
+                fail(f'line {agent_index + 1}: {role}.agent has a block value')
+            found[field] = token
+
+    overrides = one(top, 'agent_args_override', lines)
+    if overrides is not None:
+        _, index, end = overrides
+        rest = key_match(lines[index]).group(2)
+        if rest and rest.strip():
+            fail(f'line {index + 1}: agent_args_override must be a block mapping')
+        agents, _ = children(lines, index, end)
+        claude = one(agents, 'claude', lines)
+        if claude is not None:
+            _, claude_index, claude_end = claude
+            token, _ = split_inline(key_match(lines[claude_index]).group(2))
+            if token is None:
+                items = parse_items(lines, claude_index + 1, claude_end)
+                found['claude_args'] = items if items is not None else 'block'
+            else:
+                found['claude_args'] = token
+    return found
+
+
+DESIRED = {'agent': AGENT, 'reviewer_agent': AGENT,
+           'fixer_agent': AGENT, 'claude_args': tuple(CLAUDE_ARGS)}
+
+# ------------------------------------------------------------------- edits
+
+edits = []  # (start, end, replacement lines) splices on the original lines
+
+
+def set_scalar(lines, entry, indent, value):
+    """Replace a key line's inline value, keeping any trailing comment."""
+    _, index, end = entry
+    match = key_match(lines[index])
+    token, comment = split_inline(match.group(2))
+    if token is None and any(classify(lines[j])[0] == 'content'
+                             for j in range(index + 1, end)):
+        fail(f'line {index + 1}: refusing to replace a block value with a scalar')
+    if token == value:
+        return
+    rendered = ' ' * indent + f'{match.group(1)}: {value}'
+    if comment:
+        rendered += '  ' + comment
+    edits.append((index, index + 1, [rendered]))
+
+
+def arg_block(child_indent):
+    return [' ' * child_indent + 'claude:'] + [
+        ' ' * (child_indent + 2) + f'- {arg}' for arg in CLAUDE_ARGS]
+
+
+def append_block(lines, block):
+    """Append a top-level block at end of file with a blank-line separator."""
+    separator = [''] if lines and classify(lines[-1])[0] != 'blank' else []
+    edits.append((len(lines), len(lines), separator + block))
+
+
+def apply(lines, text):
+    original_text = text
+    original_top = [name for name, _, _ in top_keys(lines)]
+    current = extract(lines)
+    if current == DESIRED:
+        return None
+
+    top = top_keys(lines)
+    agent = one(top, 'agent', lines)
+    if agent is None:
+        first_key = min((index for _, index, _ in top), default=len(lines))
+        edits.append((first_key, first_key, [f'agent: {AGENT}']))
+    else:
+        set_scalar(lines, agent, 0, AGENT)
+
+    review = one(top, 'review_agents', lines)
+    if review is None:
+        append_block(lines, ['review_agents:', '  reviewer:', f'    agent: {AGENT}',
+                             '  fixer:', f'    agent: {AGENT}'])
+    else:
+        _, index, end = review
+        roles, child_indent = children(lines, index, end)
+        reviewer = one(roles, 'reviewer', lines)
+        fixer = one(roles, 'fixer', lines)
+        if reviewer is None:
+            edits.append((index + 1, index + 1,
+                          [' ' * child_indent + 'reviewer:',
+                           ' ' * (child_indent + 2) + f'agent: {AGENT}']))
+        else:
+            role_keys, role_indent = children(lines, reviewer[1], reviewer[2])
+            agent_key = one(role_keys, 'agent', lines)
+            if agent_key is None:
+                edits.append((reviewer[1] + 1, reviewer[1] + 1,
+                              [' ' * role_indent + f'agent: {AGENT}']))
+            else:
+                set_scalar(lines, agent_key, role_indent, AGENT)
+        if fixer is None:
+            if reviewer is not None:
+                # After the reviewer block, but ahead of trailing blank lines
+                # the span absorbed, so the two roles stay adjacent.
+                at = reviewer[2]
+                while at > reviewer[1] + 1 and classify(lines[at - 1])[0] == 'blank':
+                    at -= 1
+            else:
+                at = index + 1
+            edits.append((at, at,
+                          [' ' * child_indent + 'fixer:',
+                           ' ' * (child_indent + 2) + f'agent: {AGENT}']))
+        else:
+            role_keys, role_indent = children(lines, fixer[1], fixer[2])
+            agent_key = one(role_keys, 'agent', lines)
+            if agent_key is None:
+                edits.append((fixer[1] + 1, fixer[1] + 1,
+                              [' ' * role_indent + f'agent: {AGENT}']))
+            else:
+                set_scalar(lines, agent_key, role_indent, AGENT)
+
+    overrides = one(top, 'agent_args_override', lines)
+    if overrides is None:
+        append_block(lines, ['agent_args_override:'] + arg_block(2))
+    else:
+        _, index, end = overrides
+        agents, child_indent = children(lines, index, end)
+        claude = one(agents, 'claude', lines)
+        if claude is None:
+            edits.append((index + 1, index + 1, arg_block(child_indent)))
+        else:
+            _, claude_index, claude_end = claude
+            token, comment = split_inline(key_match(lines[claude_index]).group(2))
+            items = (token if token is not None
+                     else parse_items(lines, claude_index + 1, claude_end))
+            if items == tuple(CLAUDE_ARGS):
+                pass
+            else:
+                # Replace the whole value (inline or block, any shape) with the
+                # canonical block list, keeping comments and the key's indent.
+                rendered = ' ' * child_indent + 'claude:'
+                if comment:
+                    rendered += '  ' + comment
+                edits.append((claude_index, claude_index + 1, [rendered]))
+                content = [j for j in range(claude_index + 1, claude_end)
+                           if classify(lines[j])[0] == 'content']
+                edits.append((claude_index + 1, claude_index + 1,
+                              [' ' * (child_indent + 2) + f'- {arg}'
+                               for arg in CLAUDE_ARGS]))
+                for j in sorted(content, reverse=True):
+                    edits.append((j, j + 1, []))
+
+    for start, end, replacement in sorted(edits, reverse=True):
+        lines[start:end] = replacement
+
+    # Verify the merge before anything is written: the rendered text must yield
+    # exactly the desired values and lose no original top-level key.
+    rendered_top = [name for name, _, _ in top_keys(lines)]
+    added = {'agent', 'review_agents', 'agent_args_override'}
+    if [name for name in rendered_top if name not in added or name in original_top] != original_top:
+        fail('merge verification failed: top-level keys changed')
+    if extract(lines) != DESIRED:
+        fail('merge verification failed: owned values did not converge')
+    rendered = '\n'.join(lines)
+    if not rendered.endswith('\n'):
+        rendered += '\n'
+    return rendered if rendered != original_text else None
+
+
+# -------------------------------------------------------------------- main
+
+MINIMAL = f'''\
+# no-mistakes global configuration
+#
+# Only the Claude agent-policy keys below are declared by dotfiles
+# (bin/no-mistakes-set-agent-policy, merged on Home Manager activation);
+# every other setting is left to no-mistakes and the operator.
+agent: {AGENT}
+
+review_agents:
+  reviewer:
+    agent: {AGENT}
+  fixer:
+    agent: {AGENT}
+
+agent_args_override:
+  claude:
+''' + ''.join(f'    - {arg}\n' for arg in CLAUDE_ARGS)
+
+original = path.read_bytes() if path.exists() else b''
+try:
+    text = original.decode('utf-8')
+except UnicodeDecodeError:
+    fail('not valid UTF-8')
+rendered = MINIMAL if not text.strip() else apply(text.split('\n'), text)
+if rendered is None:
+    raise SystemExit(0)
+
+path.parent.mkdir(parents=True, exist_ok=True)
+fd, temporary = tempfile.mkstemp(prefix=path.name + '.', dir=path.parent)
+try:
+    with os.fdopen(fd, 'wb') as output:
+        output.write(rendered.encode('utf-8'))
+        output.flush()
+        os.fsync(output.fileno())
+        if path.exists():
+            os.fchmod(output.fileno(), stat.S_IMODE(path.stat().st_mode))
+        else:
+            os.fchmod(output.fileno(), 0o644)
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+PY

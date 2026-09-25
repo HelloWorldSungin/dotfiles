@@ -365,3 +365,45 @@ Model metadata and decimal parsing are fixture dependencies. It reads the binary
 without editing or launching Claude, makes no model calls, and intentionally
 fails if its version-specific source anchors change. This is source/schema
 inspection plus isolated function execution, not full session ingestion.
+
+## no-mistakes agent policy
+
+`~/.no-mistakes/config.yaml` is owned by no-mistakes itself: it is a commented
+YAML file the tool reads on every run and rewrites when its own configuration
+commands run, so it is not a repository symlink and never becomes a read-only
+managed file. During Home Manager activation,
+`bin/no-mistakes-set-agent-policy` merges exactly four settings into it:
+
+| Setting | Value |
+|---------|-------|
+| `agent` (top level, single entry) | `claude` |
+| `review_agents.reviewer.agent` | `claude` |
+| `review_agents.fixer.agent` | `claude` |
+| `agent_args_override.claude` | `[--model, claude-opus-5-5, --effort, low]` |
+
+These are the captain's 2026-09-25 fleet policy: every no-mistakes stage,
+including both independent review-role sessions, runs Claude Code
+claude-opus-5-5 at low effort. The `agent_args_override.claude` flags are the
+single effective knob: native flags there beat `agent_config` and any
+`review_agents` model/effort, so both review roles inherit them.
+
+The merge is surgical and comment-preserving: it rewrites only the lines of
+these four settings, keeps every other key and every comment byte-identical,
+and never rewrites a file whose values already match (same bytes, same inode).
+On a fresh machine with no file it creates a minimal file with just these
+keys. Shapes it cannot edit confidently - duplicate keys, tab indentation,
+block or multi-line flow values where a scalar belongs - are refused with a
+nonzero exit and no write. `NO_MISTAKES_CONFIG_FILE` selects an isolated file
+for testing; `tests/no-mistakes-agent-policy.test.sh` exercises the merge
+against temporary files only.
+
+Deliberately NOT declared: the `agent_args_override.codex` fallback flags,
+`auto_fix` per-step attempts, `intent` extraction, the timeout trio
+(`ci_timeout`, `step_quiet_warning`, `daemon_connect_timeout`),
+`session_reuse`, and `log_level`. Those stay machine-local operator policy;
+their live values carry dated captain reasoning in the file's own comments.
+Declaring them here would make a rebuild silently override that reasoning.
+
+Precedence is unchanged: no-mistakes per-run flags and environment still win
+over the config file. A hand edit to these four keys lasts only until the next
+activation; change them in `bin/no-mistakes-set-agent-policy` to keep one.

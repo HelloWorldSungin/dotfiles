@@ -101,6 +101,12 @@ let
     runtimeInputs = pick [ "coreutils" "diffutils" "jq" ];
   };
 
+  noMistakesSetAgentPolicy = pkgs.writeShellApplication {
+    name = "no-mistakes-set-agent-policy";
+    text = builtins.readFile ../bin/no-mistakes-set-agent-policy;
+    runtimeInputs = pick [ "python3" ];
+  };
+
   # Guarded, opt-in companion to the checker. Installed on PATH but deliberately
   # NOT given a timer: it only ever runs when the captain invokes it. Every
   # command it shells out to is declared here - awk parses `git ls-remote`, grep
@@ -138,7 +144,7 @@ in
   _module.args.devTools = {
     inherit
       closureOnlyInputs userEnvInputs closureManifest pins flakeLock nvimPluginLock
-      checker pinnedInstaller claudeSpendPinned claudeSetCompactionWindow codexSetContextWindow codexSetModelDefaults piSetModelDefaults piSetCompactionReserve applyUpdates
+      checker pinnedInstaller claudeSpendPinned claudeSetCompactionWindow codexSetContextWindow codexSetModelDefaults piSetModelDefaults piSetCompactionReserve noMistakesSetAgentPolicy applyUpdates
       skillReviewedUpdates;
   };
 }

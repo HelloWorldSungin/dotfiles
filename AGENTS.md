@@ -92,6 +92,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `docs/agents.md` records the GPT context and compaction policy and the
   command that re-verifies Codex's advertised ceilings against an upgraded
   binary.
+- `~/.no-mistakes/config.yaml` is likewise machine-managed by no-mistakes
+  itself. Home Manager merges only the four Claude agent-policy keys (top-level
+  `agent`, both `review_agents` roles, `agent_args_override.claude`) through
+  `bin/no-mistakes-set-agent-policy`, preserving comments and every other key;
+  the codex override, `auto_fix`, `intent`, and timeouts stay machine-local.
+  See `docs/agents.md`.
 - Nix flakes only read git-tracked files: `git add` any new `bin/`/`home/` file
   before `nix build ...activationPackage`, or evaluation fails with "not tracked
   by Git".
