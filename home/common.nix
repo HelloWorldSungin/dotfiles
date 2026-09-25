@@ -130,6 +130,17 @@ in
       $DRY_RUN_CMD ${devTools.piSetCompactionReserve}/bin/pi-set-compaction-reserve
     '';
 
+  # ------------------------------------------ no-mistakes agent policy
+  # no-mistakes reads and writes ~/.no-mistakes/config.yaml itself, so
+  # home-manager merges only the captain's four Claude agent-policy keys
+  # (agent, both review_agents roles, agent_args_override.claude) via an
+  # atomic, comment-preserving, idempotent merge rather than taking over the
+  # file. Every other key stays machine-local. See docs/agents.md.
+  home.activation.noMistakesAgentPolicy =
+    lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      $DRY_RUN_CMD ${devTools.noMistakesSetAgentPolicy}/bin/no-mistakes-set-agent-policy
+    '';
+
   # ------------------------------------------------------------------ zsh
   programs.zsh = {
     enable = true;
