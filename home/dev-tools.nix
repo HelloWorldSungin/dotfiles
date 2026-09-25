@@ -95,6 +95,12 @@ let
     runtimeInputs = pick [ "coreutils" "diffutils" "jq" ];
   };
 
+  piSetCompactionReserve = pkgs.writeShellApplication {
+    name = "pi-set-compaction-reserve";
+    text = builtins.readFile ../bin/pi-set-compaction-reserve;
+    runtimeInputs = pick [ "coreutils" "diffutils" "jq" ];
+  };
+
   # Guarded, opt-in companion to the checker. Installed on PATH but deliberately
   # NOT given a timer: it only ever runs when the captain invokes it. Every
   # command it shells out to is declared here - awk parses `git ls-remote`, grep
@@ -132,7 +138,7 @@ in
   _module.args.devTools = {
     inherit
       closureOnlyInputs userEnvInputs closureManifest pins flakeLock nvimPluginLock
-      checker pinnedInstaller claudeSpendPinned claudeSetCompactionWindow codexSetContextWindow codexSetModelDefaults piSetModelDefaults applyUpdates
+      checker pinnedInstaller claudeSpendPinned claudeSetCompactionWindow codexSetContextWindow codexSetModelDefaults piSetModelDefaults piSetCompactionReserve applyUpdates
       skillReviewedUpdates;
   };
 }

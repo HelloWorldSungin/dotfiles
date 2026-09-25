@@ -153,7 +153,7 @@ opts Codex into that larger window and a 500,000-token compaction threshold.
 
 | Harness | Mechanism | Effective policy |
 |---------|-----------|------------------|
-| Pi | `pi/models.json`, `providers.openai-codex.modelOverrides` | 872,000 for `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-6-astra`; Luna keeps 272,000. Native compaction reserve unchanged. |
+| Pi | `pi/models.json` context window, plus `bin/pi-set-compaction-reserve` merging `compaction.modelOverrides` | 872,000 for `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-6-astra`, with `reserveTokens` 372000 so auto-compaction triggers above 500,000. Luna keeps 272,000 and the built-in 16,384 reserve. |
 | Codex | `bin/codex-set-context-window` atomically merges three global keys into machine-maintained `~/.codex/config.toml` | `model_context_window = 872000`, `model_auto_compact_token_limit = 500000`, `model_auto_compact_token_limit_scope = "total"`. Native catalog clamping remains active. |
 
 Codex's 872,000 is its catalog window ceiling, with **828,400 usable tokens**
@@ -181,22 +181,22 @@ explicit helper invocations; compaction stays at 500,000 with total scope
 and native clamping. Activation changes the next configuration read; tests
 build the generation without activating it or modifying live sessions.
 
-Pi's number is a *local* override: it governs pi's own context accounting,
+Pi's window number is a *local* override: it governs pi's own context accounting,
 listing, and auto-compaction. Pi compacts when
-`contextTokens > contextWindow - reserveTokens` (default reserve 16,384, so
-**855,616** at 872,000). A previous 1,050,000 declaration delayed compaction
-until 1,033,616. That figure is Pi's threshold, not a measured backend
-ceiling: on 2026-09-09 the ChatGPT Codex subscription backend accepted a
-**909,436**-token request on `gpt-5.6-luna` (scratch override) and rejected an
-approximately **1,048,000**-token request (`Your input exceeds the context
-window of this model`), also confirmed on `gpt-5.6-sol`. The ceiling sits in
-the unmeasured gap between those sizes. A 1,033,616-token request could be
-accepted if the ceiling is above it, or rejected if the ceiling is below it;
-it was not shown to exceed the ceiling. Pi's 872,000 declaration puts
-compaction at 855,616, below the 909,436-token measured accept, and stays
-clear of the 1,048,000-token rejection. It does not guarantee that every
-arbitrary oversized first prompt succeeds, and it does not identify any one
-historical session as the cause.
+`contextTokens > contextWindow - reserveTokens`. The three models use
+`reserveTokens` 372000, so the trigger is above **500,000** (872,000 - 372,000).
+The built-in reserve is 16,384, which would otherwise trigger above **855,616**.
+A previous 1,050,000 declaration delayed compaction until 1,033,616. That figure
+is Pi's threshold, not a measured backend ceiling: on 2026-09-09 the ChatGPT
+Codex subscription backend accepted a **909,436**-token request on
+`gpt-5.6-luna` (scratch override) and rejected an approximately
+**1,048,000**-token request (`Your input exceeds the context window of this
+model`), also confirmed on `gpt-5.6-sol`. The ceiling sits in the unmeasured
+gap between those sizes. A 1,033,616-token request could be accepted if the
+ceiling is above it, or rejected if the ceiling is below it; it was not shown
+to exceed the ceiling. The 872,000 window stays below the 1,048,000-token
+rejection. It does not guarantee that every arbitrary oversized first prompt
+succeeds, and it does not identify any one historical session as the cause.
 
 To re-verify after an upgrade, use an isolated `CODEX_HOME` with
 `codex debug models --bundled`. Inspect `context_window`,
@@ -210,10 +210,20 @@ documents the global controls. Use a private `codex app-server --stdio
 --strict-config` plus `config/read` for executable schema validation;
 `debug` and `features` do not support strict mode in 0.154.0.
 
-Pi compaction settings remain unchanged. Pi 0.85.1 only exposes a
-reserve, not a per-model absolute threshold. A global 372,000 reserve would
-trigger above 500,000 on an 872,000 model but even at zero usage on Luna's
-272,000 window; it also increases summary output budgets. Independently of
+Pi 0.87.0 resolves `compaction.modelOverrides` by exact `provider/modelId`
+before the ordinary reserve (`getCompactionSettings`). The owned keys are
+`openai-codex/gpt-5.6-sol`, `openai-codex/gpt-5.6-terra`, and
+`openai-codex/gpt-6-astra`, each with `reserveTokens` 372000. A global 372,000
+reserve is not used: every model whose window is at or below that reserve,
+including Luna at 272,000, would compact on the first token. Models outside
+those three keys keep the ordinary reserve, or the built-in 16,384 when it is
+absent, so Luna triggers above 255,616. The same model id on another provider
+is a different key and is left alone. `reserveTokens` also sizes the
+summarizer's output budget as `min(floor(0.8 * reserveTokens), model.maxTokens)`;
+for these models that cap is the model's own 128,000 `maxTokens`.
+`bin/pi-set-compaction-reserve` merges only those three fields into
+machine-owned `~/.pi/agent/settings.json` and refuses malformed JSON or a
+non-object override rather than replacing it. Independently of
 Codex's context policy, the [Claude calculation-window default](#claude-calculation-window)
 adds an absent 600,000 window setting. Its approximate 567,000-587,000 base
 threshold depends on output reservation; model clamping and earlier triggers
@@ -234,17 +244,25 @@ Requests above 272K total input tokens bill at the model's long-context rates fo
 the whole request. Pi's override does not change the selected model or effort.
 
 **Activation:** run `bash ~/dotfiles/rebuild.sh`. `~/.pi/agent/models.json` is a
-live symlink into the repo, and `~/.codex/config.toml` is patched by a
-home-manager activation step (`bin/codex-set-context-window`) that merges only
-those three keys - the file stays machine-owned, so project trust entries, hook
-approvals and TUI preferences are untouched, and repeat rebuilds are a no-op.
+live symlink into the repo. Pi compaction reserves are applied by the activation
+step `bin/pi-set-compaction-reserve`, which merges only the three model reserves
+into machine-owned `~/.pi/agent/settings.json`. For that bounded change alone,
+after the checkout is fast-forwarded, run
+`bash ~/dotfiles/bin/pi-set-compaction-reserve` instead of a full rebuild when
+other pending Home Manager changes must stay unapplied. `~/.codex/config.toml`
+is patched by a home-manager activation step (`bin/codex-set-context-window`)
+that merges only those three keys - the file stays machine-owned, so project
+trust entries, hook approvals and TUI preferences are untouched, and repeat
+rebuilds are a no-op.
 The parser-backed merge preserves quoted keys and multiline instruction values,
 checks that unrelated TOML values survive, and refuses malformed input before writing.
 An activation step has no removal path the way a declared file does: dropping it
 from `home/common.nix` leaves the keys behind, so back the policy out by editing
 `~/.codex/config.toml` by hand.
-Use a new Codex session after activation to pick up the policy. Pi also reloads
-its models file when opening `/model`; this change does not edit that file.
+Use a new Codex session after activation to pick up the policy. Pi reads
+`settings.json` when a session starts, so the compaction reserve applies to the
+next Pi launch and does not rewrite a running session. Pi also reloads its
+models file when opening `/model`.
 
 ## Codex model defaults
 
@@ -273,7 +291,10 @@ The home-manager activation step `bin/pi-set-model-defaults` merges only those
 three settings keys and rewrites the two pins in Firstmate's own format (one
 line, mode `0600`, atomic replace), leaves every other key untouched, skips the
 pins on a host with no `~/firstmate/config`, and does nothing on a repeat
-rebuild. `tests/pi-model-defaults.test.sh` checks that Pi resolves the result.
+rebuild. The following activation step, `bin/pi-set-compaction-reserve`, merges
+the three compaction reserves described above and also leaves every other key
+untouched. `tests/pi-model-defaults.test.sh` and
+`tests/pi-compaction-reserve.test.sh` check that Pi resolves each result.
 
 Precedence is unchanged: `pi --model`/`--thinking`, and per-launch routing such as
 the `pi-fusion` alias, still win over the settings defaults for that run, and

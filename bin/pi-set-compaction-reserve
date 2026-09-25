@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Own Pi's per-model auto-compaction reserve without taking over settings.json.
+#
+# ~/.pi/agent/settings.json is machine-maintained (changelog version, theme,
+# /model and /thinking saves, /settings). This merges only
+# compaction.modelOverrides["<provider>/<id>"].reserveTokens for the three
+# openai-codex models whose context window is 872000 in pi/models.json:
+# gpt-5.6-sol, gpt-5.6-terra, and gpt-6-astra. Every other key is preserved,
+# including an ordinary compaction.reserveTokens, keepRecentTokens on the same
+# model entry, and overrides for any other model.
+#
+# Pi 0.87.0 triggers when contextTokens > contextWindow - reserveTokens
+# (shouldCompact). reserveTokens 372000 on an 872000 window triggers above
+# 500000. A global reserve is not used: it would make every model whose window
+# is at or below that reserve compact immediately. Other models keep the
+# ordinary reserve, or the built-in 16384 when that field is absent.
+#
+# Idempotent: a file whose content already matches is never rewritten.
+# PI_SETTINGS_FILE selects an isolated file for tests.
+set -euo pipefail
+
+RESERVE=372000
+SETTINGS="${PI_SETTINGS_FILE:-${PI_CODING_AGENT_DIR:-${HOME}/.pi/agent}/settings.json}"
+
+# replace_if_changed <target> ; new content on stdin
+replace_if_changed() {
+  local target=$1 tmp
+  tmp=$(mktemp "${target}.XXXXXX")
+  cat > "$tmp"
+  if [ -f "$target" ] && cmp -s "$tmp" "$target"; then
+    rm -f "$tmp"
+    return 0
+  fi
+  if [ -f "$target" ]; then
+    chmod --reference="$target" "$tmp" 2>/dev/null || chmod 0644 "$tmp"
+  else
+    chmod 0644 "$tmp"
+  fi
+  mv -f "$tmp" "$target"
+}
+
+mkdir -p "$(dirname "$SETTINGS")"
+if [ -s "$SETTINGS" ]; then
+  current=$(cat "$SETTINGS")
+else
+  current='{}'
+fi
+
+new=$(printf '%s' "$current" | jq --indent 2 \
+  --argjson reserve "$RESERVE" \
+  --argjson models '["openai-codex/gpt-5.6-sol","openai-codex/gpt-5.6-terra","openai-codex/gpt-6-astra"]' '
+  def must_object($label):
+    if . == null then {}
+    elif type == "object" then .
+    else error("refusing to merge: " + $label + " is " + type)
+    end;
+  .compaction |= (
+    must_object("compaction")
+    | .modelOverrides |= (
+        must_object("compaction.modelOverrides")
+        | reduce $models[] as $id (.;
+            .[$id] = (
+              if .[$id] == null then {reserveTokens: $reserve}
+              elif (.[$id] | type) != "object" then
+                error("refusing to merge: compaction.modelOverrides[\"" + $id + "\"] is " + (.[$id] | type))
+              else .[$id] + {reserveTokens: $reserve}
+              end
+            )
+          )
+      )
+  )
+') || { echo "refusing to merge: $SETTINGS is not valid JSON or a compaction field is the wrong type" >&2; exit 1; }
+
+printf '%s\n' "$new" | replace_if_changed "$SETTINGS"
