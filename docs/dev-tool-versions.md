@@ -262,8 +262,8 @@ current authoritative release or branch commit.
   developer command, and its quota integration probes an optional separately
   installed Grok CLI. Neither is a repository-owned install.
 - Credentials, logins, project trust, hook approvals, TUI preferences, and the
-  machine-owned Codex config remain mutable state. Home Manager merges only the
-  Codex context-window key and does not replace that file.
+  machine-owned Codex config remain mutable state. Home Manager merges its owned
+  Codex keys without replacing that file; see [agents.md](agents.md).
 
 ## Check, install, and apply boundaries
 

@@ -147,7 +147,7 @@ repository ships that policy and does not apply that live settings write.
 
 ## GPT long context and compaction
 
-The installed Codex 0.154.0 catalog defaults Sol, Terra, Luna and Astra to
+The verified Codex 0.154.0 catalog defaults Sol, Terra, Luna and Astra to
 272,000 tokens and advertises `max_context_window = 872000`. Home Manager
 opts Codex into that larger window and a 500,000-token compaction threshold.
 
@@ -170,8 +170,8 @@ rejects a `models.gpt-6-sol` table and a compaction key in legacy
 `[profiles.sol]`; it accepts the top-level compaction key. The CLI's `-p`
 option loads a separate `$CODEX_HOME/<name>.config.toml` file. The window is clamped to
 each model's advertised maximum, and the compaction limit is clamped to 90%
-of its resolved window. All four selected models therefore have a 500,000
-limit; 272,000 models retain an earlier 244,800 limit. This also raises other
+of its resolved window. In unprofiled launches, the four selected models have
+a 500,000 limit; 272,000 models retain an earlier 244,800 limit. This also raises other
 catalog entries: daybreak-blue and codex-auto-review to 872,000, daybreak-red
 to 372,000, and GPT-5.4 to 872,000. Do not describe this as per-model policy.
 The two named profile files contain a model selection, 872,000 window, and
@@ -268,6 +268,7 @@ is patched by a home-manager activation step (`bin/codex-set-context-window`)
 that merges only those three keys - the file stays machine-owned, so project
 trust entries, hook approvals and TUI preferences are untouched, and repeat
 rebuilds are a no-op.
+The same rebuild links the two named Codex profiles into `~/.codex/`.
 The parser-backed merge preserves quoted keys and multiline instruction values,
 checks that unrelated TOML values survive, and refuses malformed input before writing.
 An activation step has no removal path the way a declared file does: dropping it
