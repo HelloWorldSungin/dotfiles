@@ -112,6 +112,13 @@ in
       $DRY_RUN_CMD ${devTools.codexSetModelDefaults}/bin/codex-set-model-defaults
     '';
 
+  # Named Codex profiles opt Sol and Astra into the larger compaction limit.
+  # The global limit stays at 500000, so other model launches are unaffected.
+  home.file.".codex/gpt-6-sol-512k.config.toml".source =
+    link "config/codex/gpt-6-sol-512k.config.toml";
+  home.file.".codex/gpt-6-astra-512k.config.toml".source =
+    link "config/codex/gpt-6-astra-512k.config.toml";
+
   # ------------------------------------------------------ pi model defaults
   # Pi writes ~/.pi/agent/settings.json itself, so home-manager owns only its
   # three default-model keys, plus the Firstmate Pi supervision-branch model and

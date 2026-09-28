@@ -154,7 +154,7 @@ opts Codex into that larger window and a 500,000-token compaction threshold.
 | Harness | Mechanism | Effective policy |
 |---------|-----------|------------------|
 | Pi | `pi/models.json` context window, plus `bin/pi-set-compaction-reserve` merging `compaction.modelOverrides` | 872,000 for `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-6-astra`, `gpt-6-sol`, with `reserveTokens` 372000 so auto-compaction triggers above 500,000. `gpt-5.6-luna` and `gpt-6-luna` keep their built-in 272,000 window with `reserveTokens` 122000, so they trigger above 150,000. |
-| Codex | `bin/codex-set-context-window` atomically merges three global keys into machine-maintained `~/.codex/config.toml` | `model_context_window = 872000`, `model_auto_compact_token_limit = 500000`, `model_auto_compact_token_limit_scope = "total"`. Native catalog clamping remains active. |
+| Codex | `bin/codex-set-context-window` atomically merges three global keys into machine-maintained `~/.codex/config.toml`; named Sol/Astra profiles are separate files | The unprofiled limit remains 500,000 total tokens. `codex -p gpt-6-sol-512k` and `codex -p gpt-6-astra-512k` select their respective models with a 512,000 total-token limit and 872,000 window. Native catalog clamping remains active. |
 
 Codex's 872,000 is its catalog window ceiling, with **828,400 usable tokens**
 after 5% headroom. It is not the public API's total context of 1,050,000 or
@@ -165,13 +165,23 @@ its maximum output of 128,000. See the official model pages for
 [Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna).
 
 The global scope is intentional: Codex has no native `models.<id>` context
-configuration. On 0.154.0, an isolated strict app-server rejects that table;
-`config/read` accepts the three global settings. The window is clamped to
+or compaction configuration. On installed 0.158.0, an isolated strict app-server
+rejects a `models.gpt-6-sol` table and a compaction key in legacy
+`[profiles.sol]`; it accepts the top-level compaction key. The CLI's `-p`
+option loads a separate `$CODEX_HOME/<name>.config.toml` file. The window is clamped to
 each model's advertised maximum, and the compaction limit is clamped to 90%
 of its resolved window. All four selected models therefore have a 500,000
 limit; 272,000 models retain an earlier 244,800 limit. This also raises other
 catalog entries: daybreak-blue and codex-auto-review to 872,000, daybreak-red
 to 372,000, and GPT-5.4 to 872,000. Do not describe this as per-model policy.
+The two named profile files contain a model selection, 872,000 window, and
+512,000 total-token compaction limit. They are opt-in, rather than an automatic
+per-model setting. Interactive Codex must launch with `-p gpt-6-sol-512k` or
+`-p gpt-6-astra-512k`; Firstmate Codex worker launches and no-mistakes Codex
+validation launches would also have to pass the corresponding profile to use
+512,000. Those callers are not changed here. Do not override a profile's model
+with Luna: its profile limit would then apply to Luna. Unprofiled Codex launches
+keep 500,000 and Pi's separate Luna policy remains at 150,000.
 `total` counts the whole active context, unlike `body_after_prefix` growth
 counting. The threshold is checked at harness boundaries, not a guarantee
 that every oversized first prompt or tool result will succeed.
