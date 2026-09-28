@@ -179,8 +179,9 @@ The two named profile files contain a model selection, 872,000 window, and
 per-model setting. Interactive Codex must launch with `-p gpt-6-sol-512k` or
 `-p gpt-6-astra-512k`; Firstmate Codex worker launches and no-mistakes Codex
 validation launches would also have to pass the corresponding profile to use
-512,000. Those callers are not changed here. Do not override a profile's model
-with Luna: its profile limit would then apply to Luna. Unprofiled Codex launches
+512,000. Those callers are not changed here. Combining either 512k profile
+with `-m` for another model is unsupported: the profile limit would then apply
+to that model, including Luna. Unprofiled Codex launches
 keep 500,000 and Pi's separate Luna policy remains at 150,000.
 `total` counts the whole active context, unlike `body_after_prefix` growth
 counting. The threshold is checked at harness boundaries, not a guarantee
