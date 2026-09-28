@@ -1,0 +1,4 @@
+model = "gpt-6-sol"
+model_context_window = 872000
+model_auto_compact_token_limit = 512000
+model_auto_compact_token_limit_scope = "total"
