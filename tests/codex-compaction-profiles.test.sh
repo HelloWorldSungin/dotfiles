@@ -12,7 +12,6 @@ import tempfile
 import tomllib
 
 root = Path(sys.argv[1])
-home_module = (root / 'home/common.nix').read_text()
 with tempfile.TemporaryDirectory(prefix='.codex-profiles-', dir=root) as scratch:
     codex_home = Path(scratch)
     (codex_home / 'config.toml').write_text(
@@ -23,7 +22,16 @@ with tempfile.TemporaryDirectory(prefix='.codex-profiles-', dir=root) as scratch
     for model in ('gpt-6-sol', 'gpt-6-astra'):
         profile = f'{model}-512k'
         relative = f'config/codex/{profile}.config.toml'
-        assert f'link "{relative}"' in home_module
+        home_file = f'{root}#homeConfigurations."sungin@ct110".config.home.file.".codex/{profile}.config.toml"'
+        target = subprocess.run(
+            ['nix', 'eval', '--raw', f'{home_file}.target'],
+            check=True, capture_output=True, text=True).stdout
+        assert target == f'.codex/{profile}.config.toml', target
+        deployed_source = subprocess.run(
+            ['nix', 'build', '--no-link', '--print-out-paths', f'{home_file}.source'],
+            check=True, capture_output=True, text=True).stdout.strip()
+        assert Path(deployed_source).is_symlink(), deployed_source
+        assert Path(deployed_source).readlink() == Path(f'/home/sungin/dotfiles/{relative}'), deployed_source
         source = root / relative
         contents = tomllib.loads(source.read_text())
         assert contents == {
