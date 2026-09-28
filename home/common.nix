@@ -83,11 +83,11 @@ in
   home.file.".pi/agent/extensions/fusion-harness".source = link "pi/extensions/fusion-harness";
 
   # ------------------------------------------------- pi model overrides
-  # Opts GPT-5.6 Sol, GPT-5.6 Terra and GPT-6 Astra into Codex's advertised
-  # 872,000-token window. `modelOverrides` patches the three built-in models in
-  # place, so the rest of the openai-codex catalog (Luna included) keeps its
-  # 272,000 default and every built-in model's pricing metadata is preserved.
-  # See docs/agents.md.
+  # Opts GPT-5.6 Sol, GPT-5.6 Terra, GPT-6 Astra and GPT-6 Sol into Codex's
+  # advertised 872,000-token window. `modelOverrides` patches the four built-in
+  # models in place, so the rest of the openai-codex catalog (both Luna models
+  # included) keeps its 272,000 default and every built-in model's pricing
+  # metadata is preserved. See docs/agents.md.
   home.file.".pi/agent/models.json".source = link "pi/models.json";
 
   # Claude owns settings.json; add only the absent calculation-window default.
@@ -122,9 +122,10 @@ in
     '';
 
   # --------------------------------------------- pi compaction reserves
-  # Same machine-owned settings file. Merges only the four model reserves that
-  # put gpt-5.6-sol, gpt-5.6-terra, and gpt-6-astra auto-compaction above
-  # 500000 tokens and gpt-5.6-luna above 150000. See docs/agents.md.
+  # Same machine-owned settings file. Merges only the six model reserves that
+  # put gpt-5.6-sol, gpt-5.6-terra, gpt-6-astra, and gpt-6-sol auto-compaction
+  # above 500000 tokens and gpt-5.6-luna and gpt-6-luna above 150000. See
+  # docs/agents.md.
   home.activation.piCompactionReserve =
     lib.hm.dag.entryAfter [ "piModelDefaults" ] ''
       $DRY_RUN_CMD ${devTools.piSetCompactionReserve}/bin/pi-set-compaction-reserve

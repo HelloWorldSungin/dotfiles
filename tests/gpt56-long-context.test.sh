@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Behavior tests for the GPT long-context configuration (GPT-5.6 Sol/Terra and
-# GPT-6 Astra):
-#   - pi/models.json: the exact three openai-codex modelOverrides.
+# GPT-6 Astra/Sol):
+#   - pi/models.json: the exact four openai-codex modelOverrides.
 #   - the installed Pi package (from the npm prefix) applying them, and its
 #     shouldCompact threshold at contextWindow minus the configured reserve.
 #   - bin/codex-set-context-window: the narrowly scoped, atomic, idempotent
@@ -38,16 +38,16 @@ assert_eq "$(jq -r '.providers | keys | join(",")' "$MODELS_JSON")" \
 pass "pi/models.json configures only the openai-codex provider"
 
 assert_eq "$(jq -r '.providers["openai-codex"].modelOverrides | keys | sort | join(",")' "$MODELS_JSON")" \
-  "gpt-5.6-sol,gpt-5.6-terra,gpt-6-astra" "modelOverrides covers exactly Sol, Terra and Astra"
-pass "modelOverrides covers exactly Sol, Terra and Astra"
+  "gpt-5.6-sol,gpt-5.6-terra,gpt-6-astra,gpt-6-sol" "modelOverrides covers exactly the four 872000 models"
+pass "modelOverrides covers exactly Sol, Terra, Astra and GPT-6 Sol"
 
-for model in gpt-5.6-sol gpt-5.6-terra gpt-6-astra; do
+for model in gpt-5.6-sol gpt-5.6-terra gpt-6-astra gpt-6-sol; do
   assert_eq "$(jq -r --arg m "$model" '.providers["openai-codex"].modelOverrides[$m].contextWindow' "$MODELS_JSON")" \
     "872000" "$model contextWindow is 872000"
   assert_eq "$(jq -r --arg m "$model" '.providers["openai-codex"].modelOverrides[$m] | keys | join(",")' "$MODELS_JSON")" \
     "contextWindow" "$model overrides only contextWindow"
 done
-pass "Sol, Terra and Astra each override only contextWindow, to 872000"
+pass "Sol, Terra, Astra and GPT-6 Sol each override only contextWindow, to 872000"
 
 # The overrides must not touch model selection, effort, or any unrelated model
 # such as Luna.
@@ -71,7 +71,7 @@ pass "the default model/effort guard fires on a root model and on a nested effor
   || fail "pi/models.json must not set a default model or effort"
 
 # Luna, and every other unrelated model, is left alone: the provider object
-# carries only the three overrides already pinned above.
+# carries only the four overrides already pinned above.
 assert_eq "$(jq -r '.providers["openai-codex"] | keys | join(",")' "$MODELS_JSON")" \
   "modelOverrides" "the openai-codex provider carries nothing but modelOverrides"
 pass "pi/models.json changes no default model, effort, or Luna"
@@ -104,7 +104,7 @@ const runtime = await ModelRuntime.create({
   allowModelNetwork: false,
 });
 const settings = SettingsManager.create(agentDir, agentDir).getCompactionSettings();
-const ids = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-6-astra"];
+const ids = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-6-astra", "gpt-6-sol"];
 const windows = {};
 for (const id of ids) {
   const model = runtime.getModel("openai-codex", id);
@@ -112,11 +112,13 @@ for (const id of ids) {
 }
 const sol = runtime.getModel("openai-codex", "gpt-5.6-sol");
 const luna = runtime.getModel("openai-codex", "gpt-5.6-luna");
+const luna6 = runtime.getModel("openai-codex", "gpt-6-luna");
 const window = windows["gpt-5.6-sol"];
 const threshold = window - settings.reserveTokens;
 process.stdout.write(JSON.stringify({
   windows,
   lunaWindow: luna?.contextWindow ?? null,
+  luna6Window: luna6?.contextWindow ?? null,
   solMaxTokens: sol?.maxTokens ?? null,
   solApi: sol?.api ?? null,
   solProvider: sol?.provider ?? null,
@@ -145,8 +147,10 @@ assert d["windows"] == {
     "gpt-5.6-sol": 872000,
     "gpt-5.6-terra": 872000,
     "gpt-6-astra": 872000,
+    "gpt-6-sol": 872000,
 }, d["windows"]
 assert d["lunaWindow"] == 272000, d["lunaWindow"]
+assert d["luna6Window"] == 272000, d["luna6Window"]
 assert d["solMaxTokens"] == 128000, d["solMaxTokens"]
 assert d["solApi"] == "openai-codex-responses", d["solApi"]
 assert d["solProvider"] == "openai-codex", d["solProvider"]
