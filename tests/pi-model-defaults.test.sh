@@ -53,23 +53,23 @@ JSON
 run_merge "$case_dir" || fail "merge into an existing settings.json failed"
 settings="$case_dir/agent/settings.json"
 assert_eq "$(jq -r '.defaultProvider' "$settings")" "openai-codex" "defaultProvider"
-assert_eq "$(jq -r '.defaultModel' "$settings")" "gpt-6-astra" "defaultModel"
-assert_eq "$(jq -r '.defaultThinkingLevel' "$settings")" "low" "defaultThinkingLevel"
+assert_eq "$(jq -r '.defaultModel' "$settings")" "gpt-6-sol" "defaultModel"
+assert_eq "$(jq -r '.defaultThinkingLevel' "$settings")" "high" "defaultThinkingLevel"
 assert_eq "$(jq -r '.lastChangelogVersion' "$settings")" "0.85.1" "unrelated key preserved"
 assert_eq "$(jq -r '.modelThinkingLevels["zai/glm-5.2"]' "$settings")" "max" "per-model override preserved"
 assert_eq "$(jq -r '.sessionDir' "$settings")" ".pi/sessions" "session directory preserved"
 assert_eq "$(jq -c '.compaction' "$settings")" '{"enabled":true,"reserveTokens":16384,"keepRecentTokens":20000}' "compaction preserved"
 assert_eq "$(jq -c '.branchSummary' "$settings")" '{"reserveTokens":8192,"skipPrompt":true}' "branch summary preserved"
-pass "settings.json gets gpt-6-astra/low and keeps session, compaction, and branch keys"
+pass "settings.json gets gpt-6-sol/high and keeps session, compaction, and branch keys"
 
 assert_eq "$(cat "$case_dir/firstmate/config/supervision-branch-model")" \
-  "openai-codex/gpt-5.6-luna" "supervision model pin"
-assert_eq "$(cat "$case_dir/firstmate/config/supervision-branch-effort")" "high" "supervision effort pin"
+  "openai-codex/gpt-6-luna" "supervision model pin"
+assert_eq "$(cat "$case_dir/firstmate/config/supervision-branch-effort")" "medium" "supervision effort pin"
 assert_eq "$(stat -c %a "$case_dir/firstmate/config/supervision-branch-model")" "600" "model pin mode"
 assert_eq "$(stat -c %a "$case_dir/firstmate/config/supervision-branch-effort")" "600" "effort pin mode"
 [ "$(tail -c1 "$case_dir/firstmate/config/supervision-branch-model" | od -An -c | tr -d ' ')" = '\n' ] \
   || fail "model pin must end in exactly one newline"
-pass "supervision pins are openai-codex/gpt-5.6-luna and high, mode 0600"
+pass "supervision pins are openai-codex/gpt-6-luna and medium, mode 0600"
 
 # ------------------------------------------------------------- idempotence
 touch -d '2000-01-01' "$settings" "$case_dir/firstmate/config/supervision-branch-model"
@@ -86,7 +86,7 @@ case_dir="$TMP_ROOT/fresh"
 mkdir -p "$case_dir"
 run_merge "$case_dir" || fail "merge into an absent settings.json failed"
 assert_eq "$(jq -c '.' "$case_dir/agent/settings.json")" \
-  '{"defaultProvider":"openai-codex","defaultModel":"gpt-6-astra","defaultThinkingLevel":"low"}' \
+  '{"defaultProvider":"openai-codex","defaultModel":"gpt-6-sol","defaultThinkingLevel":"high"}' \
   "fresh settings.json"
 [ ! -e "$case_dir/firstmate" ] || fail "a host without a Firstmate config dir must be untouched"
 pass "absent settings.json is created and a missing Firstmate home is left alone"
@@ -122,7 +122,7 @@ const settings = SettingsManager.create(agentDir, agentDir);
 const provider = settings.getDefaultProvider();
 const id = settings.getDefaultModel();
 const model = runtime.getModel(provider, id);
-const luna = runtime.getModel("openai-codex", "gpt-5.6-luna");
+const luna = runtime.getModel("openai-codex", "gpt-6-luna");
 process.stdout.write([
   `${model?.provider}/${model?.id}`,
   settings.getDefaultThinkingLevel(),
@@ -131,6 +131,6 @@ process.stdout.write([
 ].join(" "));
 NODE
 ) || fail "Pi default-model resolution probe failed"
-assert_eq "$resolved" "openai-codex/gpt-6-astra low openai-codex/gpt-5.6-luna true" \
+assert_eq "$resolved" "openai-codex/gpt-6-sol high openai-codex/gpt-6-luna true" \
   "Pi resolves the rendered defaults against its catalog"
-pass "Pi resolves openai-codex/gpt-6-astra at low, and knows reasoning-capable gpt-5.6-luna"
+pass "Pi resolves openai-codex/gpt-6-sol at high, and knows reasoning-capable gpt-6-luna"
