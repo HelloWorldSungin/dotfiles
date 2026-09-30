@@ -153,7 +153,7 @@ opts Codex into that larger window and a 500,000-token compaction threshold.
 
 | Harness | Mechanism | Effective policy |
 |---------|-----------|------------------|
-| Pi | `pi/models.json` context window, plus `bin/pi-set-compaction-reserve` merging `compaction.modelOverrides` | 872,000 for `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-6-astra`, `gpt-6-sol`, with `reserveTokens` 372000 so auto-compaction triggers above 500,000. `gpt-5.6-luna` and `gpt-6-luna` keep their built-in 272,000 window with `reserveTokens` 122000, so they trigger above 150,000. |
+| Pi | `pi/models.json` context window, plus `bin/pi-set-compaction-reserve` merging `compaction.modelOverrides` | 872,000 for `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-6-astra`, `gpt-6-sol`, and `gpt-6.1-sol`. `gpt-6-astra`, `gpt-6-sol`, and `gpt-6.1-sol` use `reserveTokens` 360000 so auto-compaction triggers above 512,000. `gpt-5.6-sol` and `gpt-5.6-terra` keep `reserveTokens` 372000, so they trigger above 500,000. `gpt-5.6-luna` and `gpt-6-luna` keep their built-in 272,000 window with `reserveTokens` 122000, so they trigger above 150,000. |
 | Codex | `bin/codex-set-context-window` atomically merges three global keys into machine-maintained `~/.codex/config.toml`; named Sol/Astra profiles are separate files | The unprofiled limit remains 500,000 total tokens. `codex -p gpt-6-sol-512k` and `codex -p gpt-6-astra-512k` select their respective models with a 512,000 total-token limit and 872,000 window. Native catalog clamping remains active. |
 
 Codex's 872,000 is its catalog window ceiling, with **828,400 usable tokens**
@@ -183,6 +183,12 @@ validation launches would also have to pass the corresponding profile to use
 with `-m` for another model is unsupported: the profile limit would then apply
 to that model, including Luna. Unprofiled Codex launches
 keep 500,000 and Pi's separate Luna policy remains at 150,000.
+`gpt-6.1-sol` is absent from the installed Codex 0.158.0 catalog. Fallback
+metadata sets both `context_window` and `max_context_window` to 272,000, so the
+global 872,000 window is clamped to 272,000 for that slug and the 500,000
+compaction limit cannot take effect. This repository does not add a Codex
+profile, catalog row, or binary patch for it. The opt-in 512,000 profiles stay
+limited to `gpt-6-sol` and `gpt-6-astra`.
 `total` counts the whole active context, unlike `body_after_prefix` growth
 counting. The threshold is checked at harness boundaries, not a guarantee
 that every oversized first prompt or tool result will succeed.
@@ -194,8 +200,10 @@ build the generation without activating it or modifying live sessions.
 
 Pi's window number is a *local* override: it governs pi's own context accounting,
 listing, and auto-compaction. Pi compacts when
-`contextTokens > contextWindow - reserveTokens`. The four models use
-`reserveTokens` 372000, so the trigger is above **500,000** (872,000 - 372,000).
+`contextTokens > contextWindow - reserveTokens`. Astra, GPT-6 Sol, and
+GPT-6.1 Sol use `reserveTokens` 360000, so the trigger is above **512,000**
+(872,000 - 360,000). GPT-5.6 Sol and Terra keep `reserveTokens` 372000, so
+their trigger stays above **500,000** (872,000 - 372,000).
 The built-in reserve is 16,384, which would otherwise trigger above **855,616**.
 A previous 1,050,000 declaration delayed compaction until 1,033,616. That figure
 is Pi's threshold, not a measured backend ceiling: on 2026-09-09 the ChatGPT
@@ -223,19 +231,21 @@ documents the global controls. Use a private `codex app-server --stdio
 
 Pi 0.87.0 resolves `compaction.modelOverrides` by exact `provider/modelId`
 before the ordinary reserve (`getCompactionSettings`). The owned keys are
-`openai-codex/gpt-5.6-sol`, `openai-codex/gpt-5.6-terra`,
-`openai-codex/gpt-6-astra`, and `openai-codex/gpt-6-sol`, each with
-`reserveTokens` 372000, plus `openai-codex/gpt-5.6-luna` and
-`openai-codex/gpt-6-luna` with `reserveTokens` 122000 on their built-in
-272,000 window, so both Luna models trigger above **150,000**. A global 372,000
-reserve is not used: every model whose window is at or below that reserve
-would compact on the first token. Models outside those six keys keep the
-ordinary reserve, or the built-in 16,384 when it is absent. The same model id
-on another provider is a different key and is left alone. `reserveTokens` also sizes the
-summarizer's output budget as `min(floor(0.8 * reserveTokens), model.maxTokens)`;
-for the four 872,000 models that cap is the model's own 128,000 `maxTokens`,
-and for the Luna models it is 97,600.
-`bin/pi-set-compaction-reserve` merges only those six fields into
+`openai-codex/gpt-5.6-sol` and `openai-codex/gpt-5.6-terra` with
+`reserveTokens` 372000, `openai-codex/gpt-6-astra`, `openai-codex/gpt-6-sol`,
+and `openai-codex/gpt-6.1-sol` with `reserveTokens` 360000, plus
+`openai-codex/gpt-5.6-luna` and `openai-codex/gpt-6-luna` with
+`reserveTokens` 122000 on their built-in 272,000 window, so both Luna models
+trigger above **150,000**. Astra, GPT-6 Sol, and GPT-6.1 Sol trigger above
+**512,000**. A global 360,000 reserve is not used: every model whose window is
+at or below that reserve would compact on the first token. Models outside
+those seven keys keep the ordinary reserve, or the built-in 16,384 when it is
+absent. The same model id on another provider is a different key and is left
+alone. `reserveTokens` also sizes the summarizer's output budget as
+`min(floor(0.8 * reserveTokens), model.maxTokens)`; for the 872,000 models
+that cap is the model's own 128,000 `maxTokens`, and for the Luna models it
+is 97,600.
+`bin/pi-set-compaction-reserve` merges only those seven fields into
 machine-owned `~/.pi/agent/settings.json` and refuses malformed JSON or a
 non-object override rather than replacing it. Independently of
 Codex's context policy, the [Claude calculation-window default](#claude-calculation-window)
@@ -259,7 +269,7 @@ the whole request. Pi's override does not change the selected model or effort.
 
 **Activation:** run `bash ~/dotfiles/rebuild.sh`. `~/.pi/agent/models.json` is a
 live symlink into the repo. Pi compaction reserves are applied by the activation
-step `bin/pi-set-compaction-reserve`, which merges only the six model reserves
+step `bin/pi-set-compaction-reserve`, which merges only the seven model reserves
 into machine-owned `~/.pi/agent/settings.json`. For that bounded change alone,
 after the checkout is fast-forwarded, run
 `bash ~/dotfiles/bin/pi-set-compaction-reserve` instead of a full rebuild when
@@ -307,7 +317,7 @@ three settings keys and rewrites the two pins in Firstmate's own format (one
 line, mode `0600`, atomic replace), leaves every other key untouched, skips the
 pins on a host with no `~/firstmate/config`, and does nothing on a repeat
 rebuild. The following activation step, `bin/pi-set-compaction-reserve`, merges
-the six compaction reserves described above and also leaves every other key
+the seven compaction reserves described above and also leaves every other key
 untouched. `tests/pi-model-defaults.test.sh` and
 `tests/pi-compaction-reserve.test.sh` check that Pi resolves each result.
 
