@@ -13,6 +13,9 @@
         },
         "gpt-6-sol": {
           "contextWindow": 872000
+        },
+        "gpt-6.1-sol": {
+          "contextWindow": 872000
         }
       }
     }

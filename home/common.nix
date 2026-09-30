@@ -129,9 +129,10 @@ in
     '';
 
   # --------------------------------------------- pi compaction reserves
-  # Same machine-owned settings file. Merges only the six model reserves that
-  # put gpt-5.6-sol, gpt-5.6-terra, gpt-6-astra, and gpt-6-sol auto-compaction
-  # above 500000 tokens and gpt-5.6-luna and gpt-6-luna above 150000. See
+  # Same machine-owned settings file. Merges only the seven model reserves that
+  # put gpt-6-astra, gpt-6-sol, and gpt-6.1-sol auto-compaction above 512000
+  # tokens, gpt-5.6-sol and gpt-5.6-terra above 500000, and gpt-5.6-luna and
+  # gpt-6-luna above 150000. See
   # docs/agents.md.
   home.activation.piCompactionReserve =
     lib.hm.dag.entryAfter [ "piModelDefaults" ] ''

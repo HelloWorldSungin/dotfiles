@@ -3,17 +3,19 @@
 #
 # ~/.pi/agent/settings.json is machine-maintained (changelog version, theme,
 # /model and /thinking saves, /settings). This merges only
-# compaction.modelOverrides["<provider>/<id>"].reserveTokens for six
+# compaction.modelOverrides["<provider>/<id>"].reserveTokens for seven
 # openai-codex models:
-#   gpt-5.6-sol, gpt-5.6-terra,
-#   gpt-6-astra, gpt-6-sol                   372000 on the 872000 window that
-#                                            pi/models.json declares
+#   gpt-5.6-sol, gpt-5.6-terra               372000 on the 872000 window
+#   gpt-6-astra, gpt-6-sol, gpt-6.1-sol      360000 on the 872000 window that
+#                                            pi/models.json declares, so
+#                                            auto-compaction triggers above 512000
 #   gpt-5.6-luna, gpt-6-luna                 122000 on their built-in 272000 window
 # Every other key is preserved, including an ordinary compaction.reserveTokens,
 # keepRecentTokens on the same model entry, and overrides for any other model.
 #
 # Pi 0.87.0 triggers when contextTokens > contextWindow - reserveTokens
-# (shouldCompact): above 500000 for the four 872000 models and above 150000
+# (shouldCompact): above 512000 for Astra, GPT-6 Sol, and GPT-6.1 Sol,
+# above 500000 for the two GPT-5.6 872000 models, and above 150000
 # for the two Luna models. A global reserve is not used: it would make every model whose
 # window is at or below that reserve compact immediately. Other models keep the
 # ordinary reserve, or the built-in 16384 when that field is absent.
@@ -25,8 +27,9 @@ set -euo pipefail
 RESERVES='{
   "openai-codex/gpt-5.6-sol": 372000,
   "openai-codex/gpt-5.6-terra": 372000,
-  "openai-codex/gpt-6-astra": 372000,
-  "openai-codex/gpt-6-sol": 372000,
+  "openai-codex/gpt-6-astra": 360000,
+  "openai-codex/gpt-6-sol": 360000,
+  "openai-codex/gpt-6.1-sol": 360000,
   "openai-codex/gpt-5.6-luna": 122000,
   "openai-codex/gpt-6-luna": 122000
 }'
