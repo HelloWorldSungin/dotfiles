@@ -1,34 +1,53 @@
 #!/usr/bin/env bash
-# Merge only the captain's Claude agent policy into ~/.no-mistakes/config.yaml;
+# Merge only the captain's TEMPORARY Claude agent policy into
+# ~/.no-mistakes/config.yaml, and restore the original baseline at expiry;
 # preserve every other key and every comment.
 #
 # no-mistakes reads and writes that file itself, so this is a surgical,
-# comment-preserving merge of exactly four settings rather than a managed file:
+# comment-preserving merge of exactly four settings rather than a managed file.
+#
+# Until 2026-10-04T00:00:00Z the declared (temporary) policy is:
 #
 #   agent: claude                       (top-level, single entry)
 #   review_agents.reviewer.agent: claude
 #   review_agents.fixer.agent: claude
-#   agent_args_override.claude: [--model, claude-opus-5-5, --effort, high]
+#   agent_args_override.claude: [--model, claude-opus-5-5, --effort, xhigh]
 #
-# Idempotent: when all four already match, the file is never rewritten (same
-# bytes, same inode). An absent or empty file (fresh machine) gets a minimal
-# file with just these keys. Any shape the merge cannot edit confidently -
-# duplicate keys, tab indentation, block or multi-line flow values where a
-# scalar belongs - is refused with a nonzero exit and no write.
+# From that instant the helper never applies xhigh again. Any run at or after
+# expiry (an activation, or the registered one-shot timer passing
+# --expire-temporary) restores the pre-migration baseline - the same four
+# settings with agent: codex, both roles codex, and the Claude override back to
+# [--model, claude-opus-5-5, --effort, low] - but ONLY while the four owned
+# settings still equal the temporary policy exactly. Anything else means a
+# later choice was made, and it is left byte for byte. --expire-temporary
+# before expiry does nothing. The Codex override is never owned.
 #
-# NO_MISTAKES_CONFIG_FILE selects an isolated file for testing. Pure Python
+# Idempotent: when the owned settings already match the target, the file is
+# never rewritten (same bytes, same inode). An absent or empty file (fresh
+# machine) gets a minimal file with just the target keys (the baseline minimal
+# file also carries the Codex GPT-6 Sol override). Any shape the merge cannot
+# edit confidently - duplicate keys, tab indentation, block or multi-line flow
+# values where a scalar belongs - is refused with a nonzero exit and no write.
+#
+# NO_MISTAKES_CONFIG_FILE selects an isolated file for testing, and
+# NO_MISTAKES_POLICY_NOW (ISO 8601 UTC) replaces the clock there. Pure Python
 # stdlib: no YAML library is required and none preserves comments anyway.
 set -euo pipefail
-python3 - <<'PY'
+python3 - "$@" <<'PY'
 import os
 import re
 import stat
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
-AGENT = 'claude'
-CLAUDE_ARGS = ['--model', 'claude-opus-5-5', '--effort', 'high']
+EXPIRY = datetime(2026, 10, 4, tzinfo=timezone.utc)
+TEMPORARY = ('claude', ['--model', 'claude-opus-5-5', '--effort', 'xhigh'])
+BASELINE = ('codex', ['--model', 'claude-opus-5-5', '--effort', 'low'])
+BASELINE_CODEX_ARGS = ['-m', 'gpt-6-sol', '-c', 'model_reasoning_effort="high"',
+                       '-c', 'model_auto_compact_token_limit=512000']
+AGENT, CLAUDE_ARGS = TEMPORARY
 
 path = Path(os.environ.get('NO_MISTAKES_CONFIG_FILE') or
             str(Path.home() / '.no-mistakes' / 'config.yaml'))
@@ -271,8 +290,13 @@ def extract(lines):
     return found
 
 
-DESIRED = {'agent': AGENT, 'reviewer_agent': AGENT,
-           'fixer_agent': AGENT, 'claude_args': tuple(CLAUDE_ARGS)}
+def desired(policy):
+    agent, args = policy
+    return {'agent': agent, 'reviewer_agent': agent,
+            'fixer_agent': agent, 'claude_args': tuple(args)}
+
+
+DESIRED = desired(TEMPORARY)
 
 # ------------------------------------------------------------------- edits
 
@@ -413,30 +437,67 @@ def apply(lines, text):
 
 # -------------------------------------------------------------------- main
 
-MINIMAL = f'''\
+def minimal(policy):
+    agent, args = policy
+    codex = ('  codex:\n' + ''.join(f'    - {arg}\n' for arg in BASELINE_CODEX_ARGS)
+             if policy == BASELINE else '')
+    return f'''\
 # no-mistakes global configuration
 #
-# Only the Claude agent-policy keys below are declared by dotfiles
+# Only the agent-policy keys below are declared by dotfiles
 # (bin/no-mistakes-set-agent-policy, merged on Home Manager activation);
 # every other setting is left to no-mistakes and the operator.
-agent: {AGENT}
+agent: {agent}
 
 review_agents:
   reviewer:
-    agent: {AGENT}
+    agent: {agent}
   fixer:
-    agent: {AGENT}
+    agent: {agent}
 
 agent_args_override:
-  claude:
-''' + ''.join(f'    - {arg}\n' for arg in CLAUDE_ARGS)
+''' + codex + '  claude:\n' + ''.join(f'    - {arg}\n' for arg in args)
+
+
+def clock():
+    override = os.environ.get('NO_MISTAKES_POLICY_NOW')
+    if not override:
+        return datetime.now(timezone.utc)
+    try:
+        return datetime.fromisoformat(override.replace('Z', '+00:00'))
+    except ValueError:
+        fail(f'NO_MISTAKES_POLICY_NOW is not an ISO 8601 time: {override!r}')
+
+
+expire_only = False
+for argument in sys.argv[1:]:
+    if argument != '--expire-temporary':
+        fail(f'unknown argument {argument!r}')
+    expire_only = True
+expired = clock() >= EXPIRY
+if expire_only and not expired:
+    raise SystemExit(0)
 
 original = path.read_bytes() if path.exists() else b''
 try:
     text = original.decode('utf-8')
 except UnicodeDecodeError:
     fail('not valid UTF-8')
-rendered = MINIMAL if not text.strip() else apply(text.split('\n'), text)
+
+if not expired:
+    rendered = minimal(TEMPORARY) if not text.strip() else apply(text.split('\n'), text)
+else:
+    # Past expiry xhigh is never applied. Restore the baseline only while the
+    # owned settings still equal the temporary policy; any other state is a
+    # later choice and stays untouched.
+    if not text.strip():
+        rendered = minimal(BASELINE)
+    elif extract(text.split('\n')) == DESIRED:
+        AGENT, CLAUDE_ARGS = BASELINE
+        DESIRED = desired(BASELINE)
+        rendered = apply(text.split('\n'), text)
+    else:
+        raise SystemExit(0)
 if rendered is None:
     raise SystemExit(0)
 

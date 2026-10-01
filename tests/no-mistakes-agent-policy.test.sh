@@ -23,12 +23,20 @@ import tempfile
 import yaml
 
 HELPER = os.environ['ROOT'] + '/bin/no-mistakes-set-agent-policy'
-DESIRED_ARGS = ['--model', 'claude-opus-5-5', '--effort', 'high']
+DESIRED_ARGS = ['--model', 'claude-opus-5-5', '--effort', 'xhigh']
+BASELINE_ARGS = ['--model', 'claude-opus-5-5', '--effort', 'low']
+CODEX_ARGS = ['-m', 'gpt-6-sol', '-c', 'model_reasoning_effort="high"',
+              '-c', 'model_auto_compact_token_limit=512000']
+# Every case runs on a pinned clock: the temporary policy window is real time.
+BEFORE_EXPIRY = '2026-10-03T23:59:59Z'
+AT_EXPIRY = '2026-10-04T00:00:00Z'
 
 
-def run(path):
-    env = dict(os.environ, NO_MISTAKES_CONFIG_FILE=str(path))
-    return subprocess.run(['bash', HELPER], env=env, capture_output=True, text=True)
+def run(path, now=BEFORE_EXPIRY, *args):
+    env = dict(os.environ, NO_MISTAKES_CONFIG_FILE=str(path),
+               NO_MISTAKES_POLICY_NOW=now)
+    return subprocess.run(['bash', HELPER, *args], env=env,
+                          capture_output=True, text=True)
 
 
 def state(path):
@@ -73,12 +81,12 @@ agent_args_override:
     - -c
     - model_reasoning_effort="medium"
   # Pinned 2026-08-18 (captain request): Claude Opus 5 while the codex window is out.
-  # Re-pinned 2026-10-01 to claude-opus-5-5 at high effort.
+  # Re-pinned 2026-10-01 to claude-opus-5-5 at xhigh effort.
   claude:
     - --model
     - claude-opus-5-5
     - --effort
-    - high
+    - xhigh
 
 # Maximum follow-up auto-fix attempts per step (0 = disabled after the initial pass)
 auto_fix:
@@ -117,7 +125,7 @@ with tempfile.TemporaryDirectory() as directory:
 
     # Quoted-but-equal values are already correct: no rewrite.
     quoted = LIVE_SHAPED.replace('agent: claude\n', 'agent: "claude"\n', 1) \
-                        .replace('- high', "- 'high'")
+                        .replace('- xhigh', "- 'xhigh'")
     path.write_text(quoted)
     before = state(path)
     assert run(path).returncode == 0
@@ -127,7 +135,7 @@ with tempfile.TemporaryDirectory() as directory:
     drifted = LIVE_SHAPED \
         .replace('agent: claude\n', 'agent: [codex, claude]  # fallback list\n', 1) \
         .replace('  reviewer:\n    agent: claude', '  reviewer:\n    agent: codex') \
-        .replace('    - high\n', '    - medium\n    - --verbose\n')
+        .replace('    - xhigh\n', '    - medium\n    - --verbose\n')
     path.write_text(drifted)
     path.chmod(0o640)
     assert run(path).returncode == 0
@@ -148,31 +156,78 @@ with tempfile.TemporaryDirectory() as directory:
     assert run(path).returncode == 0
     assert state(path) == before
 
-    # The previous Codex policy, with the stale Claude low-effort override still
-    # in place, converges to Claude high. The Codex override, now unowned, and
-    # every other key and comment stay byte for byte.
-    codex_args_block = ('    - -m\n    - gpt-6-sol\n    - -c\n'
-                        '    - model_reasoning_effort="high"\n    - -c\n'
-                        '    - model_auto_compact_token_limit=512000\n')
-    live_codex = LIVE_SHAPED \
+    # The pre-migration baseline (Codex policy, Claude override at low effort)
+    # converges to the temporary Claude xhigh policy. The Codex override, not
+    # owned, and every other key and comment stay byte for byte.
+    codex_args_block = ''.join(f'    - {arg}\n' for arg in CODEX_ARGS)
+    live_temporary = LIVE_SHAPED \
         .replace('    - -m\n    - gpt-6-astra\n    - -c\n'
                  '    - model_reasoning_effort="medium"\n', codex_args_block)
-    assert codex_args_block in live_codex
-    stale = live_codex \
+    assert codex_args_block in live_temporary
+    baseline = live_temporary \
         .replace('agent: claude\n', 'agent: codex\n', 1) \
         .replace('    agent: claude\n', '    agent: codex\n') \
-        .replace('    - high\n', '    - low\n')
-    path.write_text(stale)
+        .replace('    - xhigh\n', '    - low\n')
+    path.write_text(baseline)
     path.chmod(0o644)
     assert run(path).returncode == 0
     cfg = assert_policy(path)
-    assert cfg['agent_args_override']['codex'] == [
-        '-m', 'gpt-6-sol', '-c', 'model_reasoning_effort="high"',
-        '-c', 'model_auto_compact_token_limit=512000']
-    assert path.read_text() == live_codex
+    assert cfg['agent_args_override']['codex'] == CODEX_ARGS
+    assert path.read_text() == live_temporary
     before = state(path)
     assert run(path).returncode == 0
     assert state(path) == before
+
+    # Expiry: before the instant nothing happens, even when asked.
+    result = run(path, BEFORE_EXPIRY, '--expire-temporary')
+    assert result.returncode == 0 and state(path) == before
+
+    # At and after expiry the temporary policy is restored to the baseline
+    # exactly, whether by the timer flag or a plain activation, then stays put.
+    for now, args in ((AT_EXPIRY, ('--expire-temporary',)), ('2026-12-01T00:00:00Z', ()),
+                      ('2026-10-04T00:00:00+00:00', ('--expire-temporary',))):
+        path.write_text(live_temporary)
+        path.chmod(0o644)
+        assert run(path, now, *args).returncode == 0
+        assert path.read_text() == baseline, now
+        settled = state(path)
+        assert run(path, now, *args).returncode == 0
+        assert state(path) == settled
+
+    # A later choice is never overwritten after expiry: a different effort, a
+    # different agent, a drifted role, or the baseline hand-edited. Neither the
+    # timer flag nor an activation touches it, and xhigh is never reapplied.
+    later_choices = [
+        live_temporary.replace('    - xhigh\n', '    - high\n'),
+        live_temporary.replace('agent: claude\n', 'agent: codex\n', 1),
+        live_temporary.replace('  fixer:\n    agent: claude', '  fixer:\n    agent: codex'),
+        baseline.replace('    - low\n', '    - medium\n'),
+        baseline.replace('agent: codex\n', 'agent: claude\n', 1),
+    ]
+    for chosen in later_choices:
+        for args in ((), ('--expire-temporary',)):
+            path.write_text(chosen)
+            before = state(path)
+            assert run(path, AT_EXPIRY, *args).returncode == 0
+            assert state(path) == before, (args, chosen)
+            assert 'xhigh' not in path.read_text() or 'xhigh' in chosen
+
+    # Expiry on a fresh machine writes the baseline, never xhigh.
+    path.unlink()
+    assert run(path, AT_EXPIRY).returncode == 0
+    cfg = yaml.safe_load(path.read_text())
+    assert cfg['agent'] == 'codex'
+    assert cfg['review_agents'] == {'reviewer': {'agent': 'codex'},
+                                    'fixer': {'agent': 'codex'}}
+    assert cfg['agent_args_override'] == {'codex': CODEX_ARGS, 'claude': BASELINE_ARGS}
+    path.write_text('')
+
+    # A bad argument or clock is refused with no write.
+    for bad_args, now in ((('--nope',), BEFORE_EXPIRY), ((), 'tomorrow')):
+        path.write_text(live_temporary)
+        before = state(path)
+        assert run(path, now, *bad_args).returncode != 0
+        assert state(path) == before
 
     # Missing blocks are appended; existing keys keep their place.
     path.write_text('# only a comment\nlog_level: info\n')
@@ -209,5 +264,5 @@ with tempfile.TemporaryDirectory() as directory:
         assert result.returncode != 0, (invalid, result.stdout, result.stderr)
         assert state(path) == before, invalid
 
-print('no-mistakes agent policy: fresh, idempotent, merge, preservation, insertion and refusal cases passed')
+print('no-mistakes agent policy: fresh, idempotent, merge, preservation, insertion, refusal and expiry cases passed')
 PY

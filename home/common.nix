@@ -141,10 +141,12 @@ in
 
   # ------------------------------------------ no-mistakes agent policy
   # no-mistakes reads and writes ~/.no-mistakes/config.yaml itself, so
-  # home-manager merges only the captain's four Claude agent-policy keys
-  # (agent, both review_agents roles, agent_args_override.claude) via an
-  # atomic, comment-preserving, idempotent merge rather than taking over the
-  # file. Every other key stays machine-local. See docs/agents.md.
+  # home-manager merges only the captain's four agent-policy keys (agent, both
+  # review_agents roles, agent_args_override.claude) via an atomic,
+  # comment-preserving, idempotent merge rather than taking over the file. The
+  # policy is temporary Claude xhigh until 2026-10-04T00:00:00Z; from then on the
+  # helper restores the Codex baseline once and never reapplies xhigh. Every
+  # other key stays machine-local. See docs/agents.md.
   home.activation.noMistakesAgentPolicy =
     lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       $DRY_RUN_CMD ${devTools.noMistakesSetAgentPolicy}/bin/no-mistakes-set-agent-policy
