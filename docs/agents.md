@@ -399,31 +399,32 @@ managed file. During Home Manager activation,
 
 | Setting | Value |
 |---------|-------|
-| `agent` (top level, single entry) | `codex` |
-| `review_agents.reviewer.agent` | `codex` |
-| `review_agents.fixer.agent` | `codex` |
-| `agent_args_override.codex` | `[-m, gpt-6-sol, -c, model_reasoning_effort="high", -c, model_auto_compact_token_limit=512000]` |
+| `agent` (top level, single entry) | `claude` |
+| `review_agents.reviewer.agent` | `claude` |
+| `review_agents.fixer.agent` | `claude` |
+| `agent_args_override.claude` | `[--model, claude-opus-5-5, --effort, high]` |
 
-These are the current fleet policy: every no-mistakes stage, including both
-independent review-role sessions, runs Codex GPT-6 Sol at high reasoning, with
-the 512000 auto-compact token limit on that same argument list. The
-`agent_args_override.codex` flags are the single effective knob: native flags
-there beat `agent_config` and any `review_agents` model/effort, so both review
-roles inherit them.
+These are the captain's 2026-10-01 fleet policy: every no-mistakes stage,
+including both independent review-role sessions, runs Claude Code
+claude-opus-5-5 at high effort. The `agent_args_override.claude` flags are the
+single effective knob: native flags there beat `agent_config` and any
+`review_agents` model/effort, so both review roles inherit them.
 
 The merge is surgical and comment-preserving: it rewrites only the lines of
 these four settings, keeps every other key and every comment byte-identical,
 and never rewrites a file whose values already match (same bytes, same inode).
-An existing `agent_args_override.claude` block is not one of the four owned
-settings, so a later activation leaves it in place. On a fresh machine with
-no file it creates a minimal file with just these keys. Shapes it cannot edit
-confidently - duplicate keys, tab indentation, block or multi-line flow
-values where a scalar belongs - are refused with a nonzero exit and no write.
-`NO_MISTAKES_CONFIG_FILE` selects an isolated file for testing;
-`tests/no-mistakes-agent-policy.test.sh` exercises the merge against temporary
-files only.
+An existing `agent_args_override.codex` block is not one of the four owned
+settings, so a later activation leaves it in place. no-mistakes loads the file
+once when a run starts and builds that run's agents from it, so a write governs
+runs started afterward and an active run keeps the policy it started with.
+On a fresh machine with no file it creates a minimal file with just these
+keys. Shapes it cannot edit confidently - duplicate keys, tab indentation,
+block or multi-line flow values where a scalar belongs - are refused with a
+nonzero exit and no write. `NO_MISTAKES_CONFIG_FILE` selects an isolated file
+for testing; `tests/no-mistakes-agent-policy.test.sh` exercises the merge
+against temporary files only.
 
-Deliberately NOT declared: `agent_args_override.claude`,
+Deliberately NOT declared: the `agent_args_override.codex` fallback flags,
 `auto_fix` per-step attempts, `intent` extraction, the timeout trio
 (`ci_timeout`, `step_quiet_warning`, `daemon_connect_timeout`),
 `session_reuse`, and `log_level`. Those stay machine-local operator policy;

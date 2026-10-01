@@ -1,19 +1,15 @@
 #!/usr/bin/env bash
-# Merge only the captain's Codex agent policy into ~/.no-mistakes/config.yaml;
+# Merge only the captain's Claude agent policy into ~/.no-mistakes/config.yaml;
 # preserve every other key and every comment.
 #
 # no-mistakes reads and writes that file itself, so this is a surgical,
 # comment-preserving merge of exactly four settings rather than a managed file:
 #
-#   agent: codex                        (top-level, single entry)
-#   review_agents.reviewer.agent: codex
-#   review_agents.fixer.agent: codex
-#   agent_args_override.codex:
-#     [-m, gpt-6-sol, -c, model_reasoning_effort="high",
-#      -c, model_auto_compact_token_limit=512000]
+#   agent: claude                       (top-level, single entry)
+#   review_agents.reviewer.agent: claude
+#   review_agents.fixer.agent: claude
+#   agent_args_override.claude: [--model, claude-opus-5-5, --effort, high]
 #
-# agent_args_override.claude is not owned here. An existing Claude override,
-# including one written by an earlier activation, is left byte-for-byte.
 # Idempotent: when all four already match, the file is never rewritten (same
 # bytes, same inode). An absent or empty file (fresh machine) gets a minimal
 # file with just these keys. Any shape the merge cannot edit confidently -
@@ -31,9 +27,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-AGENT = 'codex'
-CODEX_ARGS = ['-m', 'gpt-6-sol', '-c', 'model_reasoning_effort="high"',
-              '-c', 'model_auto_compact_token_limit=512000']
+AGENT = 'claude'
+CLAUDE_ARGS = ['--model', 'claude-opus-5-5', '--effort', 'high']
 
 path = Path(os.environ.get('NO_MISTAKES_CONFIG_FILE') or
             str(Path.home() / '.no-mistakes' / 'config.yaml'))
@@ -218,7 +213,7 @@ def parse_items(lines, start, end):
 def extract(lines):
     """Current values of the four owned settings; None when absent."""
     found = {'agent': None, 'reviewer_agent': None,
-             'fixer_agent': None, 'codex_args': None}
+             'fixer_agent': None, 'claude_args': None}
 
     top = top_keys(lines)
     agent = one(top, 'agent', lines)
@@ -264,20 +259,20 @@ def extract(lines):
         if rest and rest.strip():
             fail(f'line {index + 1}: agent_args_override must be a block mapping')
         agents, _ = children(lines, index, end)
-        codex = one(agents, 'codex', lines)
-        if codex is not None:
-            _, codex_index, codex_end = codex
-            token, _ = split_inline(key_match(lines[codex_index]).group(2))
+        claude = one(agents, 'claude', lines)
+        if claude is not None:
+            _, claude_index, claude_end = claude
+            token, _ = split_inline(key_match(lines[claude_index]).group(2))
             if token is None:
-                items = parse_items(lines, codex_index + 1, codex_end)
-                found['codex_args'] = items if items is not None else 'block'
+                items = parse_items(lines, claude_index + 1, claude_end)
+                found['claude_args'] = items if items is not None else 'block'
             else:
-                found['codex_args'] = token
+                found['claude_args'] = token
     return found
 
 
 DESIRED = {'agent': AGENT, 'reviewer_agent': AGENT,
-           'fixer_agent': AGENT, 'codex_args': tuple(CODEX_ARGS)}
+           'fixer_agent': AGENT, 'claude_args': tuple(CLAUDE_ARGS)}
 
 # ------------------------------------------------------------------- edits
 
@@ -301,8 +296,8 @@ def set_scalar(lines, entry, indent, value):
 
 
 def arg_block(child_indent):
-    return [' ' * child_indent + 'codex:'] + [
-        ' ' * (child_indent + 2) + f'- {arg}' for arg in CODEX_ARGS]
+    return [' ' * child_indent + 'claude:'] + [
+        ' ' * (child_indent + 2) + f'- {arg}' for arg in CLAUDE_ARGS]
 
 
 def append_block(lines, block):
@@ -374,29 +369,28 @@ def apply(lines, text):
     else:
         _, index, end = overrides
         agents, child_indent = children(lines, index, end)
-        codex = one(agents, 'codex', lines)
-        if codex is None:
+        claude = one(agents, 'claude', lines)
+        if claude is None:
             edits.append((index + 1, index + 1, arg_block(child_indent)))
         else:
-            _, codex_index, codex_end = codex
-            token, comment = split_inline(key_match(lines[codex_index]).group(2))
+            _, claude_index, claude_end = claude
+            token, comment = split_inline(key_match(lines[claude_index]).group(2))
             items = (token if token is not None
-                     else parse_items(lines, codex_index + 1, codex_end))
-            if items == tuple(CODEX_ARGS):
+                     else parse_items(lines, claude_index + 1, claude_end))
+            if items == tuple(CLAUDE_ARGS):
                 pass
             else:
                 # Replace the whole value (inline or block, any shape) with the
                 # canonical block list, keeping comments and the key's indent.
-                # A sibling claude override is not in this span's replacement.
-                rendered = ' ' * child_indent + 'codex:'
+                rendered = ' ' * child_indent + 'claude:'
                 if comment:
                     rendered += '  ' + comment
-                edits.append((codex_index, codex_index + 1, [rendered]))
-                content = [j for j in range(codex_index + 1, codex_end)
+                edits.append((claude_index, claude_index + 1, [rendered]))
+                content = [j for j in range(claude_index + 1, claude_end)
                            if classify(lines[j])[0] == 'content']
-                edits.append((codex_index + 1, codex_index + 1,
+                edits.append((claude_index + 1, claude_index + 1,
                               [' ' * (child_indent + 2) + f'- {arg}'
-                               for arg in CODEX_ARGS]))
+                               for arg in CLAUDE_ARGS]))
                 for j in sorted(content, reverse=True):
                     edits.append((j, j + 1, []))
 
@@ -422,7 +416,7 @@ def apply(lines, text):
 MINIMAL = f'''\
 # no-mistakes global configuration
 #
-# Only the Codex agent-policy keys below are declared by dotfiles
+# Only the Claude agent-policy keys below are declared by dotfiles
 # (bin/no-mistakes-set-agent-policy, merged on Home Manager activation);
 # every other setting is left to no-mistakes and the operator.
 agent: {AGENT}
@@ -434,8 +428,8 @@ review_agents:
     agent: {AGENT}
 
 agent_args_override:
-  codex:
-''' + ''.join(f'    - {arg}\n' for arg in CODEX_ARGS)
+  claude:
+''' + ''.join(f'    - {arg}\n' for arg in CLAUDE_ARGS)
 
 original = path.read_bytes() if path.exists() else b''
 try:

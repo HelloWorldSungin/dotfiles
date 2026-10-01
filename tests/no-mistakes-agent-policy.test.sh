@@ -23,9 +23,7 @@ import tempfile
 import yaml
 
 HELPER = os.environ['ROOT'] + '/bin/no-mistakes-set-agent-policy'
-DESIRED_ARGS = ['-m', 'gpt-6-sol', '-c', 'model_reasoning_effort="high"',
-                '-c', 'model_auto_compact_token_limit=512000']
-CLAUDE_ARGS = ['--model', 'claude-opus-5-5', '--effort', 'xhigh']
+DESIRED_ARGS = ['--model', 'claude-opus-5-5', '--effort', 'high']
 
 
 def run(path):
@@ -40,66 +38,14 @@ def state(path):
 
 def assert_policy(path):
     cfg = yaml.safe_load(path.read_text())
-    assert cfg['agent'] == 'codex', cfg
-    assert cfg['review_agents'] == {'reviewer': {'agent': 'codex'},
-                                    'fixer': {'agent': 'codex'}}, cfg
-    assert cfg['agent_args_override']['codex'] == DESIRED_ARGS, cfg
+    assert cfg['agent'] == 'claude', cfg
+    assert cfg['review_agents'] == {'reviewer': {'agent': 'claude'},
+                                    'fixer': {'agent': 'claude'}}, cfg
+    assert cfg['agent_args_override']['claude'] == DESIRED_ARGS, cfg
     return cfg
 
 
-# A file that already matches the owned Codex policy, including an unowned
-# Claude override and unrelated machine-local keys.
-CODEX_CONFIGURED = '''# no-mistakes global configuration
-
-# Agent to use for code generation. This may also be an ordered fallback list,
-# for example: agent: [codex, claude]
-agent: codex
-
-# Maximum time the CI monitor babysits an open PR with no base-branch movement
-ci_timeout: "168h"
-
-# Captain's 2026-09-28 selection: Codex GPT-6 Sol high for every agent stage,
-# including independent review roles.
-review_agents:
-  reviewer:
-    agent: codex
-  fixer:
-    agent: codex
-
-# Log level for daemon output
-log_level: info
-
-# Extra native agent CLI flags (optional, global only)
-agent_args_override:
-  codex:
-    - -m
-    - gpt-6-sol
-    - -c
-    - model_reasoning_effort="high"
-    - -c
-    - model_auto_compact_token_limit=512000
-  # Unowned Claude override. Activation must not rewrite or drop it.
-  claude:
-    - --model
-    - claude-opus-5-5
-    - --effort
-    - xhigh
-
-# Maximum follow-up auto-fix attempts per step (0 = disabled after the initial pass)
-auto_fix:
-  rebase: 3
-  review: 0
-  ci: 0
-
-# User-intent extraction.
-intent:
-  enabled: true
-  threshold: 0.2
-'''
-
-# The previous Claude policy, with a drifted Codex fallback and a Claude
-# override this helper no longer owns.
-CLAUDE_CONFIGURED = '''# no-mistakes global configuration
+LIVE_SHAPED = '''# no-mistakes global configuration
 
 # Agent to use for code generation. This may also be an ordered fallback list,
 # for example: agent: [codex, claude]
@@ -127,12 +73,12 @@ agent_args_override:
     - -c
     - model_reasoning_effort="medium"
   # Pinned 2026-08-18 (captain request): Claude Opus 5 while the codex window is out.
-  # Re-pinned 2026-09-25 to claude-opus-5-5 at low effort.
+  # Re-pinned 2026-10-01 to claude-opus-5-5 at high effort.
   claude:
     - --model
     - claude-opus-5-5
     - --effort
-    - xhigh
+    - high
 
 # Maximum follow-up auto-fix attempts per step (0 = disabled after the initial pass)
 auto_fix:
@@ -152,7 +98,6 @@ with tempfile.TemporaryDirectory() as directory:
     # Absent file: a fresh machine gets a minimal file with just the policy.
     assert run(path).returncode == 0
     assert_policy(path)
-    assert 'claude:' not in path.read_text()
     assert path.stat().st_mode & 0o777 == 0o644
     before = state(path)
     assert run(path).returncode == 0
@@ -163,43 +108,68 @@ with tempfile.TemporaryDirectory() as directory:
     assert run(path).returncode == 0
     assert_policy(path)
 
-    # Later activation of a Codex-configured file: no rewrite, same bytes,
-    # same inode, and the unowned Claude override stays.
-    path.write_text(CODEX_CONFIGURED)
+    # Live-shaped file already matching: no rewrite, same bytes, same inode.
+    path.write_text(LIVE_SHAPED)
     path.chmod(0o644)
     before = state(path)
     assert run(path).returncode == 0
     assert state(path) == before
-    assert yaml.safe_load(path.read_text())['agent_args_override']['claude'] == CLAUDE_ARGS
 
     # Quoted-but-equal values are already correct: no rewrite.
-    quoted = CODEX_CONFIGURED.replace('agent: codex\n', 'agent: "codex"\n', 1) \
-                             .replace('- gpt-6-sol\n', '- "gpt-6-sol"\n', 1)
+    quoted = LIVE_SHAPED.replace('agent: claude\n', 'agent: "claude"\n', 1) \
+                        .replace('- high', "- 'high'")
     path.write_text(quoted)
     before = state(path)
     assert run(path).returncode == 0
     assert state(path) == before
 
-    # A Claude-configured file converges to Codex. Unrelated keys, comments,
-    # and the unowned Claude override survive; the drifted Codex args are
-    # replaced.
-    path.write_text(CLAUDE_CONFIGURED)
+    # Drifted values merge surgically: comments and undeclared keys survive.
+    drifted = LIVE_SHAPED \
+        .replace('agent: claude\n', 'agent: [codex, claude]  # fallback list\n', 1) \
+        .replace('  reviewer:\n    agent: claude', '  reviewer:\n    agent: codex') \
+        .replace('    - high\n', '    - medium\n    - --verbose\n')
+    path.write_text(drifted)
     path.chmod(0o640)
-    claude_block = CLAUDE_CONFIGURED.split('  claude:\n', 1)[1].split('\n# Maximum', 1)[0]
     assert run(path).returncode == 0
     cfg = assert_policy(path)
-    assert cfg['agent_args_override']['claude'] == CLAUDE_ARGS
+    assert cfg['agent_args_override']['codex'] == [
+        '-m', 'gpt-6-astra', '-c', 'model_reasoning_effort="medium"']
     assert cfg['auto_fix'] == {'rebase': 3, 'review': 0, 'ci': 0}
     assert cfg['intent'] == {'enabled': True, 'threshold': 0.2}
     assert cfg['ci_timeout'] == '168h' and cfg['log_level'] == 'info'
     text = path.read_text()
-    assert '  claude:\n' + claude_block in text
-    for comment in ('# Captain\'s fleet-wide selection, 2026-09-14',
+    for comment in ('# fallback list',
+                    '# Captain\'s fleet-wide selection, 2026-09-14',
                     '# Pinned 2026-08-18 (captain request)',
                     '# Maximum follow-up auto-fix attempts per step'):
         assert comment in text, comment
-    assert 'gpt-6-astra' not in text
     assert path.stat().st_mode & 0o777 == 0o640
+    before = state(path)
+    assert run(path).returncode == 0
+    assert state(path) == before
+
+    # The previous Codex policy, with the stale Claude low-effort override still
+    # in place, converges to Claude high. The Codex override, now unowned, and
+    # every other key and comment stay byte for byte.
+    codex_args_block = ('    - -m\n    - gpt-6-sol\n    - -c\n'
+                        '    - model_reasoning_effort="high"\n    - -c\n'
+                        '    - model_auto_compact_token_limit=512000\n')
+    live_codex = LIVE_SHAPED \
+        .replace('    - -m\n    - gpt-6-astra\n    - -c\n'
+                 '    - model_reasoning_effort="medium"\n', codex_args_block)
+    assert codex_args_block in live_codex
+    stale = live_codex \
+        .replace('agent: claude\n', 'agent: codex\n', 1) \
+        .replace('    agent: claude\n', '    agent: codex\n') \
+        .replace('    - high\n', '    - low\n')
+    path.write_text(stale)
+    path.chmod(0o644)
+    assert run(path).returncode == 0
+    cfg = assert_policy(path)
+    assert cfg['agent_args_override']['codex'] == [
+        '-m', 'gpt-6-sol', '-c', 'model_reasoning_effort="high"',
+        '-c', 'model_auto_compact_token_limit=512000']
+    assert path.read_text() == live_codex
     before = state(path)
     assert run(path).returncode == 0
     assert state(path) == before
@@ -218,17 +188,11 @@ with tempfile.TemporaryDirectory() as directory:
     assert run(path).returncode == 0
     assert_policy(path)
 
-    # A missing codex entry is inserted; an existing Claude override stays.
-    path.write_text(
-        'agent_args_override:\n'
-        '  claude:\n'
-        '    - --model\n'
-        '    - claude-opus-5-5\n'
-        '    - --effort\n'
-        '    - xhigh\n')
+    # A missing claude entry is inserted into the existing overrides block.
+    path.write_text('agent_args_override:\n  codex:\n    - -m\n    - gpt-6-astra\n')
     assert run(path).returncode == 0
     cfg = assert_policy(path)
-    assert cfg['agent_args_override']['claude'] == CLAUDE_ARGS
+    assert cfg['agent_args_override']['codex'] == ['-m', 'gpt-6-astra']
 
     # Unhandled shapes refuse with no write, byte for byte.
     for invalid in [
