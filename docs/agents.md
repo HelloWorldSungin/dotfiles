@@ -397,33 +397,46 @@ commands run, so it is not a repository symlink and never becomes a read-only
 managed file. During Home Manager activation,
 `bin/no-mistakes-set-agent-policy` merges exactly four settings into it:
 
-| Setting | Value |
-|---------|-------|
-| `agent` (top level, single entry) | `codex` |
-| `review_agents.reviewer.agent` | `codex` |
-| `review_agents.fixer.agent` | `codex` |
-| `agent_args_override.codex` | `[-m, gpt-6-sol, -c, model_reasoning_effort="high", -c, model_auto_compact_token_limit=512000]` |
+| Setting | Temporary value (until 2026-10-04T00:00:00Z) | Restored baseline |
+|---------|-------|-------|
+| `agent` (top level, single entry) | `claude` | `codex` |
+| `review_agents.reviewer.agent` | `claude` | `codex` |
+| `review_agents.fixer.agent` | `claude` | `codex` |
+| `agent_args_override.claude` | `[--model, claude-opus-5-5, --effort, xhigh]` | `[--model, claude-opus-5-5, --effort, low]` |
 
-These are the current fleet policy: every no-mistakes stage, including both
-independent review-role sessions, runs Codex GPT-6 Sol at high reasoning, with
-the 512000 auto-compact token limit on that same argument list. The
-`agent_args_override.codex` flags are the single effective knob: native flags
-there beat `agent_config` and any `review_agents` model/effort, so both review
-roles inherit them.
+This is the captain's 2026-10-01 temporary policy: until the expiry instant
+every no-mistakes stage, including both independent review-role sessions, runs
+Claude Code claude-opus-5-5 at xhigh effort. The `agent_args_override.claude`
+flags are the single effective knob: native flags there beat `agent_config` and
+any `review_agents` model/effort, so both review roles inherit them.
+
+At or after expiry the helper never applies xhigh again. Any run then (an
+activation, or the one-shot timer calling it with `--expire-temporary`)
+restores the baseline column, but only while the four owned settings still equal
+the temporary column exactly; any other state is a later choice and is left byte
+for byte. `--expire-temporary` before expiry does nothing. The limitation is that
+a later deliberate choice identical to the temporary policy cannot be told
+apart from it and is restored too. The restoration target is the
+pre-migration state, not the intermediate high pin the same change passed
+through. A pre-migration fresh machine gets a minimal baseline file that also
+carries the Codex GPT-6 Sol override (`-m gpt-6-sol`, high reasoning, 512000
+auto-compact limit).
 
 The merge is surgical and comment-preserving: it rewrites only the lines of
 these four settings, keeps every other key and every comment byte-identical,
 and never rewrites a file whose values already match (same bytes, same inode).
-An existing `agent_args_override.claude` block is not one of the four owned
-settings, so a later activation leaves it in place. On a fresh machine with
-no file it creates a minimal file with just these keys. Shapes it cannot edit
-confidently - duplicate keys, tab indentation, block or multi-line flow
-values where a scalar belongs - are refused with a nonzero exit and no write.
-`NO_MISTAKES_CONFIG_FILE` selects an isolated file for testing;
-`tests/no-mistakes-agent-policy.test.sh` exercises the merge against temporary
-files only.
+An existing `agent_args_override.codex` block is not one of the four owned
+settings, so activation and expiry leave it in place. no-mistakes loads the file
+once when a run starts and builds that run's agents from it, so a write governs
+runs started afterward and an active run keeps the policy it started with.
+On a fresh machine with no file it creates a minimal file with just these
+keys. Shapes it cannot edit confidently - duplicate keys, tab indentation,
+block or multi-line flow values where a scalar belongs - are refused with a
+nonzero exit and no write. `NO_MISTAKES_CONFIG_FILE` selects an isolated file
+for testing; `tests/no-mistakes-agent-policy.test.sh` exercises the merge
+against temporary files only.
 
-Deliberately NOT declared: `agent_args_override.claude`,
+Deliberately NOT declared: the `agent_args_override.codex` fallback flags,
 `auto_fix` per-step attempts, `intent` extraction, the timeout trio
 (`ci_timeout`, `step_quiet_warning`, `daemon_connect_timeout`),
 `session_reuse`, and `log_level`. Those stay machine-local operator policy;
