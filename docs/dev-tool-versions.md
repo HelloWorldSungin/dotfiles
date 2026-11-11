@@ -1,12 +1,11 @@
 # Developer and agent tool version ownership
 
 `config/dev-tools-versions.sh` is the machine-readable owner for external tool
-pins and stable source policies. `flake.lock` owns the immutable Nix input revisions, and
-`config/nvim/lazy-lock.json` owns Neovim plugin commits. The pins below were
-verified on 2026-09-10 against each publisher's registry, release feed, or
-manifest. The [audit evidence](tool-updates/2026-09-10/README.md) records the
-publisher provenance, checksums, value-free contract comparisons, and pending
-live convergence.
+selectors and audited pins. `flake.lock` owns the immutable Nix input revisions,
+and `config/nvim/lazy-lock.json` owns Neovim plugin commits. The
+[2026-09-10 audit evidence](tool-updates/2026-09-10/README.md) records the
+initial pin review, publisher provenance, checksums, and pending live
+convergence; moving selections below resolve at invocation.
 GBrain is excluded from this sweep; its report-only row remains unchanged.
 A version is stable only when the publisher's stable/default registry
 tag or a non-draft, non-prerelease release says so. Numeric tags containing
@@ -249,8 +248,8 @@ are also in the user environment, so they stay `user-env`: an operator whose
 `node` resolves to another build still sees that drift. Home Manager modules also own home-manager,
 Neovim, zsh, Starship, fzf, and Git. Neovim's fourteen plugin commits remain
 independently exact in `config/nvim/lazy-lock.json`; the initial lazy.nvim clone
-checks out that recorded commit. Intentional updates select upstream's annotated
-`stable` tag and record its peeled commit in the lock.
+checks out that recorded commit. Intentional updates select upstream's `stable`
+tag and record its commit in the lock.
 
 ## Neovim plugin pins
 
@@ -264,7 +263,7 @@ release or branch commit.
 | codewindow.nvim | No releases; default branch at audit time | `a8e175043ce3baaa89e0a6b5171bcd920aab3dad` |
 | diffview.nvim | No releases; default branch at audit time | `4516612fe98ff56ae0415a259ff6361a89419b0a` |
 | gitsigns.nvim | v2.1.0 GA | `a462f416e2ce4744531c6256252dee99a7d34a83` |
-| lazy.nvim | Publisher `stable` tag, currently v11.17.5 GA | `85c7ff3711b730b4030d03144f6db6375044ae82` |
+| lazy.nvim | Publisher `stable` tag | `85c7ff3711b730b4030d03144f6db6375044ae82` |
 | neogit | v2.0.0 GA | `43fa47fb61773b0d90a78ebc2521ea8faaeebd86` |
 | nvim-treesitter | No releases; default branch at audit time | `d4d59cb369da46b95699bd2200efbcffc6dadb3b` |
 | nvim-autopairs | 0.10.0 GA tag | `23320e75953ac82e559c610bec5a90d9c6dfa743` |
@@ -361,9 +360,9 @@ selection the apply path uses.
 
 Both directions then run one shared comparison, so a preview's status and exit
 code are the apply's: `up_to_date` only on equality, `would_apply` only on a
-proven local ancestor of the pin, and a refusal - non-zero, never a quiet
-`skipped` - when the selected commit differs from the authoritative remote
-branch, or when the checkout is ahead of or diverged from it. The apply path
+proven local ancestor of the selected upstream commit, and a refusal - non-zero,
+never a quiet `skipped` - when the selected commit differs from the authoritative
+remote branch, or when the checkout is ahead of or diverged from it. The apply path
 repeats its own fresh `ls-remote`, fetch, and remote-movement check before
 running that comparison against the real checkout, and never trusts a dry-run
 result. Anything the preview cannot prove - an unreachable remote, a remote that
@@ -497,20 +496,25 @@ both directions.
 
 ## Attended runtime upgrade sequence
 
-1. Land and fast-forward the pin change before running any repository script.
+1. Land and fast-forward the repository change before running any repository
+   script.
 2. Wait until all Firstmate worker lanes and no-mistakes validation runs are
    clear. Record the checker output and take any tool-specific backup first.
 3. Preview the two safe scopes with `dev-tools-apply-updates --dry-run`, then run
    the guarded apply if its independently verified exact versions are correct.
    Keep the receipt path it prints; reversing either tier is attended and starts
    from `dev-tools-apply-updates --rollback <receipt>`.
-4. Upgrade no-mistakes separately in an attended window. Confirm there is no
+4. Upgrade Treehouse separately in an attended window. Inventory the pool slots
+   and durable leases before and after the upgrade, without pruning or returning
+   slots or discarding unlanded work. Bootstrap and guarded apply leave an
+   existing Treehouse binary in place.
+5. Upgrade no-mistakes separately in an attended window. Confirm there is no
    active shared-daemon work before touching its binary or daemon, then validate
    the installed version against the checker's latest stable result.
-5. Upgrade Herdr separately in an attended window using its publisher-owned
+6. Upgrade Herdr separately in an attended window using its publisher-owned
    update flow. Review client/server compatibility and release notes first, and
    verify the live fleet is clear before any server lifecycle action.
-6. Upgrade GBrain only through Firstmate's documented backup, baseline,
+7. Upgrade GBrain only through Firstmate's documented backup, baseline,
    compatibility, migration, smoke-test, evaluation, and rollback procedure.
-7. Re-run the read-only checker. Any unknown source, version mismatch, or
+8. Re-run the read-only checker. Any unknown source, version mismatch, or
    prerelease result is a refusal to declare convergence.

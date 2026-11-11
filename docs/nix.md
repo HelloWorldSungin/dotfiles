@@ -38,12 +38,12 @@ The entry point. It declares:
 ### home/dev-tools.nix
 
 Every developer-tool derivation the repository packages itself - the pin and
-closure-manifest artifacts, the read-only checker, the pinned installer, the
-`cspend` wrapper, the Codex context-window activation helper, and the guarded
-updater - is defined here once and exported through the `devTools` module
-argument. `home/common.nix` and `home/sungin-ct110.nix` consume those exports,
-so a change to a runtime closure or an exported path cannot ship two different
-binaries to the same host.
+closure-manifest artifacts, the read-only checker, the installer, npm archive
+verifier and launch helper, the `cspend` wrapper, the Codex context-window
+activation helper, and the guarded updater - is defined here once and exported
+through the `devTools` module argument. `home/common.nix` and
+`home/sungin-ct110.nix` consume those exports, so a change to a runtime closure
+or an exported path cannot ship two different binaries to the same host.
 
 ### home/sungin-ct110.nix
 
@@ -78,7 +78,8 @@ home-manager generations # list previous environments...
 
 Fast-moving agent harness CLIs release frequently and nixpkgs versions lag.
 `bootstrap.sh` delegates their install-if-absent path to
-`bin/dev-tools-install-pinned`, which installs exact npm versions with registry
-integrity verification or exact publisher assets with recorded checksums into
-user-writable prefixes (`~/.local/bin`, `~/.npm-global/bin`). The central record
-and known upstream limitations are documented in `docs/dev-tool-versions.md`.
+`bin/dev-tools-install-pinned`, which selects missing tools under their
+configured policies, verifies npm archives or publisher assets, and installs
+them into user-writable prefixes (`~/.local/bin`, `~/.npm-global/bin`) only when
+absent. The selection policies and known upstream limitations are documented in
+[dev-tool-versions.md](dev-tool-versions.md).
