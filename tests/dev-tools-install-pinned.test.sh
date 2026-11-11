@@ -10,6 +10,23 @@ trap 'rm -rf "$TMP_ROOT"' EXIT
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
 
+sha256sum() {
+  if type -P sha256sum >/dev/null 2>&1; then command sha256sum "$@"; else shasum -a 256 "$@"; fi
+}
+sha512sum() {
+  if type -P sha512sum >/dev/null 2>&1; then command sha512sum "$@"; else shasum -a 512 "$@"; fi
+}
+
+case "$(uname -s)" in Darwin) HOST_OS=darwin ;; Linux) HOST_OS=linux ;; *) fail 'unsupported test operating system' ;; esac
+case "$(uname -m)" in x86_64|amd64) HOST_ARCH=amd64 ;; arm64|aarch64) HOST_ARCH=arm64 ;; *) fail 'unsupported test architecture' ;; esac
+HOST_PLATFORM="$HOST_OS-$HOST_ARCH"
+case "$HOST_PLATFORM" in
+  linux-amd64) HOST_HERDR_TARGET=linux-x86_64; HOST_AGY_SUFFIX=linux-x64/cli_linux_x64.tar.gz ;;
+  linux-arm64) HOST_HERDR_TARGET=linux-aarch64; HOST_AGY_SUFFIX=linux-arm/cli_linux_arm64.tar.gz ;;
+  darwin-amd64) HOST_HERDR_TARGET=macos-x86_64; HOST_AGY_SUFFIX=darwin-x64/cli_mac_x64.tar.gz ;;
+  darwin-arm64) HOST_HERDR_TARGET=macos-aarch64; HOST_AGY_SUFFIX=darwin-arm/cli_mac_arm64.tar.gz ;;
+esac
+
 FIXTURE="$TMP_ROOT/fixture"
 ASSETS="$FIXTURE/assets"
 FAKEBIN="$FIXTURE/fakebin"
@@ -119,24 +136,26 @@ case "$url" in
   https://github.com/kunchenguid/*/releases/download/*/checksums.txt)
     [ "${TEST_CHECKSUMS_FAIL:-0}" = 1 ] && exit 1
     printf '%s\n' "$url" >>"$TEST_RELEASE_LOG"
-    tree_name=treehouse-v3.1.8-linux-amd64.tar.gz
-    nm_name=no-mistakes-v1.106.1-linux-amd64.tar.gz
+    release_tag=${url#*/download/}
+    release_tag=${release_tag%%/*}
+    tree_name=treehouse-${release_tag}-${TEST_PLATFORM}.tar.gz
+    nm_name=no-mistakes-${release_tag}-${TEST_PLATFORM}.tar.gz
     case "$url" in
-      */treehouse/*) printf '%s  %s\n' "${TEST_TREE_SHA}" "$tree_name" "${TEST_OTHER_SHA}" treehouse-v3.1.8-linux-arm64.tar.gz "${TEST_OTHER_SHA}" treehouse-v3.1.8-windows-amd64.zip ;;
-      *) printf '%s  %s\n' "${TEST_NM_SHA}" "$nm_name" "${TEST_OTHER_SHA}" no-mistakes-v1.106.1-linux-arm64.tar.gz ;;
-    esac | { if [ "${TEST_CHECKSUMS_MISSING_ENTRY:-0}" = 1 ]; then grep -v linux-amd64 || true; else cat; fi; } >"$output"
+      */treehouse/*) printf '%s  %s\n' "${TEST_TREE_SHA}" "$tree_name" "${TEST_OTHER_SHA}" "treehouse-${release_tag}-windows-amd64.zip" ;;
+      *) printf '%s  %s\n' "${TEST_NM_SHA}" "$nm_name" "${TEST_OTHER_SHA}" "no-mistakes-${release_tag}-windows-amd64.zip" ;;
+    esac | { if [ "${TEST_CHECKSUMS_MISSING_ENTRY:-0}" = 1 ]; then grep -v "$TEST_PLATFORM" || true; else cat; fi; } >"$output"
     ;;
   https://github.com/kunchenguid/treehouse/releases/download/*) printf '%s\n' "$url" >>"$TEST_RELEASE_LOG"; cp "$TEST_ASSETS/treehouse.tar.gz" "$output" ;;
   https://github.com/kunchenguid/no-mistakes/releases/download/*) printf '%s\n' "$url" >>"$TEST_RELEASE_LOG"; cp "$TEST_ASSETS/no-mistakes.tar.gz" "$output" ;;
   https://herdr.dev/latest.json)
     [ "${TEST_MANIFEST_FAIL:-0}" = 1 ] && exit 1
-    jq -cn --arg sha "${TEST_MANIFEST_SHA:-$TEST_HERDR_SHA}" --arg v "${TEST_HERDR_VERSION:-0.9.0}" '{version:$v,assets:{"linux-x86_64":("https://github.com/herdrdev/herdr/releases/download/v"+$v+"/herdr-linux-x86_64")},sha256:{"linux-x86_64":$sha}}'
+    jq -cn --arg sha "${TEST_MANIFEST_SHA:-$TEST_HERDR_SHA}" --arg v "${TEST_HERDR_VERSION:-0.9.0}" --arg t "$TEST_HERDR_TARGET" '{version:$v,assets:{($t):("https://github.com/herdrdev/herdr/releases/download/v"+$v+"/herdr-"+$t)},sha256:{($t):$sha}}'
     ;;
   *herdr*) cp "$TEST_ASSETS/herdr" "$output" ;;
   *antigravity-cli-auto-updater*)
     [ "${TEST_AGY_MANIFEST_FAIL:-0}" = 1 ] && exit 1
     jq -cn --arg sha "${TEST_AGY_SHA:-$TEST_AGY_SHA_DEFAULT}" --arg v "${TEST_AGY_VERSION:-1.1.28}" \
-      '{version:$v,url:("https://storage.googleapis.com/antigravity-public/antigravity-cli/"+$v+"-test/linux-x64/cli_linux_x64.tar.gz"),sha512:$sha}'
+      --arg suffix "$TEST_AGY_SUFFIX" '{version:$v,url:("https://storage.googleapis.com/antigravity-public/antigravity-cli/"+$v+"-test/"+$suffix),sha512:$sha}'
     ;;
   *antigravity*) cp "$TEST_ASSETS/antigravity.tar.gz" "$output" ;;
   *cursor*) touch "$TEST_CURSOR_FETCHED"; printf '#!/usr/bin/env bash\nexit 0\n' >"$output" ;;
@@ -163,7 +182,7 @@ run_installer() {
     DEV_TOOLS_INSTALL_CURL_BIN="$FAKEBIN/curl" DEV_TOOLS_INSTALL_NPM_BIN="$FAKEBIN/npm" \
     DEV_TOOLS_INSTALL_GIT_BIN="$FAKEBIN/git" \
     DEV_TOOLS_INSTALL_LOCAL_BIN="$LOCAL_BIN" DEV_TOOLS_UPDATE_NPM_PREFIX="$PREFIX" \
-    TEST_HERDR_SHA="$HERDR_SHA" TEST_TREE_SHA="${TEST_TREE_SHA_OVERRIDE:-$TREE_SHA}" TEST_NM_SHA="$NM_SHA" TEST_OTHER_SHA="$OTHER_SHA" TEST_RELEASE_LOG="$RELEASE_LOG" TEST_AGY_SHA_DEFAULT="$AGY_SHA" TEST_NPM_LOG="$NPM_LOG" TEST_ASSETS="$ASSETS" TEST_CURSOR_FETCHED="$FIXTURE/cursor-fetched" \
+    TEST_HERDR_SHA="$HERDR_SHA" TEST_HERDR_TARGET="$HOST_HERDR_TARGET" TEST_PLATFORM="$HOST_PLATFORM" TEST_AGY_SUFFIX="$HOST_AGY_SUFFIX" TEST_TREE_SHA="${TEST_TREE_SHA_OVERRIDE:-$TREE_SHA}" TEST_NM_SHA="$NM_SHA" TEST_OTHER_SHA="$OTHER_SHA" TEST_RELEASE_LOG="$RELEASE_LOG" TEST_AGY_SHA_DEFAULT="$AGY_SHA" TEST_NPM_LOG="$NPM_LOG" TEST_ASSETS="$ASSETS" TEST_CURSOR_FETCHED="$FIXTURE/cursor-fetched" \
     TEST_BAD_INTEGRITY="${TEST_BAD_INTEGRITY:-0}" TEST_REAL_GIT="$(command -v git)" "$INSTALLER" "$@"
 }
 
@@ -217,7 +236,7 @@ for tool in treehouse no-mistakes; do
   run_installer --only "$tool" >"$FIXTURE/$tool.out"
   [ "$(grep -c "api.github.com/repos/kunchenguid/$repo/releases/latest" "$RELEASE_LOG")" -eq 1 ] || fail "$tool resolved its release more than once"
   grep -Fxq "https://github.com/kunchenguid/$repo/releases/download/v$ver/checksums.txt" "$RELEASE_LOG" || fail "$tool did not fetch the resolved release checksums"
-  grep -Fxq "https://github.com/kunchenguid/$repo/releases/download/v$ver/$tool-v$ver-linux-amd64.tar.gz" "$RELEASE_LOG" || fail "$tool archive was not bound to the resolved release"
+  grep -Fxq "https://github.com/kunchenguid/$repo/releases/download/v$ver/$tool-v$ver-$HOST_PLATFORM.tar.gz" "$RELEASE_LOG" || fail "$tool archive was not bound to the resolved release"
   grep -Fq "installed $tool $ver" "$FIXTURE/$tool.out" || fail "$tool did not report the resolved version"
 done
 pass 'treehouse and no-mistakes resolve latest once and bind checksums and archive to it'
@@ -251,8 +270,11 @@ for mode in api prerelease draft tag checksums missing mismatch version; do
     mismatch) export TEST_TREE_SHA_OVERRIDE=$OTHER_SHA ;;
     version) export TEST_RELEASE_TAG=v3.1.9 ;;
   esac
-  if run_installer --only treehouse >/dev/null 2>&1; then fail "latest-archive install accepted $mode"; fi
+  if run_installer --only treehouse >"$FIXTURE/$mode-refusal.out" 2>&1; then fail "latest-archive install accepted $mode"; fi
   [ ! -e "$LOCAL_BIN/treehouse" ] || fail "latest-archive $mode refusal installed a client"
+  if [ "$mode" = version ]; then
+    grep -Fq "archive reports version '3.1.8' != resolved release 3.1.9" "$FIXTURE/$mode-refusal.out" || fail 'version mismatch did not reach the archive version check'
+  fi
   unset TEST_RELEASE_API_FAIL TEST_RELEASE_PRERELEASE TEST_RELEASE_DRAFT TEST_RELEASE_TAG TEST_CHECKSUMS_FAIL TEST_CHECKSUMS_MISSING_ENTRY TEST_TREE_SHA_OVERRIDE
 done
 rm -f "$LOCAL_BIN/treehouse"
@@ -268,6 +290,9 @@ for command_name in awk bash cat chmod cp dirname env grep gzip head install ln 
   resolved=$(type -P "$command_name") || fail "missing test dependency: $command_name"
   ln -sf "$resolved" "$NO_COREUTILS_SHA_BIN/$command_name"
 done
+if resolved=$(type -P shasum); then
+  ln -sf "$resolved" "$NO_COREUTILS_SHA_BIN/shasum"
+else
 cat >"$NO_COREUTILS_SHA_BIN/shasum" <<SHASUM
 #!/usr/bin/env bash
 set -eu
@@ -279,7 +304,8 @@ case "\$bits" in
 esac
 exit 1
 SHASUM
-chmod +x "$NO_COREUTILS_SHA_BIN/shasum"
+  chmod +x "$NO_COREUTILS_SHA_BIN/shasum"
+fi
 ( PATH="$FAKEBIN:$NO_COREUTILS_SHA_BIN"; ! type -P sha256sum >/dev/null && ! type -P sha512sum >/dev/null ) \
   || fail 'the shasum-only fixture PATH still exposes the coreutils checksum tools'
 

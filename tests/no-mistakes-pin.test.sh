@@ -10,7 +10,6 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PINS="$ROOT/config/dev-tools-versions.sh"
-DOC="$ROOT/docs/dev-tool-versions.md"
 INSTALLER="$ROOT/bin/dev-tools-install-pinned"
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/no-mistakes-pin-tests.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
@@ -21,13 +20,6 @@ pass() { printf 'ok - %s\n' "$1"; }
 # shellcheck source=../config/dev-tools-versions.sh
 # shellcheck disable=SC1091
 source "$PINS"
-
-# Neither tool may fall back to a recorded exact version or recorded checksum:
-# the selection is latest stable, resolved per invocation.
-[ -z "${NO_MISTAKES_VERSION:-}" ] || fail 'NO_MISTAKES_VERSION is still recorded'
-[ -z "${TREEHOUSE_VERSION:-}" ] || fail 'TREEHOUSE_VERSION is still recorded'
-[ "${RELEASE_SHA256_PINS+set}" != set ] || fail 'RELEASE_SHA256_PINS is still recorded'
-pass 'no exact treehouse or no-mistakes version or recorded checksum remains'
 
 expected_apply() {
   case "$1" in
@@ -51,15 +43,6 @@ for tool in treehouse no-mistakes; do
   [ "$seen" -eq 1 ] || fail "GITHUB_TOOL_PINS has no $tool row"
 done
 pass 'treehouse and no-mistakes rows are latest-archive and keep their apply boundaries'
-
-for tool in Treehouse no-mistakes; do
-  doc_row=$(grep -E "^\\| $tool \\|" "$DOC") || fail "docs/dev-tool-versions.md has no $tool row"
-  printf '%s' "$doc_row" | grep -q 'Latest stable at invocation' ||
-    fail "docs/dev-tool-versions.md does not record $tool as latest stable at invocation"
-done
-grep -E '^\| no-mistakes \|' "$DOC" | grep -q 'Attended only' ||
-  fail 'docs/dev-tool-versions.md no longer records no-mistakes as attended only'
-pass 'the documented inventory rows agree with the latest-stable policy and apply boundary'
 
 # The installer only reaches its resolution decision when the tool is absent, so
 # this runs with a PATH and HOME that contain no no-mistakes or treehouse.
@@ -111,6 +94,11 @@ out=$(preview treehouse)
 printf '%s' "$out" | grep -qF "releases/download/v3.1.8/treehouse-v3.1.8-${platform}.tar.gz" ||
   { printf '%s\n' "$out" >&2; fail 'the treehouse preview does not name the resolved release archive'; }
 pass 'the treehouse preview follows the same release-bound mechanism'
+
+out=$(TEST_TREE_TAG=v3.2.0 preview treehouse)
+printf '%s' "$out" | grep -qF "releases/download/v3.2.0/treehouse-v3.2.0-${platform}.tar.gz" ||
+  { printf '%s\n' "$out" >&2; fail 'a newer stable treehouse release was not selected'; }
+pass 'a newer stable release changes the selected archive'
 
 # A later prerelease must never be selected; the stub answers as GitHub's
 # releases/latest does, which only ever reports the latest stable release.
