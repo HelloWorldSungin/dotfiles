@@ -28,9 +28,10 @@ The entry point. It declares:
   release branch, and `home-manager` matching it. Pinning means a rebuild
   next month installs the same versions as today. Updating is an explicit
   act: `nix flake update` rewrites `flake.lock` (commit that file), and the
-  audited revisions and package versions in `config/dev-tools-versions.sh` have
-  to be refreshed in the same change, or `dev-tools-check-updates` reports the
-  disagreement - see [dev-tool-versions.md](dev-tool-versions.md).
+  audited revisions and package versions in `config/dev-tools-versions.sh` are
+  receipts for that selected stable graph and have to be refreshed in the same
+  change, or `dev-tools-check-updates` reports the disagreement - see
+  [dev-tool-versions.md](dev-tool-versions.md).
 - **outputs**: named machine configurations. `homeConfigurations."sungin@ct110"`
   is the only one now; a Mac target joins later in the same file.
 

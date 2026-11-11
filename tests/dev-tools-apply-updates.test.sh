@@ -59,8 +59,8 @@ printf '%s\n' "$*" >>"$TEST_CHECKER_LOG"
 [ "${TEST_INVALID_CHECKER:-0}" = 1 ] && { printf '{}\n'; exit 0; }
 # shellcheck source=/dev/null
 source "$TEST_PINS"
-tools=$(jq -cn --arg current "$(git -C "$TEST_FIRSTMATE" rev-parse HEAD)" --arg pin "$FIRSTMATE_REV" \
-  '[{name:"firstmate",current:$current,pinned:$pin,latest_stable:$pin,status:(if $current==$pin then "up_to_date" else "drifted" end)}]')
+tools=$(jq -cn --arg current "$(git -C "$TEST_FIRSTMATE" rev-parse HEAD)" --arg latest "$FIRSTMATE_REV" \
+  '[{name:"firstmate",current:$current,pinned:"latest",latest_stable:$latest,status:(if $current==$latest then "up_to_date" else "drifted" end)}]')
 for row in "${NPM_TOOL_PINS[@]}"; do
   IFS='|' read -r name command_name _package pinned _integrity guarded _channel <<<"$row"
   [ "$guarded" = yes ] || continue

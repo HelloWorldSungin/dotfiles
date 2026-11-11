@@ -64,6 +64,7 @@ for repo_name in firstmate baby-menu; do
   printf '%s\n' "$repo_name" >"$repo_path/version"
   git -C "$repo_path" add version
   git -C "$repo_path" commit -qm "seed $repo_name"
+  [ "$repo_name" = baby-menu ] && git -C "$repo_path" tag baby-menu-v0.1.24
   git -C "$repo_path" config uploadpack.allowFilter true
 done
 FIRSTMATE_TEST_REV=$(git -C "$ASSETS/firstmate-repo" rev-parse HEAD)
@@ -77,8 +78,6 @@ ANTIGRAVITY_MANIFEST_URL_PREFIX=https://antigravity-cli-auto-updater.invalid/man
 CURSOR_AGENT_OBSERVED_VERSION=2026.09.08-test
 CURSOR_INSTALLER_URL=https://cursor.invalid/install
 CURSOR_INSTALLER_SHA256=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
-FIRSTMATE_REV=$FIRSTMATE_TEST_REV
-BABY_MENU_REV=$BABY_MENU_TEST_REV
 NPM_TOOL_PINS=(
   'demo|demo|demo-package|1.2.3|sha512-ZGV0ZXJtaW5pc3RpYw==|yes|default'
 )
@@ -123,6 +122,9 @@ for arg in "$@"; do
   previous=$arg
 done
 case "$url" in
+  https://api.github.com/repos/kunchenguid/baby-menu/releases/latest)
+    jq -cn --arg tag "${TEST_BABY_TAG:-baby-menu-v0.1.24}" '{draft:false,prerelease:false,tag_name:$tag}'
+    ;;
   https://api.github.com/repos/kunchenguid/treehouse/releases/latest|https://api.github.com/repos/kunchenguid/no-mistakes/releases/latest)
     [ "${TEST_RELEASE_API_FAIL:-0}" = 1 ] && exit 1
     case "$url" in
@@ -418,6 +420,18 @@ run_installer --only baby-menu >/dev/null
 [ "$(git -C "$FIXTURE/home/firstmate" rev-parse HEAD)" = "$FIRSTMATE_TEST_REV" ] || fail 'Firstmate clone did not use the exact commit'
 [ "$(git -C "$FIXTURE/home/baby-menu" rev-parse HEAD)" = "$BABY_MENU_TEST_REV" ] || fail 'Baby Menu clone did not use the exact release commit'
 [ "$(git -C "$FIXTURE/home/firstmate" symbolic-ref --short HEAD)" = main ] || fail 'Firstmate exact clone did not preserve the guarded-update branch'
+printf 'new\n' >>"$ASSETS/firstmate-repo/version"
+git -C "$ASSETS/firstmate-repo" commit -qam newer
+FIRSTMATE_NEW_REV=$(git -C "$ASSETS/firstmate-repo" rev-parse HEAD)
+printf 'new\n' >>"$ASSETS/baby-menu-repo/version"
+git -C "$ASSETS/baby-menu-repo" commit -qam newer
+git -C "$ASSETS/baby-menu-repo" tag baby-menu-v0.1.25
+BABY_MENU_NEW_REV=$(git -C "$ASSETS/baby-menu-repo" rev-parse HEAD)
+rm -rf "$FIXTURE/home/firstmate" "$FIXTURE/home/baby-menu"
+run_installer --only firstmate >/dev/null
+TEST_BABY_TAG=baby-menu-v0.1.25 run_installer --only baby-menu >/dev/null
+[ "$(git -C "$FIXTURE/home/firstmate" rev-parse HEAD)" = "$FIRSTMATE_NEW_REV" ] || fail 'Firstmate fresh install did not select the current upstream main'
+[ "$(git -C "$FIXTURE/home/baby-menu" rev-parse HEAD)" = "$BABY_MENU_NEW_REV" ] || fail 'Baby Menu fresh install did not select the newer stable release'
 git -C "$FIXTURE/home/firstmate" -c user.email=tests@example.invalid -c user.name=tests commit -qm 'local commit' --allow-empty
 local_head=$(git -C "$FIXTURE/home/firstmate" rev-parse HEAD)
 run_installer --only firstmate >/dev/null

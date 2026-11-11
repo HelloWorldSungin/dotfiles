@@ -23,8 +23,7 @@ let
     inherit (pkgs) coreutils curl diffutils gawk gnugrep gnused gnutar gzip python3;
   };
   userEnvInputs = {
-    inherit (pkgs) git jq;
-    nodejs_22 = pkgs.nodejs_22;
+    inherit (pkgs) git jq nodejs;
   };
   runtimeInputsByName = closureOnlyInputs // userEnvInputs;
   pick = names: map (name: runtimeInputsByName.${name}) names;
@@ -50,7 +49,7 @@ let
       ${builtins.readFile ../bin/dev-tools-check-updates}
     '';
     bashOptions = [ ]; # The checker deliberately handles source failures itself.
-    runtimeInputs = pick [ "coreutils" "curl" "gawk" "git" "gnugrep" "gnused" "jq" "nodejs_22" ];
+    runtimeInputs = pick [ "coreutils" "curl" "gawk" "git" "gnugrep" "gnused" "jq" "nodejs" ];
   };
 
   pinnedInstaller = pkgs.writeShellApplication {
@@ -59,16 +58,19 @@ let
       export DEV_TOOLS_PINS_FILE=${pins}
       ${builtins.readFile ../bin/dev-tools-install-pinned}
     '';
-    runtimeInputs = pick [ "coreutils" "curl" "gawk" "git" "gnugrep" "gnutar" "gzip" "jq" "nodejs_22" ];
+    runtimeInputs = pick [ "coreutils" "curl" "gawk" "git" "gnugrep" "gnutar" "gzip" "jq" "nodejs" ];
+  };
+
+  npmRunLatestStable = pkgs.writeShellApplication {
+    name = "npm-run-latest-stable";
+    text = builtins.readFile ../bin/npm-run-latest-stable;
+    runtimeInputs = pick [ "coreutils" "gnugrep" "jq" "nodejs" ];
   };
 
   claudeSpendPinned = pkgs.writeShellApplication {
     name = "claude-spend-pinned";
-    text = ''
-      export DEV_TOOLS_PINS_FILE=${pins}
-      ${builtins.readFile ../bin/claude-spend-pinned}
-    '';
-    runtimeInputs = pick [ "coreutils" "gnugrep" "nodejs_22" ];
+    text = builtins.readFile ../bin/claude-spend-pinned;
+    runtimeInputs = [ npmRunLatestStable ];
   };
 
   claudeSetCompactionWindow = pkgs.writeShellApplication {
@@ -121,7 +123,7 @@ let
       ${builtins.readFile ../bin/dev-tools-apply-updates}
     '';
     bashOptions = [ ]; # Applies each tier independently and handles failures itself.
-    runtimeInputs = pick [ "coreutils" "gawk" "git" "gnugrep" "gnused" "gnutar" "gzip" "jq" "nodejs_22" ]
+    runtimeInputs = pick [ "coreutils" "gawk" "git" "gnugrep" "gnused" "gnutar" "gzip" "jq" "nodejs" ]
       ++ [ checker ];
   };
 
@@ -144,7 +146,7 @@ in
   _module.args.devTools = {
     inherit
       closureOnlyInputs userEnvInputs closureManifest pins flakeLock nvimPluginLock
-      checker pinnedInstaller claudeSpendPinned claudeSetCompactionWindow codexSetContextWindow codexSetModelDefaults piSetModelDefaults piSetCompactionReserve noMistakesSetAgentPolicy applyUpdates
+      checker pinnedInstaller npmRunLatestStable claudeSpendPinned claudeSetCompactionWindow codexSetContextWindow codexSetModelDefaults piSetModelDefaults piSetCompactionReserve noMistakesSetAgentPolicy applyUpdates
       skillReviewedUpdates;
   };
 }

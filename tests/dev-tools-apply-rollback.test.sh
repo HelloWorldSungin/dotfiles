@@ -83,8 +83,8 @@ set -eu
 # shellcheck source=/dev/null
 source "\$TEST_PINS"
 head=\$($REAL_GIT -C "\$TEST_FIRSTMATE" rev-parse HEAD)
-tools=\$(jq -cn --arg current "\$head" --arg pin "\$FIRSTMATE_REV" \\
-  '[{name:"firstmate",current:\$current,pinned:\$pin,latest_stable:\$pin,status:(if \$current==\$pin then "up_to_date" else "drifted" end)}]')
+tools=\$(jq -cn --arg current "\$head" --arg latest "\$FIRSTMATE_REV" \\
+  '[{name:"firstmate",current:\$current,pinned:"latest",latest_stable:\$latest,status:(if \$current==\$latest then "up_to_date" else "drifted" end)}]')
 for row in "\${NPM_TOOL_PINS[@]}"; do
   IFS='|' read -r name command_name _package pinned _integrity guarded _channel <<<"\$row"
   [ "\$guarded" = yes ] || continue

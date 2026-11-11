@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# External toolchain release record: exact pins plus latest-stable selectors. This file is sourced by trusted scripts in
+# External toolchain stable selectors and audited receipts. This file is sourced by trusted scripts in
 # this repository. Keep every value a literal: no commands or environment reads.
 # shellcheck disable=SC2034 # Public manifest fields are consumed by multiple callers.
 
@@ -20,14 +20,6 @@ CURSOR_AGENT_OBSERVED_VERSION=2026.09.08-6caf4ff
 CURSOR_INSTALLER_URL=https://cursor.com/install
 CURSOR_INSTALLER_SHA256=8513e9f949576d7ced2a2a582252626cc86235437c2749bf93c886f1d5fdb203
 HERDR_LATEST_MANIFEST_URL=https://herdr.dev/latest.json
-
-OPENCODE_ACP_VERSION=1.18.30
-OMP_ACP_VERSION=0.1.2
-CLAUDE_SPEND_VERSION=1.0.6
-
-FIRSTMATE_REV=0fe226c93efdd12a38f1c3936d758571e40111b7
-BABY_MENU_VERSION=0.1.24
-BABY_MENU_REV=65eb280ea0e05c17677f10b56afc75e91f899f65
 
 # Pinned instruction artifacts. Living Kun documents (ENTRY/TOOLS/OPINIONS/VOICE)
 # refresh on invocation from upstream main and are not these pins. The Kun
@@ -75,7 +67,7 @@ GITHUB_TOOL_PINS=(
   'gbrain|gbrain|garrytan/gbrain|0.48.5.0|external-owner|attended-only'
 )
 
-# package|version-command|version|evidence-class. Nixpkgs 26.05 at NIXPKGS_REV
+# package|version-command|audited-version|evidence-class. Nixpkgs 26.05 at NIXPKGS_REV
 # is the authoritative stable source. Runtime inputs of repository-owned wrappers
 # are included so the inventory covers everything Home Manager materializes.
 # The evidence class says where the installed version may be read from:
@@ -87,7 +79,7 @@ GITHUB_TOOL_PINS=(
 #             unrelated system build - and reports unknown when the generated
 #             manifest is absent or does not bind it.
 NIX_PACKAGE_PINS=(
-  'gh|gh|2.100.0|user-env' 'lazygit|lazygit|0.61.1|user-env' 'nodejs_22|node|22.23.2|user-env'
+  'gh|gh|2.100.0|user-env' 'lazygit|lazygit|0.61.1|user-env' 'nodejs|node|24.19.0|user-env'
   'uv|uv|0.11.21|user-env' 'bats|bats|1.12.0|user-env' 'ripgrep|rg|15.1.0|user-env'
   'fd|fd|10.4.2|user-env' 'fzf|fzf|0.72.0|user-env' 'jq|jq|1.8.2|user-env'
   'tree|tree|2.3.2|user-env' 'htop|htop|3.5.1|user-env' 'unzip|unzip|6.0|user-env'
@@ -100,7 +92,7 @@ NIX_PACKAGE_PINS=(
 )
 
 
-# lock-name|repository|stable-policy|recorded-release-or-ref|commit
+# lock-name|repository|stable-policy|recorded-release-or-ref|audited-commit
 # "head" is used only when the upstream has no release feed.
 NEOVIM_PLUGIN_PINS=(
   'codewindow.nvim|gorbit99/codewindow.nvim|head|HEAD|a8e175043ce3baaa89e0a6b5171bcd920aab3dad'

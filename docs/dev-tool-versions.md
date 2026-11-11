@@ -14,7 +14,7 @@ alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
 
 ## External pins and stable policies
 
-| Tool | Exact pin | Authority and stable judgment | Fresh install | Apply boundary |
+| Tool | Selection | Authority and stable judgment | Fresh install | Apply boundary |
 |---|---:|---|---|---|
 | Determinate Nix Installer | 3.22.3 | Determinate GitHub GA release, with v3.22.0 prerelease excluded | Versioned installer URL plus recorded installer SHA-256 | Report only |
 | Claude Code | Latest at invocation | npm default `latest` tag, not the `stable` dist-tag. Numeric stable only; guarded apply stays off | Resolve version and integrity, then verify the exact artifact. Install-if-absent | Report only |
@@ -33,11 +33,11 @@ alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
 | quota-axi | Latest stable at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify exact artifact | Guarded exact apply with receipts |
 | chrome-devtools-axi | Latest stable at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify exact artifact | Guarded exact apply with receipts |
 | lavish-axi | Latest stable at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify exact artifact | Guarded exact apply with receipts |
-| OpenCode ACP invocation | 1.18.30 | npm default tag | Exact `npx` spec in `config/baby-menu/agents.json` | Report only |
-| OMP ACP invocation | 0.1.2 | npm default tag | Exact `npx` spec in `config/baby-menu/agents.json` | Report only |
-| claude-spend invocation | 1.0.6 | npm default tag | `CLAUDE_SPEND_VERSION` in `config/dev-tools-versions.sh`, read at run time by `bin/claude-spend-pinned` (the `cspend` alias) | Report only |
-| Firstmate source | `0fe226c93efd...` | Held at the existing audited commit pending fork reconciliation through Firstmate upstream-sync | Exact commit | Guarded exact fast-forward only |
-| Baby Menu source | 0.1.24 / `65eb280ea0e0...` | Latest non-prerelease `baby-menu-v0.1.24` release | Exact release commit | Report only |
+| OpenCode ACP invocation | Latest stable per launch | npm default tag; numeric version and publisher integrity verified before exact `npx` invocation | `npm-run-latest-stable` in `config/baby-menu/agents.json` | Report only |
+| OMP ACP invocation | Latest stable per launch | Same verified npm selection | `npm-run-latest-stable` in `config/baby-menu/agents.json` | Report only |
+| claude-spend invocation | Latest stable per launch | Same verified npm selection | The `cspend` alias delegates to `npm-run-latest-stable` | Report only |
+| Firstmate source | Current upstream `main` | Authoritative default branch commit resolved once and verified after clone or fetch | Exact resolved commit on `main` | Guarded fast-forward with receipt |
+| Baby Menu source | Latest stable release | Latest non-draft, non-prerelease `baby-menu-v` release resolved to a commit | Exact resolved release commit in a detached checkout | Report only |
 | actions/checkout | v7.0.1 / `3d3c42e5aac5...` | Latest GitHub GA action release | Exact workflow action SHA | CI only |
 | Determinate Nix Installer action | v23 / `3138316df39e...` | Latest GitHub GA action release | Exact workflow action SHA | CI only |
 | Kun loader | [KUN_LOADER_REV and KUN_LOADER_SHA256](../config/dev-tools-versions.sh) | Exact `skills/kun/SKILL.md` from `kunchenguid/kun`; living ENTRY/TOOLS/OPINIONS/VOICE files are not this pin | Repository copy via Home Manager | Reviewed `skill-reviewed-updates` adopt; never live skill stores |
@@ -160,21 +160,37 @@ cask versions or an unverified direct download. Review any existing external
 pin or nightly installation before that separate operation; dotfiles does not
 alter it or terminate open terminals. No WezTerm installer is added here.
 
-## Remaining exact selections
+## Selection and application boundaries
 
-An exact pin stays only for a compatibility or safety reason, and each one
-names the condition that removes it. Official latest stable is the default
-for the Firstmate tools above.
+Firstmate selects the current upstream `main` commit. The guarded updater
+independently fetches and compares that commit, requires a clean local `main`
+that can fast-forward, refuses active worker lanes, and records exact prior and
+target commits before mutation. Baby Menu selects the latest stable release
+for a fresh checkout and leaves an existing checkout untouched. Kun and Matt
+skills continue through reviewed adoption; Matt's live plugin bytes remain
+owned by Claude marketplace autoUpdate.
 
-| Selection | Reason | Removal condition |
-|---|---|---|
-| Cursor Agent | Beta only. Upstream publishes a moving installer and auto-update, with no stable or exact-version selector and no publisher checksum. The checker records the observed snapshot and never runs the installer. | Remove when Cursor publishes a stable exact-version artifact and a publisher checksum the existing checker can verify. |
-| Firstmate source | Exact audited commit. Guarded apply fast-forwards only to that commit after proving it is on authoritative `main`. A checkout that is ahead, diverged, or dirty is refused. Latest selection does not reset, rebase, or discard local commits. | Remove when that checkout is a clean fast-forward of upstream `main` and no local commits remain. Until then the target stays the audited commit. |
-| GBrain | Excluded. No upgrade, patch, or dream path is selected here. The report-only row stays at its recorded release. | Remove only through Firstmate's own migration procedure, not through this updater. |
-| Baby Menu, Kun loader, Matt Pocock skills | Baby Menu is a detached release checkout and an existing repository is never moved. Kun and Matt stay on the reviewed adopt path; Matt live bytes belong to Claude marketplace autoUpdate. | Remove when that existing adopt path can resolve a non-prerelease latest and verify it without writing live skill stores or moving a checkout that already exists. |
-| OpenCode ACP, OMP ACP, claude-spend | Launch and wrapper specs. `npx` has no integrity re-check in this repository, so those specs stay exact while the OpenCode CLI install resolves latest. | Remove when the launch path re-verifies registry integrity the way `dev-tools-install-pinned` does. |
-| Determinate Nix Installer | The moving installer script has no publisher checksum channel: `install.determinate.systems/nix/tag/v3.22.3/nix-installer.sh.sha256` answered 404 on 2026-11-11, so the recorded script SHA-256 is the only verification receipt. | Remove when Determinate publishes a per-tag installer checksum the bootstrap can verify. |
-| Nixpkgs, Home Manager, CI action SHAs, Neovim plugins | OS and base packages, workflow action commits, and editor plugins. Not Firstmate developer-tool selection. `flake.lock` is unchanged. Model defaults are unchanged. | Remove only in a change whose scope is that lock, workflow, or package set. This policy does not edit them. |
+Firstmate's GitHub `releases/latest` endpoint returned 404 on 2026-11-11; it
+does not offer a GA version selector. The current upstream `main` commit is
+the available source target, and the fast-forward and active-lane checks keep
+that selection from discarding unlanded work.
+
+The Nix update path selects the current `nixos-26.05` and matching Home Manager
+stable branches with `nix flake update`. `flake.lock` and the package versions
+in the manifest record that selected dependency graph for reproducible builds;
+they are refreshed together during an attended update. Neovim release-bearing
+plugins use lazy.nvim's latest stable version selector, while
+`config/nvim/lazy-lock.json` records the chosen commits. Plugins without a
+release feed use the upstream default branch. CI actions resolve stable
+releases to exact commit SHAs before workflow adoption.
+
+Cursor publishes only a moving beta installer, so this repository has no
+verifiable stable selection for it and never runs the installer. Determinate's
+versioned Nix installer script has no published per-tag checksum (the checked
+`v3.22.3` checksum URL returned 404 on 2026-11-11); its recorded SHA-256
+remains the safe receipt until a publisher-verifiable stable update path exists.
+GBrain remains outside dotfiles activation and follows Firstmate's attended
+migration procedure.
 
 Source inspection on 2026-09-15 confirmed the Herdr manifest schema and
 WezTerm stable cask instructions. npm documents its default `latest` lookup in
@@ -192,7 +208,7 @@ deprecated 25.11 channel. The lock file carries the content hashes.
 | Package | Version | Package | Version |
 |---|---:|---|---:|
 | gh | 2.100.0 | lazygit | 0.61.1 |
-| nodejs_22 | 22.23.2 | uv | 0.11.21 |
+| nodejs | 24.19.0 | uv | 0.11.21 |
 | bats | 1.12.0 | ripgrep | 15.1.0 |
 | fd | 10.4.2 | fzf | 0.72.0 |
 | jq | 1.8.2 | tree | 2.3.2 |
@@ -224,21 +240,19 @@ a manifest that is absent, unreadable, malformed, does not bind the package, or
 binds a path without a runnable version command reports `unknown` and says which
 of those it was. So a repository-checkout run - the script rather than the
 packaged wrapper - reports every `closure` row as `unknown` instead of measuring
-the wrong binary. `git`, `jq`, and `nodejs_22` are wrapper inputs too, but they
+the wrong binary. `git`, `jq`, and `nodejs` are wrapper inputs too, but they
 are also in the user environment, so they stay `user-env`: an operator whose
 `node` resolves to another build still sees that drift. Home Manager modules also own home-manager,
 Neovim, zsh, Starship, fzf, and Git. Neovim's fourteen plugin commits remain
 independently exact in `config/nvim/lazy-lock.json`; the initial lazy.nvim clone
-uses the exact v11.17.5 GA tag instead of the moving `stable` alias, and the lock
-then enforces its audited commit.
+uses upstream's stable branch, and the lock records the selected commit.
 
 ## Neovim plugin pins
 
-Plugins with a GitHub release feed use the latest non-draft, non-prerelease
-release. Projects without releases are pinned to the audited default-branch
-commit and are marked as an explicit limitation rather than described as a
-release. The checker compares the installed checkout, lock-file commit, and
-current authoritative release or branch commit.
+Plugins with a GitHub release feed select the latest stable version on update.
+Projects without releases select their default branch. The checker compares
+the installed checkout, recorded lock-file commit, and current authoritative
+release or branch commit.
 
 | Plugin | Stable source | Exact commit |
 |---|---|---|
@@ -316,8 +330,8 @@ Bootstrap invokes it after the exact Nix and Home Manager bootstrap.
 
 `dev-tools-apply-updates` has only two mutation scopes:
 
-1. Fast-forward Firstmate's `main` branch to the exact recorded commit, after
-   proving the commit belongs to the freshly read remote branch.
+1. Fast-forward Firstmate's `main` branch to the latest upstream commit, after
+   independently proving it matches the freshly fetched remote branch.
 2. Install the five axi tools and gnhf at resolved stable versions, after
    independently verifying each exact artifact and integrity. Harness CLIs
    are not in this scope.
@@ -343,7 +357,7 @@ selection the apply path uses.
 Both directions then run one shared comparison, so a preview's status and exit
 code are the apply's: `up_to_date` only on equality, `would_apply` only on a
 proven local ancestor of the pin, and a refusal - non-zero, never a quiet
-`skipped` - when the pin is absent from or not contained in the authoritative
+`skipped` - when the selected commit differs from the authoritative remote
 branch, or when the checkout is ahead of or diverged from it. The apply path
 repeats its own fresh `ls-remote`, fetch, and remote-movement check before
 running that comparison against the real checkout, and never trusts a dry-run
