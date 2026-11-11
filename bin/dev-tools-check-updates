@@ -483,7 +483,9 @@ check_ci_action() {
 
 resolve_tag_commit() {
   local repo=$1 tag=$2
-  run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" ls-remote "https://github.com/$repo.git" "refs/tags/$tag" "refs/tags/$tag^{}" 2>/dev/null | awk 'END {print $1}'
+  run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" ls-remote "https://github.com/$repo.git" "refs/tags/$tag" "refs/tags/$tag^{}" 2>/dev/null |
+    awk -v direct="refs/tags/$tag" -v peeled="refs/tags/$tag^{}" \
+      '$2 == direct {tag_object=$1} $2 == peeled {commit=$1} END {if (commit) print commit; else if (tag_object) print tag_object}'
 }
 
 check_nvim_plugin() {
@@ -501,6 +503,9 @@ check_nvim_plugin() {
     elif [ "$rc" -eq 2 ]; then latest=unknown; detail='latest release tag is prerelease-like'
     else latest=unknown; detail='latest stable plugin release could not be verified'
     fi
+  elif [ "$policy" = stable-tag ] && [ "$recorded_ref" = stable ]; then
+    latest=$(resolve_tag_commit "$repo" "$recorded_ref")
+    detail='publisher stable tag'
   elif [ "$policy" = head ] && [ "$recorded_ref" = HEAD ]; then
     latest=$(run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" ls-remote "https://github.com/$repo.git" HEAD 2>/dev/null | awk '$2 == "HEAD" {print $1; exit}')
     detail='upstream publishes no release feed; exact default-branch commit is the documented exception'

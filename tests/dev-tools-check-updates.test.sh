@@ -59,7 +59,12 @@ source "$TEST_PINS"
 if [ "${4:-}" = dist.integrity ]; then
   package=${2%@*}
   version=${2##*@}
-  case "$package" in opencode-ai) expected=$OPENCODE_ACP_VERSION ;; omp-acp) expected=$OMP_ACP_VERSION ;; claude-spend) expected=$CLAUDE_SPEND_VERSION ;; *) exit 1 ;; esac
+  case "$package" in
+    opencode-ai) expected=${TEST_OPENCODE_ACP_RELEASE:-$OPENCODE_ACP_VERSION} ;;
+    omp-acp) expected=${TEST_OMP_ACP_RELEASE:-$OMP_ACP_VERSION} ;;
+    claude-spend) expected=$CLAUDE_SPEND_VERSION ;;
+    *) exit 1 ;;
+  esac
   [ "$version" = latest ] && version=$expected
   jq -cn --arg v "$version" --arg i 'sha512-ZGV0ZXJtaW5pc3RpYw==' '{version:$v,"dist.integrity":$i}'
   exit 0
@@ -71,8 +76,8 @@ for row in "${NPM_TOOL_PINS[@]}"; do
 done
 # npx specs are separate from a moving CLI row for the same package name.
 case "$spec" in
-  opencode-ai@latest) version=$OPENCODE_ACP_VERSION ;;
-  omp-acp@latest) version=$OMP_ACP_VERSION ;;
+  opencode-ai@latest) version=${TEST_OPENCODE_ACP_RELEASE:-$OPENCODE_ACP_VERSION} ;;
+  omp-acp@latest) version=${TEST_OMP_ACP_RELEASE:-$OMP_ACP_VERSION} ;;
   claude-spend@latest) version=$CLAUDE_SPEND_VERSION ;;
 esac
 [ "$package" = "${TEST_NPM_PRERELEASE_PACKAGE:-}" ] && version=9.0.0-beta.1
@@ -198,6 +203,9 @@ for row in "${NEOVIM_PLUGIN_PINS[@]}"; do
   IFS='|' read -r _name candidate _policy tag commit <<<"$row"
   [ "$candidate" = "$clean" ] || continue
   if [ "$ref" = HEAD ]; then printf '%s\tHEAD\n' "$commit"
+  elif [ "$tag" = stable ]; then
+    printf '%s\trefs/tags/stable\n' 332b4cbc8bf61589b6ff58ce42fca80173154669
+    printf '%s\trefs/tags/stable^{}\n' "${TEST_LAZY_STABLE_COMMIT:-$commit}"
   else printf '%s\trefs/tags/%s^{}\n' "$commit" "$tag"
   fi
   exit 0
@@ -321,7 +329,7 @@ run_checker() {
     TEST_NPM_PRERELEASE_PACKAGE="${TEST_NPM_PRERELEASE_PACKAGE:-}" TEST_PRERELEASE_REPO="${TEST_PRERELEASE_REPO:-}" \
     TEST_NPM_NO_STABLE_TAG="${TEST_NPM_NO_STABLE_TAG:-}" \
     TEST_HERDR_LATEST_VERSION="${TEST_HERDR_LATEST_VERSION:-}" TEST_ANTIGRAVITY_LATEST_VERSION="${TEST_ANTIGRAVITY_LATEST_VERSION:-}" \
-    TEST_KUN_LOADER="${TEST_KUN_LOADER:-$ROOT/skills/kun/SKILL.md}" \
+    TEST_KUN_LOADER="${TEST_KUN_LOADER:-$ROOT/skills/kun/SKILL.md}" TEST_LAZY_STABLE_COMMIT="${TEST_LAZY_STABLE_COMMIT:-}" \
     TEST_CHROME_ARGS="${TEST_CHROME_ARGS:---no-sandbox --disable-dev-shm-usage --disable-gpu}" "$CHECKER" "$@"
 }
 
@@ -356,6 +364,22 @@ for agent in opencode omp; do
 done
 grep -Fxq -- "-y opencode-ai@$OPENCODE_ACP_VERSION acp" "$NPX_LOG" || fail 'OpenCode ACP did not execute the resolved stable version'
 grep -Fxq -- "-y omp-acp@$OMP_ACP_VERSION" "$NPX_LOG" || fail 'OMP ACP did not execute the resolved stable version'
+: >"$NPX_LOG"
+export TEST_OPENCODE_ACP_RELEASE=7.8.9 TEST_OMP_ACP_RELEASE=8.9.10
+for agent in opencode omp; do
+  launch=$(jq -er --arg name "$agent" '.[] | select(.name == $name) | .launchCommand' "$ROOT/config/baby-menu/agents.json")
+  env PATH="$ROOT/bin:$PATH" TEST_PINS="$PINS" TEST_CALL_LOG="$CALL_LOG" TEST_NPX_LOG="$NPX_LOG" \
+    DEV_TOOLS_NPM_BIN="$FAKEBIN/npm" DEV_TOOLS_NPX_BIN="$FAKEBIN/npx" bash -c "$launch"
+done
+unset TEST_OPENCODE_ACP_RELEASE TEST_OMP_ACP_RELEASE
+[ "$(wc -l <"$NPX_LOG")" -eq 2 ] || fail 'ACP launch count changed after registry updates'
+grep -Fxq -- '-y opencode-ai@7.8.9 acp' "$NPX_LOG" || fail 'OpenCode ACP ignored the newer stable release'
+grep -Fxq -- '-y omp-acp@8.9.10' "$NPX_LOG" || fail 'OMP ACP ignored the newer stable release'
+export TEST_LAZY_STABLE_COMMIT=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+stable_json=$(run_checker --json --force --no-cache)
+unset TEST_LAZY_STABLE_COMMIT
+printf '%s' "$stable_json" | jq -e '.tools[] | select(.name == "nvim:lazy.nvim") | .latest_stable == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" and .status == "pin_outdated"' >/dev/null \
+  || fail 'lazy.nvim checker ignored a newer publisher stable tag commit'
 grep -Fq 'npm view @anthropic-ai/claude-code@latest version --json' "$CALL_LOG" || fail 'Claude did not use the npm default version field'
 ! grep -Fq 'npm view @anthropic-ai/claude-code dist-tags.stable --json' "$CALL_LOG" || fail 'Claude was compared with the stable dist-tag'
 grep -Fq 'herdr --version' "$CALL_LOG" || fail 'Herdr installed version was not surveyed'

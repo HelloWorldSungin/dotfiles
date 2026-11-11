@@ -16,7 +16,7 @@ alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
 
 | Tool | Selection | Authority and stable judgment | Fresh install | Apply boundary |
 |---|---:|---|---|---|
-| Determinate Nix Installer | 3.22.3 | Determinate GitHub GA release, with v3.22.0 prerelease excluded | Versioned installer URL plus recorded installer SHA-256 | Report only |
+| Determinate Nix Installer | Verified 3.22.3 exception | Latest stable was 3.24.2 at review, but its installer lacks a publisher checksum | Versioned installer URL plus recorded installer SHA-256 | Report only |
 | Claude Code | Latest at invocation | npm default `latest` tag, not the `stable` dist-tag. Numeric stable only; guarded apply stays off | Resolve version and integrity, then verify the exact artifact. Install-if-absent | Report only |
 | Codex | Latest at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify the exact artifact. Install-if-absent | Report only |
 | OpenCode | Latest at invocation | npm default `latest` tag; suffixed beta and snapshot versions are refused | Resolve version and integrity, then verify the exact artifact. Install-if-absent | Report only |
@@ -185,10 +185,12 @@ release feed use the upstream default branch. CI actions resolve stable
 releases to exact commit SHAs before workflow adoption.
 
 Cursor publishes only a moving beta installer, so this repository has no
-verifiable stable selection for it and never runs the installer. Determinate's
-versioned Nix installer script has no published per-tag checksum (the checked
-`v3.22.3` checksum URL returned 404 on 2026-11-11); its recorded SHA-256
-remains the safe receipt until a publisher-verifiable stable update path exists.
+verifiable stable selection for it and never runs the installer. The Determinate
+Nix installer is a temporary named exception: 3.22.3 remains the last verified
+script while upstream's latest stable release was 3.24.2 at this review. Its
+versioned installer has no published per-tag checksum (the checked `v3.22.3`
+checksum URL returned 404 on 2026-11-11), so the recorded SHA-256 remains the
+safe receipt until a publisher-verifiable stable update path exists.
 GBrain remains outside dotfiles activation and follows Firstmate's attended
 migration procedure.
 
@@ -245,7 +247,7 @@ are also in the user environment, so they stay `user-env`: an operator whose
 `node` resolves to another build still sees that drift. Home Manager modules also own home-manager,
 Neovim, zsh, Starship, fzf, and Git. Neovim's fourteen plugin commits remain
 independently exact in `config/nvim/lazy-lock.json`; the initial lazy.nvim clone
-uses upstream's stable branch, and the lock records the selected commit.
+uses upstream's annotated `stable` tag, and the lock records its peeled commit.
 
 ## Neovim plugin pins
 
@@ -259,7 +261,7 @@ release or branch commit.
 | codewindow.nvim | No releases; default branch at audit time | `a8e175043ce3baaa89e0a6b5171bcd920aab3dad` |
 | diffview.nvim | No releases; default branch at audit time | `4516612fe98ff56ae0415a259ff6361a89419b0a` |
 | gitsigns.nvim | v2.1.0 GA | `a462f416e2ce4744531c6256252dee99a7d34a83` |
-| lazy.nvim | v11.17.5 GA | `85c7ff3711b730b4030d03144f6db6375044ae82` |
+| lazy.nvim | Publisher `stable` tag, currently v11.17.5 GA | `85c7ff3711b730b4030d03144f6db6375044ae82` |
 | neogit | v2.0.0 GA | `43fa47fb61773b0d90a78ebc2521ea8faaeebd86` |
 | nvim-treesitter | No releases; default branch at audit time | `d4d59cb369da46b95699bd2200efbcffc6dadb3b` |
 | nvim-autopairs | 0.10.0 GA tag | `23320e75953ac82e559c610bec5a90d9c6dfa743` |

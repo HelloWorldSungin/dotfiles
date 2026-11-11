@@ -98,7 +98,7 @@ NEOVIM_PLUGIN_PINS=(
   'codewindow.nvim|gorbit99/codewindow.nvim|head|HEAD|a8e175043ce3baaa89e0a6b5171bcd920aab3dad'
   'diffview.nvim|sindrets/diffview.nvim|head|HEAD|4516612fe98ff56ae0415a259ff6361a89419b0a'
   'gitsigns.nvim|lewis6991/gitsigns.nvim|release|v2.1.0|a462f416e2ce4744531c6256252dee99a7d34a83'
-  'lazy.nvim|folke/lazy.nvim|release|v11.17.5|85c7ff3711b730b4030d03144f6db6375044ae82'
+  'lazy.nvim|folke/lazy.nvim|stable-tag|stable|85c7ff3711b730b4030d03144f6db6375044ae82'
   'neogit|NeogitOrg/neogit|release|v2.0.0|43fa47fb61773b0d90a78ebc2521ea8faaeebd86'
   'nvim-treesitter|nvim-treesitter/nvim-treesitter|head|HEAD|d4d59cb369da46b95699bd2200efbcffc6dadb3b'
   'nvim-autopairs|windwp/nvim-autopairs|release|0.10.0|23320e75953ac82e559c610bec5a90d9c6dfa743'
