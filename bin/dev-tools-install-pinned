@@ -8,6 +8,7 @@ ROOT=$(cd "$SELF_DIR/.." && pwd)
 PINS_FILE=${DEV_TOOLS_PINS_FILE:-$ROOT/config/dev-tools-versions.sh}
 CURL_BIN=${DEV_TOOLS_INSTALL_CURL_BIN:-curl}
 NPM_BIN=${DEV_TOOLS_INSTALL_NPM_BIN:-npm}
+NPM_PACK_BIN=${DEV_TOOLS_NPM_PACK_BIN:-$SELF_DIR/npm-pack-verified}
 GIT_BIN=${DEV_TOOLS_INSTALL_GIT_BIN:-git}
 SHA256_BIN=${DEV_TOOLS_INSTALL_SHA256_BIN:-$(command -v sha256sum >/dev/null 2>&1 && printf sha256sum || printf 'shasum -a 256')}
 SHA512_BIN=${DEV_TOOLS_INSTALL_SHA512_BIN:-$(command -v sha512sum >/dev/null 2>&1 && printf sha512sum || printf 'shasum -a 512')}
@@ -77,7 +78,7 @@ installed_version() {
 }
 
 install_npm_pin() {
-  local name=$1 command_name=$2 package=$3 version=$4 integrity=$5 _guarded=$6 _channel=$7 actual registry_json registry_version registry_integrity
+  local name=$1 command_name=$2 package=$3 version=$4 integrity=$5 _guarded=$6 _channel=$7 actual registry_json registry_version registry_integrity tmp archive
   selected "$name" || return 0
   if command -v "$command_name" >/dev/null 2>&1; then
     actual=$(installed_version "$command_name" || printf unknown)
@@ -106,10 +107,18 @@ install_npm_pin() {
     say "refuse $name: registry version or integrity differs from the recorded pin" >&2
     return 1
   fi
-  NPM_CONFIG_PREFIX="$NPM_PREFIX" "$NPM_BIN" install -g "$package@$version"
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/dev-tool-npm-install.XXXXXX")
+  trap 'rm -rf "$tmp"' RETURN
+  archive=$("$NPM_PACK_BIN" "$NPM_BIN" "$package" "$version" "$integrity" "$tmp") || {
+    say "refuse $name: publisher archive integrity differs from the selected version" >&2
+    return 1
+  }
+  NPM_CONFIG_PREFIX="$NPM_PREFIX" "$NPM_BIN" install -g "$archive"
   actual=$(installed_version "$command_name" || true)
   [ "$actual" = "$version" ] || { say "refuse $name: installed version '${actual:-unknown}' != pin $version" >&2; return 1; }
   say "installed $name $version"
+  trap - RETURN
+  rm -rf "$tmp"
 }
 
 platform() {

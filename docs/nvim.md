@@ -19,8 +19,9 @@ Plugins are managed by **lazy.nvim**: on first launch it clones everything
 from GitHub automatically, so a fresh machine just works. `:Lazy` opens its UI
 for inspection. `lazy-lock.json` is written by lazy.nvim and committed, so a
 fresh machine gets the same plugin commits this one runs. Never hand-edit it.
-The lazy.nvim bootstrap selects the publisher's `stable` tag; the checker
-compares its peeled commit with the generated lock.
+The lazy.nvim bootstrap checks out the commit in `lazy-lock.json`. Intentional
+updates select the publisher's `stable` tag and record its peeled commit in
+the lock; the checker compares that tag with the recorded commit.
 When intentionally updating, first audit stable releases, then let
 [lazy.nvim's stable SemVer selector](https://lazy.folke.io/spec/versioning)
 choose versions and regenerate the lock. Update the plugin

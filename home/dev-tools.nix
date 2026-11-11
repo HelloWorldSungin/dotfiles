@@ -52,19 +52,29 @@ let
     runtimeInputs = pick [ "coreutils" "curl" "gawk" "git" "gnugrep" "gnused" "jq" "nodejs" ];
   };
 
+  npmPackVerified = pkgs.writeShellApplication {
+    name = "npm-pack-verified";
+    text = builtins.readFile ../bin/npm-pack-verified;
+    runtimeInputs = pick [ "coreutils" "gnugrep" "jq" "nodejs" ];
+  };
+
   pinnedInstaller = pkgs.writeShellApplication {
     name = "dev-tools-install-pinned";
     text = ''
       export DEV_TOOLS_PINS_FILE=${pins}
+      export DEV_TOOLS_NPM_PACK_BIN=${npmPackVerified}/bin/npm-pack-verified
       ${builtins.readFile ../bin/dev-tools-install-pinned}
     '';
-    runtimeInputs = pick [ "coreutils" "curl" "gawk" "git" "gnugrep" "gnutar" "gzip" "jq" "nodejs" ];
+    runtimeInputs = pick [ "coreutils" "curl" "gawk" "git" "gnugrep" "gnutar" "gzip" "jq" "nodejs" ] ++ [ npmPackVerified ];
   };
 
   npmRunLatestStable = pkgs.writeShellApplication {
     name = "npm-run-latest-stable";
-    text = builtins.readFile ../bin/npm-run-latest-stable;
-    runtimeInputs = pick [ "coreutils" "gnugrep" "jq" "nodejs" ];
+    text = ''
+      export DEV_TOOLS_NPM_PACK_BIN=${npmPackVerified}/bin/npm-pack-verified
+      ${builtins.readFile ../bin/npm-run-latest-stable}
+    '';
+    runtimeInputs = pick [ "coreutils" "gnugrep" "jq" "nodejs" ] ++ [ npmPackVerified ];
   };
 
   claudeSpendPinned = pkgs.writeShellApplication {
@@ -120,11 +130,12 @@ let
     name = "dev-tools-apply-updates";
     text = ''
       export DEV_TOOLS_PINS_FILE=${pins}
+      export DEV_TOOLS_NPM_PACK_BIN=${npmPackVerified}/bin/npm-pack-verified
       ${builtins.readFile ../bin/dev-tools-apply-updates}
     '';
     bashOptions = [ ]; # Applies each tier independently and handles failures itself.
     runtimeInputs = pick [ "coreutils" "gawk" "git" "gnugrep" "gnused" "gnutar" "gzip" "jq" "nodejs" ]
-      ++ [ checker ];
+      ++ [ checker npmPackVerified ];
   };
 
   # Opt-in reviewed adoption for the Kun loader and Matt skills pins. Installed
@@ -146,7 +157,7 @@ in
   _module.args.devTools = {
     inherit
       closureOnlyInputs userEnvInputs closureManifest pins flakeLock nvimPluginLock
-      checker pinnedInstaller npmRunLatestStable claudeSpendPinned claudeSetCompactionWindow codexSetContextWindow codexSetModelDefaults piSetModelDefaults piSetCompactionReserve noMistakesSetAgentPolicy applyUpdates
+      checker npmPackVerified pinnedInstaller npmRunLatestStable claudeSpendPinned claudeSetCompactionWindow codexSetContextWindow codexSetModelDefaults piSetModelDefaults piSetCompactionReserve noMistakesSetAgentPolicy applyUpdates
       skillReviewedUpdates;
   };
 }

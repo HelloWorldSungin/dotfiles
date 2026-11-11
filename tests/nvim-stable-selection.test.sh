@@ -66,6 +66,9 @@ LUA
 TEST_LAZY_SOURCE="$LAZY_SOURCE" TEST_LAZY_REPO="$REPO" TEST_STABLE_COMMIT="$STABLE_COMMIT" \
   TEST_PLUGIN_DIR="$ROOT/config/nvim/lua/plugins" nvim -u NONE -i NONE --headless \
   -c "luafile $TMP_ROOT/check.lua" -c 'qa!'
+git -C "$REPO" -c user.email=tests@example.invalid -c user.name=tests tag -fa stable -m moved
+mkdir -p "$TMP_ROOT/config/nvim"
+jq -n --arg commit "$STABLE_COMMIT" '{"lazy.nvim":{commit:$commit}}' >"$TMP_ROOT/config/nvim/lazy-lock.json"
 cat >"$TMP_ROOT/bin/git" <<'SH'
 #!/usr/bin/env bash
 args=()
@@ -83,11 +86,11 @@ package.loaded["lazy"] = { setup = function() end }
 dofile(os.getenv("TEST_NVIM_INIT"))
 LUA
 TEST_NVIM_INIT="$ROOT/config/nvim/init.lua" TEST_LAZY_REPO="$REPO" TEST_REAL_GIT="$(command -v git)" \
-  XDG_DATA_HOME="$TMP_ROOT/data" XDG_CACHE_HOME="$TMP_ROOT/cache" PATH="$TMP_ROOT/bin:$PATH" \
+  XDG_CONFIG_HOME="$TMP_ROOT/config" XDG_DATA_HOME="$TMP_ROOT/data" XDG_CACHE_HOME="$TMP_ROOT/cache" PATH="$TMP_ROOT/bin:$PATH" \
   nvim -u NONE -i NONE --headless -c "luafile $TMP_ROOT/bootstrap.lua" -c 'qa!'
 [ "$(git -C "$TMP_ROOT/data/nvim/lazy/lazy.nvim" rev-parse HEAD)" = "$STABLE_COMMIT" ] || {
-  printf 'lazy.nvim bootstrap did not select the stable tag commit\n' >&2
+  printf 'lazy.nvim bootstrap did not select the locked commit\n' >&2
   exit 1
 }
-printf 'ok - lazy.nvim bootstrap selects the peeled stable tag\n'
+printf 'ok - lazy.nvim bootstrap keeps the locked commit when stable moves\n'
 printf 'ok - lazy.nvim resolves loaded plugins to stable SemVer tags\n'

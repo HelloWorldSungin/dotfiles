@@ -38,7 +38,11 @@ TARGET_COMMIT=$(git -C "$SEED" rev-parse HEAD)
 git -C "$SEED" push -q "file://$REMOTE" main
 
 PINS="$TMP_ROOT/pins.sh"
-sed 's/|latest|publisher|/|3.4.5|sha512-ZGV0ZXJtaW5pc3RpYw==|/g' "$ROOT/config/dev-tools-versions.sh" >"$PINS"
+TARGET_BODY='target archive'
+PRIOR_BODY='prior archive'
+TARGET_INTEGRITY=$(node -e 'process.stdout.write("sha512-" + require("node:crypto").createHash("sha512").update(process.argv[1]).digest("base64"))' "$TARGET_BODY")
+PRIOR_INTEGRITY=$(node -e 'process.stdout.write("sha512-" + require("node:crypto").createHash("sha512").update(process.argv[1]).digest("base64"))' "$PRIOR_BODY")
+sed "s@|latest|publisher|@|3.4.5|$TARGET_INTEGRITY|@g" "$ROOT/config/dev-tools-versions.sh" >"$PINS"
 printf '\nFIRSTMATE_REV=%s\n' "$TARGET_COMMIT" >>"$PINS"
 # shellcheck source=../config/dev-tools-versions.sh
 # shellcheck disable=SC1091
@@ -55,8 +59,8 @@ done
 : "${GH_VERSION:?gh-axi pin missing}"
 QUOTA_PRIOR=1.2.3
 GH_PRIOR=2.3.4
-QUOTA_PRIOR_INTEGRITY=sha512-QUOTAAXIPRIORREGISTRYINTEGRITYEVIDENCE00000000000000000000000000000000000000000000000000==
-GH_PRIOR_INTEGRITY=sha512-GHAXIPRIORREGISTRYINTEGRITYEVIDENCE0000000000000000000000000000000000000000000000000000==
+QUOTA_PRIOR_INTEGRITY=$PRIOR_INTEGRITY
+GH_PRIOR_INTEGRITY=$PRIOR_INTEGRITY
 
 FAKEBIN="$TMP_ROOT/fakebin"; PREFIX="$TMP_ROOT/npm-prefix"; STATE="$TMP_ROOT/state"
 RECEIPTS="$TMP_ROOT/receipts"; REGISTRY="$TMP_ROOT/registry"
@@ -133,6 +137,26 @@ if [ "\$1" = view ]; then
   fi
   exit 1
 fi
+if [ "\$1" = pack ]; then
+  package=\${2%@*}
+  version=\${2##*@}
+  [ "\$3" = --json ] && [ "\$4" = --pack-destination ] || exit 1
+  for row in "\${NPM_TOOL_PINS[@]}"; do
+    IFS='|' read -r _name _command_name candidate pinned _integrity guarded _channel <<<"\$row"
+    [ "\$guarded" = yes ] && [ "\$candidate" = "\$package" ] || continue
+    if [ "\$version" = "\$pinned" ]; then body=\$TEST_TARGET_BODY
+    else
+      [ -f "\$TEST_REGISTRY/\$package@\$version" ] || exit 1
+      body=\$TEST_PRIOR_BODY
+    fi
+    [ "\$package@\$version" = "\${TEST_TAMPER_PACK_SPEC:-}" ] && body="\$body tampered"
+    filename="\$package-\$version.tgz"
+    printf '%s' "\$body" >"\$5/\$filename"
+    jq -cn --arg name "\$package" --arg v "\$version" --arg f "\$filename" '[{name:\$name,version:\$v,filename:\$f}]'
+    exit 0
+  done
+  exit 1
+fi
 if [ "\$1" = install ]; then
   if ls "\$TEST_RECEIPT_DIR"/apply-*.json >/dev/null 2>&1; then printf 'npm-install receipt=yes\n' >>"\$TEST_PRE_LOG"
   else printf 'npm-install receipt=no\n' >>"\$TEST_PRE_LOG"; fi
@@ -141,10 +165,7 @@ if [ "\$1" = install ]; then
     base=\${spec##*/}; base=\${base%.tgz}
     version=\${base##*-}
     package=\${base%-*}
-  else
-    package=\${spec%@*}
-    version=\${spec##*@}
-  fi
+  else exit 1; fi
   for row in "\${NPM_TOOL_PINS[@]}"; do
     IFS='|' read -r _name command_name candidate pinned _integrity guarded _channel <<<"\$row"
     [ "\$guarded" = yes ] || continue
@@ -211,6 +232,7 @@ run_tool() {
     TEST_RETIRE_AFTER_VIEW="${TEST_RETIRE_AFTER_VIEW:-}" \
     DEV_TOOLS_APPLY_PRIOR_ARTIFACT_DIR="${TEST_ARTIFACT_DIR:-}" \
     TEST_RECEIPT_DIR="${TEST_RECEIPT_DIR:-$RECEIPTS}" TEST_BAD_INSTALL="${TEST_BAD_INSTALL:-0}" \
+    TEST_TARGET_BODY="$TARGET_BODY" TEST_PRIOR_BODY="$PRIOR_BODY" TEST_TAMPER_PACK_SPEC="${TEST_TAMPER_PACK_SPEC:-}" \
     TEST_BREAK_RECEIPT="${TEST_BREAK_RECEIPT:-}" \
     "$APPLY" "$@"
 }
@@ -290,6 +312,36 @@ np=$(jq -ce '.tools[] | select(.name=="quota-axi")' "$RECEIPT") || fail 'the rec
 [ "$(jq -r '.rollback.restarts_services' "$RECEIPT")" = false ] || fail 'the receipt does not declare rollback as never restarting a service'
 converged || fail 'the apply did not converge every tool'
 pass 'the receipt is written mode 0600 before mutation and records exact prior, target, and completion'
+
+fake_install "$QUOTA_COMMAND" "$QUOTA_PRIOR"
+: >"$NPM_LOG"
+export TEST_TAMPER_PACK_SPEC="quota-axi@$QUOTA_VERSION"
+set +e
+json=$(run_tool --json)
+rc=$?
+set -e
+unset TEST_TAMPER_PACK_SPEC
+[ "$rc" -ne 0 ] || fail 'mutated apply archive exited successfully'
+[ "$(package_status "$json" quota-axi)" = refused ] || fail 'mutated apply archive was not refused'
+no_install_ran || fail 'mutated apply archive reached npm install'
+[ "$(tool_version "$QUOTA_COMMAND")" = "$QUOTA_PRIOR" ] || fail 'mutated apply archive changed the tool'
+fake_install "$QUOTA_COMMAND" "$QUOTA_VERSION"
+pass 'apply refuses archive bytes that differ from selected integrity'
+
+TAMPER_RECEIPT="$RECEIPTS/tampered-prior.json"
+jq '.tools |= map(select(.name == "quota-axi"))' "$RECEIPT" >"$TAMPER_RECEIPT"
+: >"$NPM_LOG"
+export TEST_TAMPER_PACK_SPEC="quota-axi@$QUOTA_PRIOR"
+set +e
+json=$(run_rollback "$TAMPER_RECEIPT" --attended --json)
+rc=$?
+set -e
+unset TEST_TAMPER_PACK_SPEC
+[ "$rc" -ne 0 ] || fail 'mutated prior archive exited successfully'
+[ "$(tool_status "$json" quota-axi)" = refused ] || fail 'mutated prior archive was not refused'
+no_install_ran || fail 'mutated prior archive reached npm install'
+converged || fail 'mutated prior archive changed the recorded target state'
+pass 'registry rollback refuses archive bytes that differ from recorded integrity'
 
 # --------------------------------- state at the recorded target is eligible
 
@@ -496,7 +548,7 @@ for tool in firstmate quota-axi gh-axi; do
   [ "$(tool_status "$json" "$tool")" = rolled_back ] || fail "the attended rollback did not complete for $tool"
 done
 at_prior || fail 'the attended rollback did not restore every recorded prior state'
-grep -Fq "install -g quota-axi@$QUOTA_PRIOR" "$NPM_LOG" || fail 'the attended rollback did not reinstall the exact recorded prior version'
+grep -Eq "install -g .*/quota-axi-$QUOTA_PRIOR\\.tgz$" "$NPM_LOG" || fail 'the attended rollback did not reinstall the verified prior archive'
 [ "$(grep -c 'install -g' "$NPM_LOG")" -eq 2 ] || fail 'the attended rollback installed something the receipt never recorded'
 [ ! -s "$LIFECYCLE_LOG" ] || fail 'rollback invoked Herdr or the shared no-mistakes daemon'
 settled=$(jq -ce '.tools[] | select(.name=="quota-axi")' "$RECEIPT")
@@ -887,8 +939,10 @@ cp "$TMP_ROOT/artifact.original" "$ARTIFACTS/quota-axi-$QUOTA_PRIOR.tgz"
 : >"$NPM_LOG"
 json=$(run_rollback "$ARTIFACT_RECEIPT" --attended --json)
 [ "$(tool_status "$json" quota-axi)" = rolled_back ] || fail 'an operator-supplied artifact could not be reversed'
-grep -Fq "install -g $ARTIFACTS/quota-axi-$QUOTA_PRIOR.tgz" "$NPM_LOG" \
-  || fail 'the reversal did not reinstall the recorded artifact file'
+grep -Eq "install -g .*/quota-axi-$QUOTA_PRIOR\\.tgz$" "$NPM_LOG" \
+  || fail 'the reversal did not reinstall the verified artifact copy'
+! grep -Fq "install -g $ARTIFACTS/quota-axi-$QUOTA_PRIOR.tgz" "$NPM_LOG" \
+  || fail 'the reversal installed the mutable operator artifact directly'
 [ "$(tool_version "$QUOTA_COMMAND")" = "$QUOTA_PRIOR" ] || fail 'the reversal did not restore the prior version'
 unset TEST_ARTIFACT_DIR
 publish "quota-axi@$QUOTA_PRIOR" "$QUOTA_PRIOR_INTEGRITY"
@@ -912,7 +966,7 @@ case "$(package_detail "$json" quota-axi)" in
   "could not verify the installed version $QUOTA_PRIOR against the registry or an operator-supplied artifact;"*) : ;;
   *) fail "an unrecordable mutation was refused for the wrong reason: $(package_detail "$json" quota-axi)" ;;
 esac
-! grep -Fq "install -g quota-axi@$QUOTA_VERSION" "$NPM_LOG" || fail 'a package with no reversal path was still installed'
+! grep -Eq "install -g .*/quota-axi-$QUOTA_VERSION\\.tgz$" "$NPM_LOG" || fail 'a package with no reversal path was still installed'
 [ "$(tool_version "$QUOTA_COMMAND")" = "$QUOTA_PRIOR" ] || fail 'a package with no reversal path was still changed'
 
 # The sibling with good evidence converges, and the receipt it produced is still
@@ -966,7 +1020,7 @@ rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail 'an artifact naming a different package exited successfully'
 [ "$(package_status "$json" quota-axi)" = refused ] || fail 'an artifact naming a different package was accepted as evidence'
-! grep -Fq "install -g quota-axi@$QUOTA_VERSION" "$NPM_LOG" || fail 'a mutation ran on unverified artifact evidence'
+! grep -Eq "install -g .*/quota-axi-$QUOTA_VERSION\\.tgz$" "$NPM_LOG" || fail 'a mutation ran on unverified artifact evidence'
 [ "$(tool_version "$QUOTA_COMMAND")" = "$QUOTA_PRIOR" ] || fail 'the tool was changed on unverified artifact evidence'
 make_artifact quota-axi "$QUOTA_PRIOR"
 unset TEST_ARTIFACT_DIR

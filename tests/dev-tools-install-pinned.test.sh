@@ -69,6 +69,8 @@ for repo_name in firstmate baby-menu; do
 done
 FIRSTMATE_TEST_REV=$(git -C "$ASSETS/firstmate-repo" rev-parse HEAD)
 BABY_MENU_TEST_REV=$(git -C "$ASSETS/baby-menu-repo" rev-parse HEAD)
+DEMO_BODY='demo archive'
+DEMO_INTEGRITY=$(node -e 'process.stdout.write("sha512-" + require("node:crypto").createHash("sha512").update(process.argv[1]).digest("base64"))' "$DEMO_BODY")
 
 PINS="$FIXTURE/pins.sh"
 cat >"$PINS" <<EOF
@@ -79,7 +81,7 @@ CURSOR_AGENT_OBSERVED_VERSION=2026.09.08-test
 CURSOR_INSTALLER_URL=https://cursor.invalid/install
 CURSOR_INSTALLER_SHA256=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 NPM_TOOL_PINS=(
-  'demo|demo|demo-package|1.2.3|sha512-ZGV0ZXJtaW5pc3RpYw==|yes|default'
+  'demo|demo|demo-package|1.2.3|$DEMO_INTEGRITY|yes|default'
 )
 EOF
 
@@ -92,15 +94,24 @@ set -eu
 printf '%s\n' "$*" >>"$TEST_NPM_LOG"
 if [ "$1" = view ]; then
   [ "${TEST_REGISTRY_FAIL:-0}" = 1 ] && exit 1
-  integrity=sha512-ZGV0ZXJtaW5pc3RpYw==
+  integrity=$TEST_DEMO_INTEGRITY
   [ "${TEST_BAD_INTEGRITY:-0}" = 1 ] && integrity=sha512-different
   if [ "$2" = demo-package@latest ]; then
-    integrity=${TEST_LATEST_INTEGRITY:-sha512-ZGV0ZXJtaW5pc3RpYw==}
+    integrity=${TEST_LATEST_INTEGRITY:-$TEST_DEMO_INTEGRITY}
   fi
   jq -cn --arg v "${TEST_LATEST_VERSION:-1.2.3}" --arg i "$integrity" '{version:$v,"dist.integrity":$i}'
   exit 0
 fi
+if [ "$1" = pack ]; then
+  [ "$2" = demo-package@1.2.3 ] && [ "$3" = --json ] && [ "$4" = --pack-destination ] || exit 1
+  body=$TEST_DEMO_BODY
+  [ "${TEST_PACK_TAMPERED:-0}" = 1 ] && body="$body tampered"
+  printf '%s' "$body" >"$5/demo-package-1.2.3.tgz"
+  jq -cn '[{name:"demo-package",version:"1.2.3",filename:"demo-package-1.2.3.tgz"}]'
+  exit 0
+fi
 if [ "$1" = install ]; then
+  [ -f "$3" ] && [ "$(cat "$3")" = "$TEST_DEMO_BODY" ] || exit 1
   mkdir -p "$NPM_CONFIG_PREFIX/bin"
   cat >"$NPM_CONFIG_PREFIX/bin/demo" <<'TOOL'
 #!/usr/bin/env bash
@@ -185,13 +196,13 @@ run_installer() {
     DEV_TOOLS_INSTALL_GIT_BIN="$FAKEBIN/git" \
     DEV_TOOLS_INSTALL_LOCAL_BIN="$LOCAL_BIN" DEV_TOOLS_UPDATE_NPM_PREFIX="$PREFIX" \
     TEST_HERDR_SHA="$HERDR_SHA" TEST_HERDR_TARGET="$HOST_HERDR_TARGET" TEST_PLATFORM="$HOST_PLATFORM" TEST_AGY_SUFFIX="$HOST_AGY_SUFFIX" TEST_TREE_SHA="${TEST_TREE_SHA_OVERRIDE:-$TREE_SHA}" TEST_NM_SHA="$NM_SHA" TEST_OTHER_SHA="$OTHER_SHA" TEST_RELEASE_LOG="$RELEASE_LOG" TEST_AGY_SHA_DEFAULT="$AGY_SHA" TEST_NPM_LOG="$NPM_LOG" TEST_ASSETS="$ASSETS" TEST_CURSOR_FETCHED="$FIXTURE/cursor-fetched" \
-    TEST_BAD_INTEGRITY="${TEST_BAD_INTEGRITY:-0}" TEST_REAL_GIT="$(command -v git)" "$INSTALLER" "$@"
+    TEST_BAD_INTEGRITY="${TEST_BAD_INTEGRITY:-0}" TEST_DEMO_BODY="$DEMO_BODY" TEST_DEMO_INTEGRITY="$DEMO_INTEGRITY" TEST_PACK_TAMPERED="${TEST_PACK_TAMPERED:-0}" TEST_REAL_GIT="$(command -v git)" "$INSTALLER" "$@"
 }
 
 run_installer --only demo >/dev/null
 [ -x "$PREFIX/bin/demo" ] || fail 'exact npm tool was not installed'
 grep -Fxq 'view demo-package@1.2.3 version dist.integrity --json' "$NPM_LOG" || fail 'npm artifact version and integrity were not re-verified'
-grep -Fxq 'install -g demo-package@1.2.3' "$NPM_LOG" || fail 'npm install did not use the exact version'
+grep -Eq 'install -g .*/demo-package-1\.2\.3\.tgz$' "$NPM_LOG" || fail 'npm install did not use the verified local archive'
 before=$(wc -l <"$NPM_LOG")
 run_installer --only demo >/dev/null
 [ "$(wc -l <"$NPM_LOG")" -eq "$before" ] || fail 'install-if-absent was not idempotent'
@@ -203,6 +214,14 @@ if run_installer --only demo >/dev/null 2>&1; then fail 'registry integrity drif
 [ ! -e "$PREFIX/bin/demo" ] || fail 'integrity refusal still installed the tool'
 unset TEST_BAD_INTEGRITY
 pass 'npm registry integrity drift is refused'
+
+export TEST_PACK_TAMPERED=1
+: >"$NPM_LOG"
+if run_installer --only demo >/dev/null 2>&1; then fail 'mutated publisher archive was accepted'; fi
+[ ! -e "$PREFIX/bin/demo" ] || fail 'mutated publisher archive installed a tool'
+! grep -Fq 'install -g' "$NPM_LOG" || fail 'mutated publisher archive reached npm install'
+unset TEST_PACK_TAMPERED
+pass 'fresh install refuses archive bytes that differ from selected integrity'
 
 : >"$NPM_LOG"
 SAFE_PINS=$PINS
@@ -324,14 +343,14 @@ pass 'publisher checksums verify on platforms that ship only shasum'
 # artifact again. Existing commands never trigger source discovery.
 SAFE_PINS=$PINS
 PINS="$FIXTURE/stable-pins.sh"
-sed 's/|1.2.3|sha512-ZGV0ZXJtaW5pc3RpYw==|/|latest|publisher|/' "$SAFE_PINS" >"$PINS"
+sed "s@|1.2.3|$DEMO_INTEGRITY|@|latest|publisher|@" "$SAFE_PINS" >"$PINS"
 rm -f "$PREFIX/bin/demo"
 : >"$NPM_LOG"
 run_installer --dry-run --only demo >/dev/null
 [ ! -e "$PREFIX/bin/demo" ] || fail 'stable preview installed a package'
 grep -Fq 'view demo-package@latest' "$NPM_LOG" || fail 'stable preview did not resolve publisher tag'
 run_installer --only demo >/dev/null
-grep -Fq 'install -g demo-package@1.2.3' "$NPM_LOG" || fail 'stable install used a moving npm argument'
+grep -Eq 'install -g .*/demo-package-1\.2\.3\.tgz$' "$NPM_LOG" || fail 'stable install did not use the verified local archive'
 before=$(wc -l <"$NPM_LOG")
 run_installer --only demo >/dev/null
 [ "$(wc -l <"$NPM_LOG")" -eq "$before" ] || fail 'installed stable tool triggered discovery'

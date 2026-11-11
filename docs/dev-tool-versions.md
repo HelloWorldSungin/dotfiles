@@ -101,7 +101,8 @@ Firstmate npm tools select the publisher default tag at invocation:
 `claude`, `codex`, `opencode`, `pi`, `gnhf`, `gh-axi`, `tasks-axi`,
 `quota-axi`, `chrome-devtools-axi`, and `lavish-axi`. The `latest|publisher`
 rows reject prereleases, a non-default channel, or missing integrity, then
-re-query the resolved exact version before installation. Receipts still bind
+re-query the resolved exact version and verify its packed archive against that
+integrity before installing the local tarball. Receipts still bind
 that exact version and integrity. `dev-tools-install-pinned` retains its
 command name and install-if-absent behavior: an existing command is skipped
 before discovery, including one outside the configured install prefix. A
@@ -115,8 +116,9 @@ is left in place. Herdr keeps its publisher stable manifest and attended
 boundary. Cursor remains the beta-only exception below.
 
 `dev-tools-apply-updates` independently resolves each moving npm target and
-requires it to match the checker's stable result. It then uses the existing
-exact integrity verification, active-worker protection, prefix observation,
+requires it to match the checker's stable result. It verifies the packed
+archive before previewing or installing from that local file, then uses the
+active-worker protection, prefix observation,
 prior-artifact evidence and mode-0600 receipt path. Receipts bind exact versions
 and integrity for rollback even after the tag moves. A newer numeric installed
 version is left alone; this policy does not automatically downgrade it. No
@@ -247,7 +249,8 @@ are also in the user environment, so they stay `user-env`: an operator whose
 `node` resolves to another build still sees that drift. Home Manager modules also own home-manager,
 Neovim, zsh, Starship, fzf, and Git. Neovim's fourteen plugin commits remain
 independently exact in `config/nvim/lazy-lock.json`; the initial lazy.nvim clone
-uses upstream's annotated `stable` tag, and the lock records its peeled commit.
+checks out that recorded commit. Intentional updates select upstream's annotated
+`stable` tag and record its peeled commit in the lock.
 
 ## Neovim plugin pins
 
@@ -407,7 +410,7 @@ tarball at `$DEV_TOOLS_APPLY_PRIOR_ARTIFACT_DIR/<package>-<version>.tgz`
 package at that version - the filename alone is never trusted, because
 `npm install -g <tarball>` takes its target from the contents - and its checksum
 then becomes the recorded prior evidence, pinning the bytes whose identity was
-verified. A reversal reinstalls that file after re-verifying the checksum,
+verified. A reversal reinstalls a private verified copy of that file,
 refusing if it has moved or changed. The installed version must also have a
 shape a reversal could restore (`X.Y.Z`, optionally with a fourth component); a
 prerelease or two-component version is refused rather than recorded as
@@ -469,7 +472,9 @@ and the tier never ends up half reverted.
 
 Reversal is then `git reset --hard <prior commit>` - never a force, and never a
 discard of local changes - and an npm reinstall of only the exact prior version
-the receipt records. Each re-proves its whole tier precondition immediately before
+the receipt records. Registry backed reversals verify the packed prior archive
+against the receipt's SHA-512 and install that local file; operator artifacts
+are copied and verified before installation. Each re-proves its whole tier precondition immediately before
 mutating, not only at preflight time: observed state, the worker lane, the branch
 and clean checkout with verified ancestry for Firstmate, and the recorded prior
 artifact evidence for npm. Bounded registry time separates the preflight from the

@@ -128,11 +128,15 @@ APPLY_BIN="$PACKAGED/bin/dev-tools-apply-updates"
 # shellcheck source=../config/dev-tools-versions.sh
 # shellcheck disable=SC1091
 source "$ROOT/config/dev-tools-versions.sh"
+TARGET_BODY='target archive'
+PRIOR_BODY='prior archive'
+TARGET_INTEGRITY=$(node -e 'process.stdout.write("sha512-" + require("node:crypto").createHash("sha512").update(process.argv[1]).digest("base64"))' "$TARGET_BODY")
+PRIOR_INTEGRITY=$(node -e 'process.stdout.write("sha512-" + require("node:crypto").createHash("sha512").update(process.argv[1]).digest("base64"))' "$PRIOR_BODY")
 for row in "${NPM_TOOL_PINS[@]}"; do
   IFS='|' read -r name command_name _package version integrity guarded _channel <<<"$row"
   [ "$name" = quota-axi ] || continue
   QUOTA_COMMAND=$command_name; QUOTA_VERSION=$version; QUOTA_INTEGRITY=$integrity
-  if [ "$version" = latest ]; then QUOTA_VERSION=1.2.3; QUOTA_INTEGRITY=sha512-ZGV0ZXJtaW5pc3RpYw==; fi
+  if [ "$version" = latest ]; then QUOTA_VERSION=1.2.3; QUOTA_INTEGRITY=$TARGET_INTEGRITY; fi
   [ "$guarded" = yes ] || fail 'quota-axi is no longer a guarded pin'
 done
 : "${QUOTA_VERSION:?quota-axi pin missing}"
@@ -170,12 +174,23 @@ if [ "\$1" = view ]; then
   version=\${2##*@}
   [ "\$version" = latest ] && version='$QUOTA_VERSION'
   if [ "\$version" = '$QUOTA_VERSION' ]; then integrity='$QUOTA_INTEGRITY'
-  else integrity="sha512-prior-\$version"
+  else integrity='$PRIOR_INTEGRITY'
   fi
   printf '{"version":"%s","dist.integrity":"%s"}\n' "\$version" "\$integrity"
   exit 0
 fi
+if [ "\$1" = pack ]; then
+  package=\${2%@*}
+  version=\${2##*@}
+  [ "\$3" = --json ] && [ "\$4" = --pack-destination ] || exit 1
+  filename="\$package-\$version.tgz"
+  if [ "\$version" = '$QUOTA_VERSION' ]; then body='$TARGET_BODY'; else body='$PRIOR_BODY'; fi
+  printf '%s' "\$body" >"\$5/\$filename"
+  printf '[{"name":"%s","version":"%s","filename":"%s"}]\n' "\$package" "\$version" "\$filename"
+  exit 0
+fi
 if [ "\$1" = install ]; then
+  [ -f "\$3" ] || exit 1
   mkdir -p "\$NPM_CONFIG_PREFIX/bin"
   printf '#!$BASH_BIN\nprintf "%s %s\\\\n"\n' '$QUOTA_COMMAND' '$QUOTA_VERSION' >"\$NPM_CONFIG_PREFIX/bin/$QUOTA_COMMAND"
   chmod +x "\$NPM_CONFIG_PREFIX/bin/$QUOTA_COMMAND"
@@ -275,7 +290,7 @@ for wrapper in dev-tools-check-updates dev-tools-install-pinned npm-run-latest-s
     store_path=${entry%/bin}
     # A wrapper may depend on a sibling wrapper; those are not nixpkgs packages.
     case "$store_path" in
-      *-dev-tools-check-updates|*-dev-tools-versions.sh|*-skill-reviewed-updates|*-npm-run-latest-stable) continue ;;
+      *-dev-tools-check-updates|*-dev-tools-versions.sh|*-skill-reviewed-updates|*-npm-run-latest-stable|*-npm-pack-verified) continue ;;
     esac
     printf '%s\n' "$PINNED_PATHS" | grep -Fqx "$store_path" \
       || fail "$wrapper depends on ${store_path##*/} but no NIX_PACKAGE_PINS row names it"
@@ -339,7 +354,7 @@ for wrapper in dev-tools-check-updates dev-tools-install-pinned npm-run-latest-s
     case "$entry" in /nix/store/*) : ;; *) continue ;; esac
     store_path=${entry%/bin}
     case "$store_path" in
-      *-dev-tools-check-updates|*-dev-tools-versions.sh|*-skill-reviewed-updates|*-npm-run-latest-stable) continue ;;
+      *-dev-tools-check-updates|*-dev-tools-versions.sh|*-skill-reviewed-updates|*-npm-run-latest-stable|*-npm-pack-verified) continue ;;
     esac
     printf '%s' "$MANIFEST" | jq -e --arg p "$store_path" 'any(.[]; .store_path == $p)' >/dev/null && continue
     attr=$(awk -v p="$store_path" '$2 == p {print $1}' <<<"$PINNED_ROWS")
