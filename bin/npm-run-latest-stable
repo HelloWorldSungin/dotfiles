@@ -23,4 +23,27 @@ exact_integrity=$(printf '%s' "$exact" | jq -er '."dist.integrity" // .dist.inte
   exit 1
 }
 
-exec "$NPX_BIN" -y "$package@$version" "$@"
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/npm-latest-stable.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+packed=$($NPM_BIN pack "$package@$version" --json --pack-destination "$tmp")
+packed_name=$(printf '%s' "$packed" | jq -er 'if type == "array" and length == 1 then .[0].name | strings else empty end')
+packed_version=$(printf '%s' "$packed" | jq -er 'if type == "array" and length == 1 then .[0].version | strings else empty end')
+packed_filename=$(printf '%s' "$packed" | jq -er 'if type == "array" and length == 1 then .[0].filename | strings else empty end')
+[ "$packed_name" = "$package" ] && [ "$packed_version" = "$version" ] && [ "$packed_filename" = "$package-$version.tgz" ] || {
+  printf 'npm-run-latest-stable: packed artifact identity changed\n' >&2
+  exit 1
+}
+archive="$tmp/$packed_filename"
+[ -f "$archive" ] || { printf 'npm-run-latest-stable: packed artifact missing\n' >&2; exit 1; }
+actual=$(node -e '
+  const fs = require("node:fs");
+  const crypto = require("node:crypto");
+  const hash = crypto.createHash("sha512");
+  fs.createReadStream(process.argv[1])
+    .on("data", chunk => hash.update(chunk))
+    .on("end", () => process.stdout.write("sha512-" + hash.digest("base64")))
+    .on("error", () => process.exit(1));
+' "$archive")
+[ "$actual" = "$integrity" ] || { printf 'npm-run-latest-stable: packed artifact integrity changed\n' >&2; exit 1; }
+
+"$NPX_BIN" -y "$archive" "$@"

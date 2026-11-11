@@ -56,6 +56,17 @@ package=${spec%@latest}
 field=$3
 # shellcheck source=/dev/null
 source "$TEST_PINS"
+if [ "$1" = pack ]; then
+  [ "$3" = --json ] && [ "$4" = --pack-destination ] || exit 1
+  package=${2%@*}
+  version=${2##*@}
+  filename="$package-$version.tgz"
+  body="artifact:$package@$version"
+  [ "$package" = "${TEST_ACP_TAMPERED_PACKAGE:-}" ] && body="$body:tampered"
+  printf '%s' "$body" >"$5/$filename"
+  jq -cn --arg name "$package" --arg v "$version" --arg f "$filename" '[{name:$name,version:$v,filename:$f}]'
+  exit 0
+fi
 if [ "${4:-}" = dist.integrity ]; then
   package=${2%@*}
   version=${2##*@}
@@ -66,7 +77,9 @@ if [ "${4:-}" = dist.integrity ]; then
     *) exit 1 ;;
   esac
   [ "$version" = latest ] && version=$expected
-  jq -cn --arg v "$version" --arg i 'sha512-ZGV0ZXJtaW5pc3RpYw==' '{version:$v,"dist.integrity":$i}'
+  body="artifact:$package@$version"
+  integrity=$(node -e 'process.stdout.write("sha512-" + require("node:crypto").createHash("sha512").update(process.argv[1]).digest("base64"))' "$body")
+  jq -cn --arg v "$version" --arg i "$integrity" '{version:$v,"dist.integrity":$i}'
   exit 0
 fi
 version=
@@ -90,7 +103,10 @@ SH
 
 cat >"$FAKEBIN/npx" <<'SH'
 #!/usr/bin/env bash
-printf '%s\n' "$*" >>"$TEST_NPX_LOG"
+[ "$1" = -y ] && [ -f "$2" ] || exit 1
+body=$(cat "$2")
+shift 2
+printf '%s|%s\n' "$body" "$*" >>"$TEST_NPX_LOG"
 SH
 
 cat >"$FAKEBIN/curl" <<'SH'
@@ -362,8 +378,8 @@ for agent in opencode omp; do
   env PATH="$ROOT/bin:$PATH" TEST_PINS="$PINS" TEST_CALL_LOG="$CALL_LOG" TEST_NPX_LOG="$NPX_LOG" \
     DEV_TOOLS_NPM_BIN="$FAKEBIN/npm" DEV_TOOLS_NPX_BIN="$FAKEBIN/npx" bash -c "$launch"
 done
-grep -Fxq -- "-y opencode-ai@$OPENCODE_ACP_VERSION acp" "$NPX_LOG" || fail 'OpenCode ACP did not execute the resolved stable version'
-grep -Fxq -- "-y omp-acp@$OMP_ACP_VERSION" "$NPX_LOG" || fail 'OMP ACP did not execute the resolved stable version'
+grep -Fxq -- "artifact:opencode-ai@$OPENCODE_ACP_VERSION|acp" "$NPX_LOG" || fail 'OpenCode ACP did not execute the resolved stable archive'
+grep -Fxq -- "artifact:omp-acp@$OMP_ACP_VERSION|" "$NPX_LOG" || fail 'OMP ACP did not execute the resolved stable archive'
 : >"$NPX_LOG"
 export TEST_OPENCODE_ACP_RELEASE=7.8.9 TEST_OMP_ACP_RELEASE=8.9.10
 for agent in opencode omp; do
@@ -373,8 +389,19 @@ for agent in opencode omp; do
 done
 unset TEST_OPENCODE_ACP_RELEASE TEST_OMP_ACP_RELEASE
 [ "$(wc -l <"$NPX_LOG")" -eq 2 ] || fail 'ACP launch count changed after registry updates'
-grep -Fxq -- '-y opencode-ai@7.8.9 acp' "$NPX_LOG" || fail 'OpenCode ACP ignored the newer stable release'
-grep -Fxq -- '-y omp-acp@8.9.10' "$NPX_LOG" || fail 'OMP ACP ignored the newer stable release'
+grep -Fxq -- 'artifact:opencode-ai@7.8.9|acp' "$NPX_LOG" || fail 'OpenCode ACP ignored the newer stable release'
+grep -Fxq -- 'artifact:omp-acp@8.9.10|' "$NPX_LOG" || fail 'OMP ACP ignored the newer stable release'
+for agent in opencode omp; do
+  case "$agent" in opencode) export TEST_ACP_TAMPERED_PACKAGE=opencode-ai ;; omp) export TEST_ACP_TAMPERED_PACKAGE=omp-acp ;; esac
+  : >"$NPX_LOG"
+  launch=$(jq -er --arg name "$agent" '.[] | select(.name == $name) | .launchCommand' "$ROOT/config/baby-menu/agents.json")
+  if env PATH="$ROOT/bin:$PATH" TEST_PINS="$PINS" TEST_CALL_LOG="$CALL_LOG" TEST_NPX_LOG="$NPX_LOG" \
+    DEV_TOOLS_NPM_BIN="$FAKEBIN/npm" DEV_TOOLS_NPX_BIN="$FAKEBIN/npx" bash -c "$launch" >/dev/null 2>&1; then
+    fail "$agent accepted an archive whose bytes differ from selected integrity"
+  fi
+  [ ! -s "$NPX_LOG" ] || fail "$agent executed a mismatched archive"
+  unset TEST_ACP_TAMPERED_PACKAGE
+done
 export TEST_LAZY_STABLE_COMMIT=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 stable_json=$(run_checker --json --force --no-cache)
 unset TEST_LAZY_STABLE_COMMIT

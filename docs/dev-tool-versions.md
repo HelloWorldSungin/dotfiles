@@ -33,7 +33,7 @@ alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
 | quota-axi | Latest stable at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify exact artifact | Guarded exact apply with receipts |
 | chrome-devtools-axi | Latest stable at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify exact artifact | Guarded exact apply with receipts |
 | lavish-axi | Latest stable at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify exact artifact | Guarded exact apply with receipts |
-| OpenCode ACP invocation | Latest stable per launch | npm default tag; numeric version and publisher integrity verified before exact `npx` invocation | `npm-run-latest-stable` in `config/baby-menu/agents.json` | Report only |
+| OpenCode ACP invocation | Latest stable per launch | npm default tag; numeric version and publisher SHA-512 verified against the packed archive before local-tarball `npx` invocation | `npm-run-latest-stable` in `config/baby-menu/agents.json` | Report only |
 | OMP ACP invocation | Latest stable per launch | Same verified npm selection | `npm-run-latest-stable` in `config/baby-menu/agents.json` | Report only |
 | claude-spend invocation | Latest stable per launch | Same verified npm selection | The `cspend` alias delegates to `npm-run-latest-stable` | Report only |
 | Firstmate source | Current upstream `main` | Authoritative default branch commit resolved once and verified after clone or fetch | Exact resolved commit on `main` | Guarded fast-forward with receipt |

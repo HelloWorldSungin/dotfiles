@@ -5,9 +5,34 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/nvim-stable-tests.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
 command -v nvim >/dev/null 2>&1 || { printf 'missing test dependency: nvim\n' >&2; exit 1; }
+command -v nix >/dev/null 2>&1 || { printf 'missing test dependency: nix\n' >&2; exit 1; }
 
+REPO="$TMP_ROOT/lazy-remote"
+mkdir -p "$REPO" "$TMP_ROOT/bin"
+git -C "$REPO" init -q -b main
+printf 'old stable\n' >"$REPO/release"
+git -C "$REPO" add release
+git -C "$REPO" -c user.email=tests@example.invalid -c user.name=tests commit -qm old-stable
+git -C "$REPO" tag v1.0.0
+printf 'current stable\n' >>"$REPO/release"
+git -C "$REPO" -c user.email=tests@example.invalid -c user.name=tests commit -qam current-stable
+STABLE_COMMIT=$(git -C "$REPO" rev-parse HEAD)
+git -C "$REPO" -c user.email=tests@example.invalid -c user.name=tests tag -am stable stable
+git -C "$REPO" -c user.email=tests@example.invalid -c user.name=tests tag -am v2.0.0 v2.0.0
+printf 'preview\n' >>"$REPO/release"
+git -C "$REPO" -c user.email=tests@example.invalid -c user.name=tests commit -qam preview
+git -C "$REPO" tag v3.0.0-beta.1
+
+LAZY_SOURCE=$(nix build --no-link --print-out-paths --impure --expr \
+  'let flake = builtins.getFlake (toString ./.); in (builtins.getAttr builtins.currentSystem flake.inputs.nixpkgs.legacyPackages).vimPlugins.lazy-nvim')
+[ -f "$LAZY_SOURCE/lua/lazy/manage/git.lua" ] || { printf 'lazy.nvim resolver unavailable in Nix package\n' >&2; exit 1; }
 cat >"$TMP_ROOT/check.lua" <<'LUA'
+local source = os.getenv("TEST_LAZY_SOURCE")
+package.path = source .. "/lua/?.lua;" .. source .. "/lua/?/init.lua;" .. package.path
+local git = require("lazy.manage.git")
 local directory = os.getenv("TEST_PLUGIN_DIR")
+local repository = os.getenv("TEST_LAZY_REPO")
+local stable_commit = os.getenv("TEST_STABLE_COMMIT")
 local expected = {
   ["NeogitOrg/neogit"] = true,
   ["lewis6991/gitsigns.nvim"] = true,
@@ -23,7 +48,12 @@ for _, file in ipairs({ "editing.lua", "git.lua", "markdown.lua", "navigation.lu
   for _, spec in ipairs(dofile(directory .. "/" .. file)) do
     local name = spec[1]
     if expected[name] then
-      assert(spec.version == "*", name .. " does not select the latest stable SemVer release")
+      spec.dir = repository
+      spec.branch = "main"
+      spec._ = {}
+      local target = git.get_target(spec)
+      assert(target and target.tag == "v2.0.0", name .. " selected a prerelease or stale tag")
+      assert(target.commit == stable_commit, name .. " selected the wrong commit")
       seen[name] = true
     end
   end
@@ -33,18 +63,9 @@ for name in pairs(expected) do
 end
 LUA
 
-TEST_PLUGIN_DIR="$ROOT/config/nvim/lua/plugins" nvim -u NONE -i NONE --headless \
+TEST_LAZY_SOURCE="$LAZY_SOURCE" TEST_LAZY_REPO="$REPO" TEST_STABLE_COMMIT="$STABLE_COMMIT" \
+  TEST_PLUGIN_DIR="$ROOT/config/nvim/lua/plugins" nvim -u NONE -i NONE --headless \
   -c "luafile $TMP_ROOT/check.lua" -c 'qa!'
-REPO="$TMP_ROOT/lazy-remote"
-mkdir -p "$REPO" "$TMP_ROOT/bin"
-git -C "$REPO" init -q -b main
-printf 'stable\n' >"$REPO/release"
-git -C "$REPO" add release
-git -C "$REPO" -c user.email=tests@example.invalid -c user.name=tests commit -qm stable
-STABLE_COMMIT=$(git -C "$REPO" rev-parse HEAD)
-git -C "$REPO" -c user.email=tests@example.invalid -c user.name=tests tag -am stable stable
-printf 'development\n' >>"$REPO/release"
-git -C "$REPO" -c user.email=tests@example.invalid -c user.name=tests commit -qam development
 cat >"$TMP_ROOT/bin/git" <<'SH'
 #!/usr/bin/env bash
 args=()
@@ -69,4 +90,4 @@ TEST_NVIM_INIT="$ROOT/config/nvim/init.lua" TEST_LAZY_REPO="$REPO" TEST_REAL_GIT
   exit 1
 }
 printf 'ok - lazy.nvim bootstrap selects the peeled stable tag\n'
-printf 'ok - loaded Neovim plugin specs select stable SemVer\n'
+printf 'ok - lazy.nvim resolves loaded plugins to stable SemVer tags\n'
