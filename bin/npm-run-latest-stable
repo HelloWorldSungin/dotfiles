@@ -9,7 +9,12 @@ NPM_PACK_BIN=${DEV_TOOLS_NPM_PACK_BIN:-$SELF_DIR/npm-pack-verified}
 [ "$#" -ge 1 ] || { printf 'npm-run-latest-stable: package required\n' >&2; exit 2; }
 package=$1
 shift
-case "$package" in opencode-ai|omp-acp|claude-spend) ;; *) printf 'npm-run-latest-stable: unsupported package: %s\n' "$package" >&2; exit 2 ;; esac
+case "$package" in
+  opencode-ai) command_name=opencode ;;
+  omp-acp) command_name=omp-acp ;;
+  claude-spend) command_name=claude-spend ;;
+  *) printf 'npm-run-latest-stable: unsupported package: %s\n' "$package" >&2; exit 2 ;;
+esac
 
 latest=$($NPM_BIN view "$package@latest" version dist.integrity --json)
 version=$(printf '%s' "$latest" | jq -er '.version | strings')
@@ -32,4 +37,4 @@ archive=$("$NPM_PACK_BIN" "$NPM_BIN" "$package" "$version" "$integrity" "$tmp") 
   exit 1
 }
 
-"$NPX_BIN" -y "$archive" "$@"
+"$NPX_BIN" --yes --package="$archive" "$command_name" "$@"

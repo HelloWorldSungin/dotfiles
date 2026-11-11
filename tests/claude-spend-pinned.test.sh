@@ -39,8 +39,10 @@ SH
 cat >"$STUB_BIN/npx" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$@" >"$TEST_ARGV_LOG"
-[ -f "$2" ] || exit 1
-cat "$2" >"$TEST_ARCHIVE_LOG"
+[ "$1" = --yes ] && [ "$3" = claude-spend ] || exit 1
+case "$2" in --package=*) archive=${2#--package=} ;; *) exit 1 ;; esac
+[ -f "$archive" ] || exit 1
+cat "$archive" >"$TEST_ARCHIVE_LOG"
 SH
 chmod +x "$STUB_BIN/npm" "$STUB_BIN/npx"
 
@@ -61,7 +63,7 @@ run_alias() {
 
 run_alias
 [ "$(cat "$ARCHIVE_LOG")" = 'artifact:claude-spend@1.0.6' ] || fail 'cspend did not launch the resolved stable archive'
-[ "$(sed -n '3p' "$ARGV_LOG")" = --report ] || fail 'cspend lost its argument'
+[ "$(sed -n '4p' "$ARGV_LOG")" = --report ] || fail 'cspend lost its argument'
 pass 'cspend resolves and executes the verified stable archive'
 
 export TEST_LATEST_VERSION=9.8.7

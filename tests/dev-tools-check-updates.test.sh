@@ -103,9 +103,12 @@ SH
 
 cat >"$FAKEBIN/npx" <<'SH'
 #!/usr/bin/env bash
-[ "$1" = -y ] && [ -f "$2" ] || exit 1
-body=$(cat "$2")
-shift 2
+[ "$1" = --yes ] || exit 1
+case "$2" in --package=*) archive=${2#--package=} ;; *) exit 1 ;; esac
+[ -f "$archive" ] || exit 1
+case "$3" in opencode|omp-acp) : ;; *) exit 1 ;; esac
+body=$(cat "$archive")
+shift 3
 printf '%s|%s\n' "$body" "$*" >>"$TEST_NPX_LOG"
 SH
 

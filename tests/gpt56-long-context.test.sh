@@ -2,7 +2,7 @@
 # Behavior tests for the GPT long-context configuration (GPT-5.6 Sol/Terra and
 # GPT-6 Astra/Sol):
 #   - pi/models.json: the exact five openai-codex modelOverrides.
-#   - the installed Pi package (from the npm prefix) applying them, and its
+#   - the installed Pi package applying them, and its
 #     shouldCompact threshold at contextWindow minus the configured reserve.
 #   - bin/codex-set-context-window: the narrowly scoped, atomic, idempotent
 #     merge of the three owned keys into a machine-maintained config.toml.
@@ -80,9 +80,34 @@ pass "pi/models.json changes no default model, effort, or Luna"
 # configured reserve, and shouldCompact is the same predicate the session uses.
 # Live provider probes stay out of this suite.
 command -v node >/dev/null 2>&1 || fail "missing test dependency: node"
-PI_PKG="${NPM_CONFIG_PREFIX:-$HOME/.npm-global}/lib/node_modules/@earendil-works/pi-coding-agent"
-jq -e '.name == "@earendil-works/pi-coding-agent"' "$PI_PKG/package.json" >/dev/null \
-  || fail "missing or invalid test dependency: $PI_PKG"
+pi_command=$(command -v pi) || fail "missing test dependency: pi"
+PI_PKG=$(node "$ROOT/tests/pi-installed-package.mjs" "$pi_command") \
+  || fail "missing or invalid installed Pi package"
+
+# The lookup follows either npm's bin link or the managed launcher's selected
+# release. Both fixtures carry the package identity independently of the lookup.
+fixture_pkg="$TMP_ROOT/npm/lib/node_modules/@earendil-works/pi-coding-agent"
+mkdir -p "$fixture_pkg/dist/bundle" "$TMP_ROOT/npm/bin"
+printf '%s\n' '{"name":"@earendil-works/pi-coding-agent"}' > "$fixture_pkg/package.json"
+printf '#!/bin/sh\n' > "$fixture_pkg/dist/bundle/cli.js"
+ln -s ../lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js "$TMP_ROOT/npm/bin/pi"
+assert_eq "$(node "$ROOT/tests/pi-installed-package.mjs" "$TMP_ROOT/npm/bin/pi")" \
+  "$fixture_pkg" "npm Pi executable resolves to its package"
+
+managed="$TMP_ROOT/managed/agent"
+managed_pkg="$managed/install/releases/1.5.2/node_modules/@earendil-works/pi-coding-agent"
+mkdir -p "$managed/bin" "$managed/install" "$managed_pkg/dist/bundle" \
+  "$managed/install/releases/1.5.2/node_modules/.bin" "$TMP_ROOT/managed/local"
+printf '#!/bin/sh\n' > "$managed/bin/pi"
+printf '1.5.2\n' > "$managed/install/current-version"
+printf '%s\n' '{"name":"@earendil-works/pi-coding-agent"}' > "$managed_pkg/package.json"
+printf '#!/bin/sh\n' > "$managed_pkg/dist/bundle/cli.js"
+ln -s ../@earendil-works/pi-coding-agent/dist/bundle/cli.js \
+  "$managed/install/releases/1.5.2/node_modules/.bin/pi"
+ln -s ../agent/bin/pi "$TMP_ROOT/managed/local/pi"
+assert_eq "$(node "$ROOT/tests/pi-installed-package.mjs" "$TMP_ROOT/managed/local/pi")" \
+  "$managed_pkg" "managed Pi executable resolves through its selected release"
+pass "installed Pi lookup supports npm and managed release layouts"
 
 pi_compact_probe() {
   local models_json=$1

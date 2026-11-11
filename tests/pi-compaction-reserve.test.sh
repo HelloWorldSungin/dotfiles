@@ -128,9 +128,9 @@ pass "a non-object model override is refused and left untouched"
 
 # ----------------------------- installed Pi resolves the trigger per model
 command -v node >/dev/null 2>&1 || fail "missing test dependency: node"
-PI_PKG="${NPM_CONFIG_PREFIX:-$HOME/.npm-global}/lib/node_modules/@earendil-works/pi-coding-agent"
-jq -e '.name == "@earendil-works/pi-coding-agent"' "$PI_PKG/package.json" >/dev/null \
-  || fail "missing or invalid test dependency: $PI_PKG"
+pi_command=$(command -v pi) || fail "missing test dependency: pi"
+PI_PKG=$(node "$ROOT/tests/pi-installed-package.mjs" "$pi_command") \
+  || fail "missing or invalid installed Pi package"
 
 probe_dir="$TMP_ROOT/probe"
 mkdir -p "$probe_dir"
@@ -288,10 +288,8 @@ assert d["badCount"] == 0, d
 PY
 pass "without an ordinary reserve, both Luna models trigger above 150000 and other models stay on the built-in 16384"
 
-# GPT-6.1 Sol is absent from the bundled catalog. Pi ignores an unknown
-# models.json override until a newer catalog overlay lists the id. This fixture
-# publishes that one model at the catalog default, then checks Astra's window
-# and the 512000 trigger.
+# The installed catalog includes GPT-6.1 Sol. Check its resolved window and
+# trigger beside Astra rather than manufacturing a replacement catalog entry.
 gpt61="$TMP_ROOT/gpt61"
 mkdir -p "$gpt61"
 cp "$MODELS_JSON" "$gpt61/models.json"
@@ -299,29 +297,13 @@ run_merge "$gpt61/settings.json" || fail "gpt-6.1 settings merge failed"
 gpt61_json="$TMP_ROOT/gpt61.json"
 PI_OFFLINE=1 node --input-type=module - "$PI_PKG" "$gpt61" > "$gpt61_json" <<'NODE' \
   || fail "gpt-6.1 catalog probe failed"
-import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 const pkg = process.argv[2];
 const agentDir = process.argv[3];
-const { OPENAI_CODEX_MODELS } = await import(pkg + "/node_modules/@earendil-works/pi-ai/dist/providers/openai-codex.models.js");
-const base = OPENAI_CODEX_MODELS["gpt-6-sol"];
-writeFileSync(join(agentDir, "models-store.json"), JSON.stringify({
-  "openai-codex": {
-    lastModified: Date.now() + 86_400_000,
-    models: [{ ...base, id: "gpt-6.1-sol", name: "GPT-6.1 Sol", contextWindow: 272000 }],
-  },
-}));
 const { ModelRuntime, SettingsManager, shouldCompact } = await import(pkg + "/dist/index.js");
 const runtime = await ModelRuntime.create({
   modelsPath: join(agentDir, "models.json"),
   authPath: join(agentDir, "auth.json"),
-  refreshOnCreate: true,
-  allowModelNetwork: false,
-});
-const absent = await ModelRuntime.create({
-  modelsPath: join(agentDir, "models.json"),
-  authPath: join(agentDir, "absent-auth.json"),
-  modelsStorePath: join(agentDir, "missing-store.json"),
   refreshOnCreate: false,
   allowModelNetwork: false,
 });
@@ -340,7 +322,6 @@ function row(model) {
 const model = runtime.getModel("openai-codex", "gpt-6.1-sol");
 const astra = runtime.getModel("openai-codex", "gpt-6-astra");
 process.stdout.write(JSON.stringify({
-  bundledAbsent: absent.getModel("openai-codex", "gpt-6.1-sol") == null,
   gpt61: row(model),
   astra: row(astra),
 }));
@@ -348,7 +329,6 @@ NODE
 python3 - "$gpt61_json" <<'PY' || fail "gpt-6.1 trigger assertions failed"
 import json, sys
 d = json.load(open(sys.argv[1]))
-assert d["bundledAbsent"] is True, d
 for name in ("gpt61", "astra"):
     row = d[name]
     assert row["contextWindow"] == 872000, (name, row)
@@ -357,6 +337,6 @@ for name in ("gpt61", "astra"):
     assert row["compactAtThreshold"] is False, (name, row)
     assert row["compactAtPlusOne"] is True, (name, row)
 PY
-pass "when the catalog lists gpt-6.1-sol, Pi matches Astra at 872000 and compacts above 512000"
+pass "installed GPT-6.1 Sol matches Astra at 872000 and compacts above 512000"
 
 printf '\nall Pi compaction reserve tests passed\n'
