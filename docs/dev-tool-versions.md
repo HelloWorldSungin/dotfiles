@@ -23,8 +23,8 @@ alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
 | Pi | Latest at invocation | `@earendil-works/pi-coding-agent` default tag. The retired Mario Zechner package is not the fleet distribution | Resolve version and integrity, then verify the exact artifact. Install-if-absent | Report only |
 | Antigravity CLI | Latest production manifest at invocation | Google's per-platform production manifest | Publisher asset and SHA-512 from that manifest. Install-if-absent | Report only; its own self-update remains an upstream limitation |
 | Cursor Agent | 2026.09.08-6caf4ff | Version embedded in Cursor's official moving installer | No automated install; observed snapshot only | Report only |
-| Treehouse | 2.3.0 | Latest non-draft, non-prerelease GitHub release | Exact release archive and publisher checksum | Report only |
-| no-mistakes | 1.72.0 | Latest GitHub GA release; 1.73.0 and 1.74.0 prereleases are excluded | Exact release archive and publisher checksum | Attended only |
+| Treehouse | Latest stable at invocation | Latest non-draft, non-prerelease GitHub release, resolved once per operation | Release archive verified against that release's publisher `checksums.txt`, only when absent | Report only |
+| no-mistakes | Latest stable at invocation | Latest non-draft, non-prerelease GitHub release; later prerelease tags are excluded automatically | Release archive verified against that release's publisher `checksums.txt`, only when absent | Attended only |
 | Herdr | Latest stable at invocation | `herdr.dev/latest.json` | Publisher asset and SHA-256, only when absent | Attended compatibility review; activation deferred |
 | GBrain | 0.48.5.0 | Latest non-draft, non-prerelease `garrytan/gbrain` release | Not installed here | Firstmate-owned attended migration |
 | gnhf | Latest at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify the exact artifact | Guarded exact apply with receipts |
@@ -123,7 +123,22 @@ version is left alone; this policy does not automatically downgrade it. No
 background apply timer is added. Busy lanes defer the current invocation; a
 later manual invocation retries. There is no durable retry queue, automatic
 retry hook, cross-session usage authority or admission protocol. no-mistakes
-remains pinned and attended-only.
+stays attended-only.
+
+Treehouse and no-mistakes select the latest non-draft, non-prerelease GitHub
+release (`latest|latest-archive` rows). The installer resolves that release once
+per operation, fetches the same release's publisher `checksums.txt`, requires
+exactly one SHA-256 entry for the platform archive, verifies the downloaded
+archive against it, and requires the archive's own binary to report the resolved
+version before anything is installed. A missing or ambiguous checksum entry, a
+mismatch, a draft, a prerelease, a non-numeric tag or a version mismatch installs
+nothing. Existing commands are never replaced or upgraded by bootstrap, and this
+policy never starts, stops or restarts the no-mistakes daemon. Treehouse 3.x
+reads the 2.x pool format and keeps every lease, but `treehouse status` rewrites
+the pool state to version 4 and its dirty return and interactive exit paths now
+exit 3 instead of 0 (Firstmate's machine callers use `get --lease` and
+`return --force`, which are unaffected); activating it on a live pool is an
+attended step, not part of this policy.
 
 Herdr uses the top-level version, platform asset URL and SHA-256 from the
 [publisher stable manifest](https://herdr.dev/latest.json), never its preview
@@ -155,11 +170,11 @@ for the Firstmate tools above.
 |---|---|---|
 | Cursor Agent | Beta only. Upstream publishes a moving installer and auto-update, with no stable or exact-version selector and no publisher checksum. The checker records the observed snapshot and never runs the installer. | Remove when Cursor publishes a stable exact-version artifact and a publisher checksum the existing checker can verify. |
 | Firstmate source | Exact audited commit. Guarded apply fast-forwards only to that commit after proving it is on authoritative `main`. A checkout that is ahead, diverged, or dirty is refused. Latest selection does not reset, rebase, or discard local commits. | Remove when that checkout is a clean fast-forward of upstream `main` and no local commits remain. Until then the target stays the audited commit. |
-| Treehouse and no-mistakes | GitHub latest does not publish a checksum the existing archive installer can bind. Recorded release SHA-256 stays the verification receipt, so it also stays the selection. no-mistakes stays attended-only; this policy never starts or restarts its daemon. | Remove a tool's exact archive pin when its non-prerelease latest release publishes a checksum this installer already knows how to verify. no-mistakes also stays attended while its daemon can still be serving a live validation. |
 | GBrain | Excluded. No upgrade, patch, or dream path is selected here. The report-only row stays at its recorded release. | Remove only through Firstmate's own migration procedure, not through this updater. |
 | Baby Menu, Kun loader, Matt Pocock skills | Baby Menu is a detached release checkout and an existing repository is never moved. Kun and Matt stay on the reviewed adopt path; Matt live bytes belong to Claude marketplace autoUpdate. | Remove when that existing adopt path can resolve a non-prerelease latest and verify it without writing live skill stores or moving a checkout that already exists. |
 | OpenCode ACP, OMP ACP, claude-spend | Launch and wrapper specs. `npx` has no integrity re-check in this repository, so those specs stay exact while the OpenCode CLI install resolves latest. | Remove when the launch path re-verifies registry integrity the way `dev-tools-install-pinned` does. |
-| Nixpkgs, Home Manager, Nix installer, CI action SHAs, Neovim plugins | OS and base packages, workflow action commits, and editor plugins. Not Firstmate developer-tool selection. `flake.lock` is unchanged. Model defaults are unchanged. | Remove only in a change whose scope is that lock, workflow, or package set. This policy does not edit them. |
+| Determinate Nix Installer | The moving installer script has no publisher checksum channel: `install.determinate.systems/nix/tag/v3.22.3/nix-installer.sh.sha256` answered 404 on 2026-11-11, so the recorded script SHA-256 is the only verification receipt. | Remove when Determinate publishes a per-tag installer checksum the bootstrap can verify. |
+| Nixpkgs, Home Manager, CI action SHAs, Neovim plugins | OS and base packages, workflow action commits, and editor plugins. Not Firstmate developer-tool selection. `flake.lock` is unchanged. Model defaults are unchanged. | Remove only in a change whose scope is that lock, workflow, or package set. This policy does not edit them. |
 
 Source inspection on 2026-09-15 confirmed the Herdr manifest schema and
 WezTerm stable cask instructions. npm documents its default `latest` lookup in
@@ -470,7 +485,7 @@ both directions.
    from `dev-tools-apply-updates --rollback <receipt>`.
 4. Upgrade no-mistakes separately in an attended window. Confirm there is no
    active shared-daemon work before touching its binary or daemon, then validate
-   the installed version against the pin.
+   the installed version against the checker's latest stable result.
 5. Upgrade Herdr separately in an attended window using its publisher-owned
    update flow. Review client/server compatibility and release notes first, and
    verify the live fleet is clear before any server lifecycle action.

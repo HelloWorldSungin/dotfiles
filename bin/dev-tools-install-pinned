@@ -30,8 +30,10 @@ versions are re-verified against their recorded registry integrity before npm
 installs them. Firstmate npm tools marked latest|publisher resolve the default
 tag and its integrity first, rejecting prereleases and a non-default channel.
 Herdr resolves its stable manifest asset and checksum. Antigravity resolves
-Google's production manifest and SHA-512. Other release archives retain
-recorded publisher checksums. Herdr and no-mistakes are install-if-absent
+Google's production manifest and SHA-512. Treehouse and no-mistakes resolve the
+latest non-draft, non-prerelease GitHub release once, then verify that release's
+archive against its own publisher checksums.txt and the installed version
+against the resolved tag. Herdr and no-mistakes are install-if-absent
 only; this command never starts, stops, restarts, reloads, updates, or runs
 setup hooks for either service. An existing Firstmate checkout is left in
 place, including one with local commits.
@@ -117,17 +119,6 @@ platform() {
   printf '%s-%s\n' "$os" "$arch"
 }
 
-sha_for() {
-  local wanted=$1 row key tree_sha nm_sha
-  for row in "${RELEASE_SHA256_PINS[@]}"; do
-    IFS='|' read -r key tree_sha nm_sha <<<"$row"
-    [ "$key" = "$PLATFORM" ] || continue
-    case "$wanted" in treehouse) printf '%s\n' "$tree_sha" ;; no-mistakes) printf '%s\n' "$nm_sha" ;; esac
-    return 0
-  done
-  return 1
-}
-
 fetch() {
   $CURL_BIN -fsSL --connect-timeout 10 --max-time 120 "$1" -o "$2"
 }
@@ -144,37 +135,60 @@ verify_sha512() {
   [ "$actual" = "$expected" ]
 }
 
+# Resolve a GitHub repository's latest non-draft, non-prerelease release exactly
+# once and print its numeric version. Every later URL and the checksum lookup are
+# derived from that one result, so a release published mid-run cannot be mixed in.
+resolve_latest_release() {
+  local repo=$1 json tag
+  json=$($CURL_BIN -fsSL --connect-timeout 10 --max-time 120 -H 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/$repo/releases/latest") || return 1
+  tag=$(printf '%s' "$json" | jq -er 'select(.draft == false and .prerelease == false) | .tag_name | strings') || return 1
+  case "$tag" in v*) ;; *) return 1 ;; esac
+  safe_version "${tag#v}" || return 1
+  printf '%s\n' "${tag#v}"
+}
+
+# Print the SHA-256 the publisher's checksums.txt lists for exactly one file.
+checksum_for() {
+  local sums=$1 filename=$2 digest
+  digest=$(awk -v f="$filename" '$2 == f || $2 == "*" f { print $1; n++ } END { exit n == 1 ? 0 : 1 }' "$sums") || return 1
+  printf '%s\n' "$digest" | grep -Eq '^[0-9a-f]{64}$' || return 1
+  printf '%s\n' "$digest"
+}
+
 install_release_tool() {
-  local name=$1 version=$2 expected filename url tmp binary
+  local name=$1 repo=$2 version filename base url sums_url expected tmp binary actual
   selected "$name" || return 0
-  safe_version "$version" || { say "refuse $name: unsafe stable version '$version'" >&2; return 1; }
   if command -v "$name" >/dev/null 2>&1; then
-    say "skip $name: installed $(installed_version "$name" || printf unknown) (pin $version; report-only)"
+    say "skip $name: installed $(installed_version "$name" || printf unknown) (latest stable policy; report-only)"
     return 0
   fi
-  expected=$(sha_for "$name") || { say "refuse $name: unsupported platform $PLATFORM" >&2; return 1; }
-  case "$name" in
-    treehouse)
-      filename="treehouse-v${version}-${PLATFORM}.tar.gz"
-      url="https://github.com/kunchenguid/treehouse/releases/download/v${version}/${filename}"
-      ;;
-    no-mistakes)
-      filename="no-mistakes-v${version}-${PLATFORM}.tar.gz"
-      url="https://github.com/kunchenguid/no-mistakes/releases/download/v${version}/${filename}"
-      ;;
-    *) return 2 ;;
-  esac
+  version=$(resolve_latest_release "$repo") || {
+    say "refuse $name: no latest non-draft, non-prerelease release with a numeric tag could be resolved" >&2; return 1;
+  }
+  filename="${name}-v${version}-${PLATFORM}.tar.gz"
+  base="https://github.com/${repo}/releases/download/v${version}"
+  url="$base/$filename"
+  sums_url="$base/checksums.txt"
   if [ "$DRY_RUN" -eq 1 ]; then
-    say "would install $name $version from $url (sha256 $expected)"
+    say "would install $name $version from $url (sha256 from the release's publisher $sums_url)"
     return 0
   fi
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/dev-tool-install.XXXXXX")
   trap 'rm -rf "$tmp"' RETURN
+  fetch "$sums_url" "$tmp/checksums.txt" || { say "refuse $name: release $version publishes no checksums.txt" >&2; return 1; }
+  expected=$(checksum_for "$tmp/checksums.txt" "$filename") || {
+    say "refuse $name: release $version has no usable checksum for $filename" >&2; return 1;
+  }
   fetch "$url" "$tmp/$filename"
   verify_sha256 "$tmp/$filename" "$expected" || { say "refuse $name: publisher checksum mismatch" >&2; return 1; }
   $TAR_BIN -xzf "$tmp/$filename" -C "$tmp"
   binary="$tmp/$name"
   [ -f "$binary" ] || { say "refuse $name: archive has no expected binary" >&2; return 1; }
+  # The archive's own binary must report the resolved release before it is
+  # installed, so a mislabeled archive never replaces anything.
+  actual=$(env NO_UPDATE_NOTIFIER=1 "$binary" --version 2>/dev/null | grep -Eo '[0-9]+(\.[0-9]+){2,3}' | head -1 || true)
+  [ "$actual" = "$version" ] || { say "refuse $name: archive reports version '${actual:-unknown}' != resolved release $version" >&2; return 1; }
   mkdir -p "$LOCAL_BIN"
   $INSTALL_BIN -m 0755 "$binary" "$LOCAL_BIN/$name"
   say "installed $name $version"
@@ -322,8 +336,8 @@ done
 for name in treehouse no-mistakes; do
   selected "$name" && matched=1
   case "$name" in
-    treehouse) install_release_tool "$name" "$TREEHOUSE_VERSION" ;;
-    no-mistakes) install_release_tool "$name" "$NO_MISTAKES_VERSION" ;;
+    treehouse) install_release_tool "$name" kunchenguid/treehouse ;;
+    no-mistakes) install_release_tool "$name" kunchenguid/no-mistakes ;;
   esac
 done
 selected herdr && matched=1; install_herdr

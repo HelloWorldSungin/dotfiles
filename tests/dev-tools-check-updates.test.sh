@@ -113,6 +113,7 @@ case "$url" in
     tag=
     for row in "${GITHUB_TOOL_PINS[@]}"; do
       IFS='|' read -r name _command candidate version _install _apply <<<"$row"
+      [ "$version" = latest ] && version=0.9.0
       [ "$candidate" = "$repo" ] && [ "$name" != herdr ] && tag="v$version"
     done
     for row in "${NEOVIM_PLUGIN_PINS[@]}"; do

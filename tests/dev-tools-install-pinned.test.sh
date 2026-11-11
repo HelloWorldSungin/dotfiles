@@ -25,8 +25,8 @@ make_binary() {
   chmod +x "$path"
 }
 
-make_binary "$ASSETS/treehouse/treehouse" treehouse 2.3.0
-make_binary "$ASSETS/no-mistakes/no-mistakes" no-mistakes 1.72.0
+make_binary "$ASSETS/treehouse/treehouse" treehouse 3.1.8
+make_binary "$ASSETS/no-mistakes/no-mistakes" no-mistakes 1.106.1
 make_binary "$ASSETS/herdr" herdr 0.9.0
 mkdir -p "$ASSETS/antigravity-dir"
 make_binary "$ASSETS/antigravity-dir/antigravity" agy 1.1.28
@@ -35,6 +35,9 @@ tar -czf "$ASSETS/no-mistakes.tar.gz" -C "$ASSETS/no-mistakes" no-mistakes
 tar -czf "$ASSETS/antigravity.tar.gz" -C "$ASSETS/antigravity-dir" antigravity
 TREE_SHA=$(sha256sum "$ASSETS/treehouse.tar.gz" | awk '{print $1}')
 NM_SHA=$(sha256sum "$ASSETS/no-mistakes.tar.gz" | awk '{print $1}')
+OTHER_SHA=$(printf 'another platform archive' | sha256sum | awk '{print $1}')
+RELEASE_LOG="$FIXTURE/release.log"
+: >"$RELEASE_LOG"
 HERDR_SHA=$(sha256sum "$ASSETS/herdr" | awk '{print $1}')
 AGY_SHA=$(sha512sum "$ASSETS/antigravity.tar.gz" | awk '{print $1}')
 
@@ -52,8 +55,6 @@ BABY_MENU_TEST_REV=$(git -C "$ASSETS/baby-menu-repo" rev-parse HEAD)
 PINS="$FIXTURE/pins.sh"
 cat >"$PINS" <<EOF
 TOOLCHAIN_VERIFIED_AT=2026-09-09
-TREEHOUSE_VERSION=2.3.0
-NO_MISTAKES_VERSION=1.72.0
 HERDR_LATEST_MANIFEST_URL=https://herdr.dev/latest.json
 ANTIGRAVITY_MANIFEST_URL_PREFIX=https://antigravity-cli-auto-updater.invalid/manifests
 CURSOR_AGENT_OBSERVED_VERSION=2026.09.08-test
@@ -63,9 +64,6 @@ FIRSTMATE_REV=$FIRSTMATE_TEST_REV
 BABY_MENU_REV=$BABY_MENU_TEST_REV
 NPM_TOOL_PINS=(
   'demo|demo|demo-package|1.2.3|sha512-ZGV0ZXJtaW5pc3RpYw==|yes|default'
-)
-RELEASE_SHA256_PINS=(
-  'linux-amd64|$TREE_SHA|$NM_SHA'
 )
 EOF
 
@@ -108,8 +106,28 @@ for arg in "$@"; do
   previous=$arg
 done
 case "$url" in
-  *treehouse*) cp "$TEST_ASSETS/treehouse.tar.gz" "$output" ;;
-  *no-mistakes*) cp "$TEST_ASSETS/no-mistakes.tar.gz" "$output" ;;
+  https://api.github.com/repos/kunchenguid/treehouse/releases/latest|https://api.github.com/repos/kunchenguid/no-mistakes/releases/latest)
+    [ "${TEST_RELEASE_API_FAIL:-0}" = 1 ] && exit 1
+    case "$url" in
+      */treehouse/*) tag=v3.1.8 ;;
+      *) tag=v1.106.1 ;;
+    esac
+    printf '%s\n' "$url" >>"$TEST_RELEASE_LOG"
+    jq -cn --arg tag "${TEST_RELEASE_TAG:-$tag}" --argjson pre "${TEST_RELEASE_PRERELEASE:-false}" --argjson draft "${TEST_RELEASE_DRAFT:-false}" \
+      '{draft:$draft,prerelease:$pre,tag_name:$tag}'
+    ;;
+  https://github.com/kunchenguid/*/releases/download/*/checksums.txt)
+    [ "${TEST_CHECKSUMS_FAIL:-0}" = 1 ] && exit 1
+    printf '%s\n' "$url" >>"$TEST_RELEASE_LOG"
+    tree_name=treehouse-v3.1.8-linux-amd64.tar.gz
+    nm_name=no-mistakes-v1.106.1-linux-amd64.tar.gz
+    case "$url" in
+      */treehouse/*) printf '%s  %s\n' "${TEST_TREE_SHA}" "$tree_name" "${TEST_OTHER_SHA}" treehouse-v3.1.8-linux-arm64.tar.gz "${TEST_OTHER_SHA}" treehouse-v3.1.8-windows-amd64.zip ;;
+      *) printf '%s  %s\n' "${TEST_NM_SHA}" "$nm_name" "${TEST_OTHER_SHA}" no-mistakes-v1.106.1-linux-arm64.tar.gz ;;
+    esac | { if [ "${TEST_CHECKSUMS_MISSING_ENTRY:-0}" = 1 ]; then grep -v linux-amd64 || true; else cat; fi; } >"$output"
+    ;;
+  https://github.com/kunchenguid/treehouse/releases/download/*) printf '%s\n' "$url" >>"$TEST_RELEASE_LOG"; cp "$TEST_ASSETS/treehouse.tar.gz" "$output" ;;
+  https://github.com/kunchenguid/no-mistakes/releases/download/*) printf '%s\n' "$url" >>"$TEST_RELEASE_LOG"; cp "$TEST_ASSETS/no-mistakes.tar.gz" "$output" ;;
   https://herdr.dev/latest.json)
     [ "${TEST_MANIFEST_FAIL:-0}" = 1 ] && exit 1
     jq -cn --arg sha "${TEST_MANIFEST_SHA:-$TEST_HERDR_SHA}" --arg v "${TEST_HERDR_VERSION:-0.9.0}" '{version:$v,assets:{"linux-x86_64":("https://github.com/herdrdev/herdr/releases/download/v"+$v+"/herdr-linux-x86_64")},sha256:{"linux-x86_64":$sha}}'
@@ -145,7 +163,7 @@ run_installer() {
     DEV_TOOLS_INSTALL_CURL_BIN="$FAKEBIN/curl" DEV_TOOLS_INSTALL_NPM_BIN="$FAKEBIN/npm" \
     DEV_TOOLS_INSTALL_GIT_BIN="$FAKEBIN/git" \
     DEV_TOOLS_INSTALL_LOCAL_BIN="$LOCAL_BIN" DEV_TOOLS_UPDATE_NPM_PREFIX="$PREFIX" \
-    TEST_HERDR_SHA="$HERDR_SHA" TEST_AGY_SHA_DEFAULT="$AGY_SHA" TEST_NPM_LOG="$NPM_LOG" TEST_ASSETS="$ASSETS" TEST_CURSOR_FETCHED="$FIXTURE/cursor-fetched" \
+    TEST_HERDR_SHA="$HERDR_SHA" TEST_TREE_SHA="${TEST_TREE_SHA_OVERRIDE:-$TREE_SHA}" TEST_NM_SHA="$NM_SHA" TEST_OTHER_SHA="$OTHER_SHA" TEST_RELEASE_LOG="$RELEASE_LOG" TEST_AGY_SHA_DEFAULT="$AGY_SHA" TEST_NPM_LOG="$NPM_LOG" TEST_ASSETS="$ASSETS" TEST_CURSOR_FETCHED="$FIXTURE/cursor-fetched" \
     TEST_BAD_INTEGRITY="${TEST_BAD_INTEGRITY:-0}" TEST_REAL_GIT="$(command -v git)" "$INSTALLER" "$@"
 }
 
@@ -185,10 +203,61 @@ run_installer --only treehouse >/dev/null
 run_installer --only no-mistakes >/dev/null
 run_installer --only herdr >/dev/null
 run_installer --only agy >/dev/null
-for command_name in treehouse no-mistakes herdr agy; do [ -x "$LOCAL_BIN/$command_name" ] || fail "$command_name exact artifact was not installed"; done
+for command_name in treehouse no-mistakes herdr agy; do [ -x "$LOCAL_BIN/$command_name" ] || fail "$command_name artifact was not installed"; done
 ! grep -Eq 'herdr (update|server|setup|restart|reload|stop|start)' "$FIXTURE/tool-calls.log" || fail 'Herdr lifecycle was driven'
 ! grep -Eq 'no-mistakes (daemon|update|setup|restart|reload|stop|start)' "$FIXTURE/tool-calls.log" || fail 'no-mistakes daemon lifecycle was driven'
-pass 'publisher-checksummed releases install exact binaries without lifecycle actions'
+pass 'publisher-checksummed releases install binaries without lifecycle actions'
+
+# Latest-stable GitHub archives: the release is resolved once, and its checksums
+# and archive are both bound to that one result.
+for tool in treehouse no-mistakes; do
+  case "$tool" in treehouse) repo=treehouse; ver=3.1.8 ;; *) repo=no-mistakes; ver=1.106.1 ;; esac
+  rm -f "$LOCAL_BIN/$tool"
+  : >"$RELEASE_LOG"
+  run_installer --only "$tool" >"$FIXTURE/$tool.out"
+  [ "$(grep -c "api.github.com/repos/kunchenguid/$repo/releases/latest" "$RELEASE_LOG")" -eq 1 ] || fail "$tool resolved its release more than once"
+  grep -Fxq "https://github.com/kunchenguid/$repo/releases/download/v$ver/checksums.txt" "$RELEASE_LOG" || fail "$tool did not fetch the resolved release checksums"
+  grep -Fxq "https://github.com/kunchenguid/$repo/releases/download/v$ver/$tool-v$ver-linux-amd64.tar.gz" "$RELEASE_LOG" || fail "$tool archive was not bound to the resolved release"
+  grep -Fq "installed $tool $ver" "$FIXTURE/$tool.out" || fail "$tool did not report the resolved version"
+done
+pass 'treehouse and no-mistakes resolve latest once and bind checksums and archive to it'
+
+# Installed commands never trigger discovery.
+: >"$RELEASE_LOG"
+run_installer --only treehouse >"$FIXTURE/skip.out"
+[ ! -s "$RELEASE_LOG" ] || fail 'an installed treehouse still triggered release discovery'
+grep -Fq 'skip treehouse' "$FIXTURE/skip.out" || fail 'installed treehouse was not skipped'
+pass 'installed latest-archive tools are skipped without discovery'
+
+# Dry run discovers read-only and installs nothing.
+rm -f "$LOCAL_BIN/treehouse"
+: >"$RELEASE_LOG"
+run_installer --dry-run --only treehouse >"$FIXTURE/tree-dry.out"
+[ ! -e "$LOCAL_BIN/treehouse" ] || fail 'treehouse dry-run installed a client'
+grep -Fq 'would install treehouse 3.1.8' "$FIXTURE/tree-dry.out" || fail 'treehouse dry-run did not name the resolved release'
+[ "$(grep -c 'releases/download' "$RELEASE_LOG")" -eq 0 ] || fail 'treehouse dry-run downloaded release artifacts'
+pass 'latest-archive dry-run resolves read-only and downloads nothing'
+
+# Fail closed: every refusal leaves no binary behind.
+for mode in api prerelease draft tag checksums missing mismatch version; do
+  rm -f "$LOCAL_BIN/treehouse"
+  case "$mode" in
+    api) export TEST_RELEASE_API_FAIL=1 ;;
+    prerelease) export TEST_RELEASE_PRERELEASE=true ;;
+    draft) export TEST_RELEASE_DRAFT=true ;;
+    tag) export TEST_RELEASE_TAG=nightly ;;
+    checksums) export TEST_CHECKSUMS_FAIL=1 ;;
+    missing) export TEST_CHECKSUMS_MISSING_ENTRY=1 ;;
+    mismatch) export TEST_TREE_SHA_OVERRIDE=$OTHER_SHA ;;
+    version) export TEST_RELEASE_TAG=v3.1.9 ;;
+  esac
+  if run_installer --only treehouse >/dev/null 2>&1; then fail "latest-archive install accepted $mode"; fi
+  [ ! -e "$LOCAL_BIN/treehouse" ] || fail "latest-archive $mode refusal installed a client"
+  unset TEST_RELEASE_API_FAIL TEST_RELEASE_PRERELEASE TEST_RELEASE_DRAFT TEST_RELEASE_TAG TEST_CHECKSUMS_FAIL TEST_CHECKSUMS_MISSING_ENTRY TEST_TREE_SHA_OVERRIDE
+done
+rm -f "$LOCAL_BIN/treehouse"
+run_installer --only treehouse >/dev/null
+pass 'latest-archive installs refuse API failure, prerelease, draft, non-numeric tags, missing or mismatched checksums and version drift'
 
 # macOS ships neither sha256sum nor sha512sum, only `shasum`. Rebuild the
 # fixture PATH without the coreutils checksum tools and reinstall both

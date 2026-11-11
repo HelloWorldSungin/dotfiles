@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Behavioral tests for the no-mistakes exact pin and its install wiring.
+# Behavioral tests for the no-mistakes and treehouse latest-stable policy rows and
+# their install wiring.
 #
-# These drive the real pins file through the real installer in --dry-run, so
-# they prove the recorded version and publisher checksum actually reach the
-# fetch decision, rather than asserting that two files contain the same string.
-# No network is used and nothing is installed.
+# These drive the real pins file through the real installer in --dry-run against
+# a stubbed GitHub API, so they prove the policy reaches the release-resolution
+# decision rather than asserting that two files contain the same string. No
+# network is used and nothing is installed.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -21,87 +22,107 @@ pass() { printf 'ok - %s\n' "$1"; }
 # shellcheck disable=SC1091
 source "$PINS"
 
-[ -n "${NO_MISTAKES_VERSION:-}" ] || fail 'NO_MISTAKES_VERSION is unset'
-case "$NO_MISTAKES_VERSION" in
-  *[Aa]lpha*|*[Bb]eta*|*[Rr]c*|*preview*|*nightly*|*snapshot*)
-    fail "NO_MISTAKES_VERSION $NO_MISTAKES_VERSION is not a stable version" ;;
-esac
-pass "NO_MISTAKES_VERSION $NO_MISTAKES_VERSION carries no prerelease suffix"
+# Neither tool may fall back to a recorded exact version or recorded checksum:
+# the selection is latest stable, resolved per invocation.
+[ -z "${NO_MISTAKES_VERSION:-}" ] || fail 'NO_MISTAKES_VERSION is still recorded'
+[ -z "${TREEHOUSE_VERSION:-}" ] || fail 'TREEHOUSE_VERSION is still recorded'
+[ "${RELEASE_SHA256_PINS+set}" != set ] || fail 'RELEASE_SHA256_PINS is still recorded'
+pass 'no exact treehouse or no-mistakes version or recorded checksum remains'
 
-row_version=
-for row in "${GITHUB_TOOL_PINS[@]}"; do
-  IFS='|' read -r name _cmd repo version install_policy apply_policy <<<"$row"
-  [ "$name" = no-mistakes ] || continue
-  row_version=$version
-  [ "$repo" = kunchenguid/no-mistakes ] || fail "no-mistakes repository is $repo"
-  [ "$install_policy" = exact-archive ] || fail "no-mistakes install policy is $install_policy"
-  # Attended-only is what keeps the guarded updater and any timer from ever
-  # touching a binary the shared daemon is running out of.
-  [ "$apply_policy" = attended-only ] || fail "no-mistakes apply policy is $apply_policy"
-done
-[ -n "$row_version" ] || fail 'GITHUB_TOOL_PINS has no no-mistakes row'
-[ "$row_version" = "$NO_MISTAKES_VERSION" ] ||
-  fail "GITHUB_TOOL_PINS says $row_version but NO_MISTAKES_VERSION says $NO_MISTAKES_VERSION"
-pass 'the release-pin row agrees with NO_MISTAKES_VERSION and stays attended-only'
-
-platforms=0
-for row in "${RELEASE_SHA256_PINS[@]}"; do
-  IFS='|' read -r key _tree nm _herdr <<<"$row"
-  case "$key" in darwin-amd64|darwin-arm64|linux-amd64|linux-arm64) ;;
-    *) fail "unexpected release platform $key" ;;
+expected_apply() {
+  case "$1" in
+    treehouse) printf 'report-only' ;;
+    no-mistakes) printf 'attended-only' ;;
   esac
-  printf '%s' "$nm" | grep -qE '^[0-9a-f]{64}$' ||
-    fail "no-mistakes checksum for $key is not a sha256 digest"
-  platforms=$((platforms + 1))
+}
+for tool in treehouse no-mistakes; do
+  seen=0
+  for row in "${GITHUB_TOOL_PINS[@]}"; do
+    IFS='|' read -r name _cmd repo version install_policy apply_policy <<<"$row"
+    [ "$name" = "$tool" ] || continue
+    seen=1
+    [ "$repo" = "kunchenguid/$tool" ] || fail "$tool repository is $repo"
+    [ "$version" = latest ] || fail "$tool version selector is $version"
+    [ "$install_policy" = latest-archive ] || fail "$tool install policy is $install_policy"
+    # Attended-only keeps the guarded updater and any timer away from a binary
+    # the shared daemon is running out of; treehouse stays report-only.
+    [ "$apply_policy" = "$(expected_apply "$tool")" ] || fail "$tool apply policy is $apply_policy"
+  done
+  [ "$seen" -eq 1 ] || fail "GITHUB_TOOL_PINS has no $tool row"
 done
-[ "$platforms" -eq 4 ] || fail "expected 4 release platforms, found $platforms"
-# Distinct per-platform digests: a copy-paste that reused one platform's value
-# would silently make three platforms unverifiable.
-distinct=$(for row in "${RELEASE_SHA256_PINS[@]}"; do IFS='|' read -r _k _t nm _h <<<"$row"; printf '%s\n' "$nm"; done | sort -u | wc -l)
-[ "$distinct" -eq 4 ] || fail "the four platform checksums are not distinct ($distinct unique)"
-pass 'all four platforms carry distinct sha256 no-mistakes checksums'
+pass 'treehouse and no-mistakes rows are latest-archive and keep their apply boundaries'
 
-doc_row=$(grep -E '^\| no-mistakes \|' "$DOC") || fail 'docs/dev-tool-versions.md has no no-mistakes row'
-doc_version=$(printf '%s' "$doc_row" | awk -F'|' '{gsub(/ /,"",$3); print $3}')
-[ "$doc_version" = "$NO_MISTAKES_VERSION" ] ||
-  fail "docs/dev-tool-versions.md says $doc_version but the pin says $NO_MISTAKES_VERSION"
-printf '%s' "$doc_row" | grep -q 'Attended only' ||
+for tool in Treehouse no-mistakes; do
+  doc_row=$(grep -E "^\\| $tool \\|" "$DOC") || fail "docs/dev-tool-versions.md has no $tool row"
+  printf '%s' "$doc_row" | grep -q 'Latest stable at invocation' ||
+    fail "docs/dev-tool-versions.md does not record $tool as latest stable at invocation"
+done
+grep -E '^\| no-mistakes \|' "$DOC" | grep -q 'Attended only' ||
   fail 'docs/dev-tool-versions.md no longer records no-mistakes as attended only'
-# A row that still names the pinned version as excluded would contradict itself.
-if printf '%s' "$doc_row" | grep -q "$NO_MISTAKES_VERSION prerelease"; then
-  fail "docs/dev-tool-versions.md excludes $NO_MISTAKES_VERSION as a prerelease while pinning it"
-fi
-pass 'the documented inventory row agrees with the pin and its apply boundary'
+pass 'the documented inventory rows agree with the latest-stable policy and apply boundary'
 
-# The installer only reaches its fetch decision when the tool is absent, so this
-# runs with a PATH and HOME that contain no no-mistakes.
+# The installer only reaches its resolution decision when the tool is absent, so
+# this runs with a PATH and HOME that contain no no-mistakes or treehouse.
 platform=
 case "$(uname -s)" in Darwin) platform=darwin ;; Linux) platform=linux ;; *) fail "unsupported test platform $(uname -s)" ;; esac
 case "$(uname -m)" in x86_64|amd64) platform="$platform-amd64" ;; arm64|aarch64) platform="$platform-arm64" ;;
   *) fail "unsupported test architecture $(uname -m)" ;;
 esac
-expected_sha=
-for row in "${RELEASE_SHA256_PINS[@]}"; do
-  IFS='|' read -r key _tree nm _herdr <<<"$row"
-  [ "$key" = "$platform" ] && expected_sha=$nm
-done
-[ -n "$expected_sha" ] || fail "no release checksum row for $platform"
 
-mkdir -p "$TMP_ROOT/home" "$TMP_ROOT/localbin" "$TMP_ROOT/npm"
-preview=$(env PATH=/usr/bin:/bin HOME="$TMP_ROOT/home" \
-  DEV_TOOLS_INSTALL_LOCAL_BIN="$TMP_ROOT/localbin" \
-  DEV_TOOLS_UPDATE_NPM_PREFIX="$TMP_ROOT/npm" \
-  bash "$INSTALLER" --dry-run --only no-mistakes 2>&1) ||
-  fail 'dev-tools-install-pinned --dry-run --only no-mistakes failed'
+mkdir -p "$TMP_ROOT/home" "$TMP_ROOT/localbin" "$TMP_ROOT/npm" "$TMP_ROOT/fakebin"
+cat >"$TMP_ROOT/fakebin/curl" <<'SH'
+#!/usr/bin/env bash
+set -eu
+url=
+for arg in "$@"; do case "$arg" in https://*) url=$arg ;; esac; done
+printf '%s\n' "$url" >>"$TEST_CURL_LOG"
+case "$url" in
+  https://api.github.com/repos/kunchenguid/no-mistakes/releases/latest)
+    jq -cn --arg tag "$TEST_NM_TAG" --argjson pre "${TEST_NM_PRERELEASE:-false}" '{draft:false,prerelease:$pre,tag_name:$tag}' ;;
+  https://api.github.com/repos/kunchenguid/treehouse/releases/latest)
+    jq -cn --arg tag "$TEST_TREE_TAG" '{draft:false,prerelease:false,tag_name:$tag}' ;;
+  *) exit 1 ;;
+esac
+SH
+chmod +x "$TMP_ROOT/fakebin/curl"
+jq_bin=$(command -v jq) || fail 'missing test dependency: jq'
+ln -sf "$jq_bin" "$TMP_ROOT/fakebin/jq"
 
-expected_url="https://github.com/kunchenguid/no-mistakes/releases/download/v${NO_MISTAKES_VERSION}/no-mistakes-v${NO_MISTAKES_VERSION}-${platform}.tar.gz"
-printf '%s' "$preview" | grep -qF "$expected_url" ||
-  { printf '%s\n' "$preview" >&2; fail 'the installer preview does not name the pinned release archive'; }
-printf '%s' "$preview" | grep -qF "sha256 $expected_sha" ||
-  { printf '%s\n' "$preview" >&2; fail 'the installer preview does not name the pinned publisher checksum'; }
-pass 'the installer resolves the pin to the exact release archive and publisher checksum'
+preview() {
+  env PATH="$TMP_ROOT/fakebin:/usr/bin:/bin" HOME="$TMP_ROOT/home" \
+    DEV_TOOLS_INSTALL_CURL_BIN="$TMP_ROOT/fakebin/curl" \
+    DEV_TOOLS_INSTALL_LOCAL_BIN="$TMP_ROOT/localbin" \
+    DEV_TOOLS_UPDATE_NPM_PREFIX="$TMP_ROOT/npm" \
+    TEST_CURL_LOG="$TMP_ROOT/curl.log" TEST_NM_TAG="${TEST_NM_TAG:-v1.106.1}" TEST_TREE_TAG="${TEST_TREE_TAG:-v3.1.8}" \
+    TEST_NM_PRERELEASE="${TEST_NM_PRERELEASE:-false}" \
+    bash "$INSTALLER" --dry-run --only "$1" 2>&1
+}
 
-# The preview must stay a preview: nothing installed, no network artifacts left.
+: >"$TMP_ROOT/curl.log"
+out=$(preview no-mistakes) || { printf '%s\n' "$out" >&2; fail 'dry-run --only no-mistakes failed'; }
+expected_url="https://github.com/kunchenguid/no-mistakes/releases/download/v1.106.1/no-mistakes-v1.106.1-${platform}.tar.gz"
+printf '%s' "$out" | grep -qF "$expected_url" || { printf '%s\n' "$out" >&2; fail 'the preview does not name the resolved release archive'; }
+printf '%s' "$out" | grep -qF 'releases/download/v1.106.1/checksums.txt' ||
+  { printf '%s\n' "$out" >&2; fail 'the preview does not bind the resolved release checksums'; }
+[ "$(grep -c . "$TMP_ROOT/curl.log")" -eq 1 ] || fail 'the preview contacted more than the one release lookup'
+pass 'the installer resolves latest to the exact release archive and its publisher checksums'
+
+out=$(preview treehouse)
+printf '%s' "$out" | grep -qF "releases/download/v3.1.8/treehouse-v3.1.8-${platform}.tar.gz" ||
+  { printf '%s\n' "$out" >&2; fail 'the treehouse preview does not name the resolved release archive'; }
+pass 'the treehouse preview follows the same release-bound mechanism'
+
+# A later prerelease must never be selected; the stub answers as GitHub's
+# releases/latest does, which only ever reports the latest stable release.
+export TEST_NM_PRERELEASE=true
+if out=$(preview no-mistakes 2>&1); then fail "a prerelease was selected: $out"; fi
+unset TEST_NM_PRERELEASE
+export TEST_NM_TAG=v1.107.0-preview.1
+if out=$(preview no-mistakes 2>&1); then fail "a suffixed tag was selected: $out"; fi
+unset TEST_NM_TAG
+pass 'a prerelease or suffixed tag is refused'
+
+# The preview must stay a preview: nothing installed.
 [ -z "$(ls -A "$TMP_ROOT/localbin")" ] || fail '--dry-run wrote into the install directory'
 pass '--dry-run installs nothing'
 

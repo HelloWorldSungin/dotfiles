@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Exact toolchain release record. This file is sourced by trusted scripts in
+# External toolchain release record: exact pins plus latest-stable selectors. This file is sourced by trusted scripts in
 # this repository. Keep every value a literal: no commands or environment reads.
 # shellcheck disable=SC2034 # Public manifest fields are consumed by multiple callers.
 
@@ -20,9 +20,6 @@ CURSOR_AGENT_OBSERVED_VERSION=2026.09.08-6caf4ff
 CURSOR_INSTALLER_URL=https://cursor.com/install
 CURSOR_INSTALLER_SHA256=8513e9f949576d7ced2a2a582252626cc86235437c2749bf93c886f1d5fdb203
 HERDR_LATEST_MANIFEST_URL=https://herdr.dev/latest.json
-
-TREEHOUSE_VERSION=2.3.0
-NO_MISTAKES_VERSION=1.72.0
 
 OPENCODE_ACP_VERSION=1.18.30
 OMP_ACP_VERSION=0.1.2
@@ -67,20 +64,15 @@ NPM_TOOL_PINS=(
   'lavish-axi|lavish-axi|lavish-axi|latest|publisher|yes|default'
 )
 
+# latest|latest-archive rows resolve the latest non-draft, non-prerelease GitHub
+# release once per invocation, then bind that release's publisher checksums.txt
+# and archive to the resolved tag. The installer never reads a recorded checksum.
 # name|command|owner/repo|version|install-policy|apply-policy
 GITHUB_TOOL_PINS=(
-  'treehouse|treehouse|kunchenguid/treehouse|2.3.0|exact-archive|report-only'
-  'no-mistakes|no-mistakes|kunchenguid/no-mistakes|1.72.0|exact-archive|attended-only'
+  'treehouse|treehouse|kunchenguid/treehouse|latest|latest-archive|report-only'
+  'no-mistakes|no-mistakes|kunchenguid/no-mistakes|latest|latest-archive|attended-only'
   'herdr|herdr|herdrdev/herdr|latest|stable-manifest-binary|attended-only'
   'gbrain|gbrain|garrytan/gbrain|0.48.5.0|external-owner|attended-only'
-)
-
-# platform|treehouse-sha256|no-mistakes-sha256
-RELEASE_SHA256_PINS=(
-  'darwin-amd64|349afcc13c2beb20d846eb560a11b30e1a5cab8e2dfb22988a36aa7f213b5881|b82a873be9473670f38abe1d9a21a64877c445307d85dfd8d10dfd8d3e1f90d2'
-  'darwin-arm64|1cb09bcfa830b4eec5e54beeaa71589adb9c5d828573dda0f5150e2d80cf13d5|c3a38e95e050c30ee303806f22fbdc708f945e28d6b249d8e9540de65becb5c7'
-  'linux-amd64|94fd2b2c20c35aac1ddc2941317890ad82c9916f5ccecbac4a50cda783eed10f|c226b69b8b8115827d2e438ea8b32eaff9b89291a1d2fddc5ef2449017b8d927'
-  'linux-arm64|408589ba72b58d5e942071ed863a83fd96566cfd1e514945daa59defde528bbb|92f402654bdea845ded9cebca41fd565e2ae654bb81c9ce2282e0a2610df8736'
 )
 
 # package|version-command|version|evidence-class. Nixpkgs 26.05 at NIXPKGS_REV
