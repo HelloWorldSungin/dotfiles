@@ -6,11 +6,17 @@ require("keys")
 -- Bootstrap the lazy.nvim plugin manager if it isn't installed yet.
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
 if not (vim.uv or vim.loop).fs_stat(lazypath) then
-  vim.fn.system({
-    "git", "clone", "--filter=blob:none",
-    "--branch=v11.17.5",
-    "https://github.com/folke/lazy.nvim.git", lazypath,
-  })
+  local lockfile = vim.fn.stdpath("config") .. "/lazy-lock.json"
+  local ok, lock = pcall(function()
+    return vim.fn.json_decode(table.concat(vim.fn.readfile(lockfile), "\n"))
+  end)
+  local commit = ok and type(lock) == "table" and type(lock["lazy.nvim"]) == "table"
+    and lock["lazy.nvim"].commit or nil
+  assert(type(commit) == "string" and #commit == 40 and commit:match("^[0-9a-f]+$"), "Invalid lazy.nvim lock commit")
+  vim.fn.system({ "git", "clone", "--filter=blob:none", "--no-checkout", "https://github.com/folke/lazy.nvim.git", lazypath })
+  assert(vim.v.shell_error == 0, "Failed to clone lazy.nvim")
+  vim.fn.system({ "git", "-C", lazypath, "checkout", "--detach", commit })
+  assert(vim.v.shell_error == 0, "Failed to check out locked lazy.nvim commit")
 end
 vim.opt.rtp:prepend(lazypath)
 

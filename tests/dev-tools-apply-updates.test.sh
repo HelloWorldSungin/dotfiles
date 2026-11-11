@@ -26,9 +26,13 @@ PINNED_HEAD=$(git -C "$SEED" rev-parse HEAD)
 git -C "$SEED" push -q "file://$REMOTE" main
 
 PINS="$TMP_ROOT/pins.sh"
+TARGET_BODY='target archive'
+PRIOR_BODY='prior archive'
+TARGET_INTEGRITY=$(node -e 'process.stdout.write("sha512-" + require("node:crypto").createHash("sha512").update(process.argv[1]).digest("base64"))' "$TARGET_BODY")
+PRIOR_INTEGRITY=$(node -e 'process.stdout.write("sha512-" + require("node:crypto").createHash("sha512").update(process.argv[1]).digest("base64"))' "$PRIOR_BODY")
 # Exact policy overrides remain supported; the moving policy cases below
 # exercise discovery independently of these existing receipt/rollback tests.
-sed 's/|latest|publisher|/|1.2.3|sha512-ZGV0ZXJtaW5pc3RpYw==|/g' "$ROOT/config/dev-tools-versions.sh" >"$PINS"
+sed "s@|latest|publisher|@|1.2.3|$TARGET_INTEGRITY|@g" "$ROOT/config/dev-tools-versions.sh" >"$PINS"
 printf '\nFIRSTMATE_REV=%s\n' "$PINNED_HEAD" >>"$PINS"
 # shellcheck source=../config/dev-tools-versions.sh
 # shellcheck disable=SC1091
@@ -59,8 +63,8 @@ printf '%s\n' "$*" >>"$TEST_CHECKER_LOG"
 [ "${TEST_INVALID_CHECKER:-0}" = 1 ] && { printf '{}\n'; exit 0; }
 # shellcheck source=/dev/null
 source "$TEST_PINS"
-tools=$(jq -cn --arg current "$(git -C "$TEST_FIRSTMATE" rev-parse HEAD)" --arg pin "$FIRSTMATE_REV" \
-  '[{name:"firstmate",current:$current,pinned:$pin,latest_stable:$pin,status:(if $current==$pin then "up_to_date" else "drifted" end)}]')
+tools=$(jq -cn --arg current "$(git -C "$TEST_FIRSTMATE" rev-parse HEAD)" --arg latest "$FIRSTMATE_REV" \
+  '[{name:"firstmate",current:$current,pinned:"latest",latest_stable:$latest,status:(if $current==$latest then "up_to_date" else "drifted" end)}]')
 for row in "${NPM_TOOL_PINS[@]}"; do
   IFS='|' read -r name command_name _package pinned _integrity guarded _channel <<<"$row"
   [ "$guarded" = yes ] || continue
@@ -84,7 +88,7 @@ done
 tools=$(jq -cn --argjson tools "$tools" '$tools + [
   {name:"codex",current:"0.1.0",pinned:"9.9.9",latest_stable:"9.9.9",status:"drifted"},
   {name:"herdr",current:"0.8.2",pinned:"0.9.0",latest_stable:"0.9.0",status:"drifted"},
-  {name:"no-mistakes",current:"1.60.2",pinned:"1.72.0",latest_stable:"1.72.0",status:"drifted"}
+  {name:"no-mistakes",current:"1.60.2",pinned:"latest",latest_stable:"1.106.1",status:"drifted"}
 ]')
 jq -cn --argjson tools "$tools" '{schema_version:4,tools:$tools}'
 SH
@@ -105,11 +109,11 @@ if [ "$1" = view ]; then
     IFS='|' read -r name _command_name candidate pinned integrity guarded _channel <<<"$row"
     [ "$guarded" = yes ] || continue
     [ "$candidate" = "$package" ] || continue
-    if [ "$pinned" = latest ]; then pinned=1.2.3; integrity=sha512-ZGV0ZXJtaW5pc3RpYw==; fi
+    if [ "$pinned" = latest ]; then pinned=1.2.3; integrity=$TEST_TARGET_INTEGRITY; fi
     [ "$version" = latest ] && version=$pinned
     if [ "$version" != "$pinned" ]; then
       # The installed prior version, published with its own integrity.
-      jq -cn --arg v "$version" --arg i "sha512-prior-$version" '{version:$v,"dist.integrity":$i}'
+      jq -cn --arg v "$version" --arg i "$TEST_PRIOR_INTEGRITY" '{version:$v,"dist.integrity":$i}'
       exit 0
     fi
     [ "$name" = "${TEST_BAD_PACKAGE:-}" ] && [ "$spec" != "$package@latest" ] && integrity=sha512-wrong
@@ -118,13 +122,31 @@ if [ "$1" = view ]; then
   done
   exit 1
 fi
+if [ "$1" = pack ]; then
+  package=${2%@*}
+  version=${2##*@}
+  [ "$3" = --json ] && [ "$4" = --pack-destination ] || exit 1
+  filename="$package-$version.tgz"
+  body=$TEST_TARGET_BODY
+  [ "$version" != 1.2.3 ] && body=$TEST_PRIOR_BODY
+  [ "$package" = "${TEST_TAMPER_PACK_PACKAGE:-}" ] && body="$body tampered"
+  printf '%s' "$body" >"$5/$filename"
+  jq -cn --arg name "$package" --arg v "$version" --arg f "$filename" '[{name:$name,version:$v,filename:$f}]'
+  exit 0
+fi
 if [ "$1" = install ]; then
   spec=$3
+  [ -f "$spec" ] || exit 1
+  base=${spec##*/}
+  archive_package=${base%-*}
+  version=${base##*-}
+  version=${version%.tgz}
+  [ "$(cat "$spec")" = "$TEST_TARGET_BODY" ] || [ "$(cat "$spec")" = "$TEST_PRIOR_BODY" ] || exit 1
   for row in "${NPM_TOOL_PINS[@]}"; do
-    IFS='|' read -r _name command_name package pinned _integrity guarded _channel <<<"$row"
+    IFS='|' read -r _name command_name candidate pinned _integrity guarded _channel <<<"$row"
     [ "$guarded" = yes ] || continue
     [ "$pinned" = latest ] && pinned=1.2.3
-    [ "$spec" = "$package@$pinned" ] || continue
+    [ "$version" = "$pinned" ] && [ "$archive_package" = "$candidate" ] || continue
     mkdir -p "$NPM_CONFIG_PREFIX/bin"
     printf '#!/usr/bin/env bash\nprintf "%s %s\\n"\n' "$command_name" "$pinned" >"$NPM_CONFIG_PREFIX/bin/$command_name"
     chmod +x "$NPM_CONFIG_PREFIX/bin/$command_name"
@@ -172,6 +194,7 @@ run_apply() {
     DEV_TOOLS_UPDATE_NPM_BIN="$FAKEBIN/npm" DEV_TOOLS_UPDATE_NPM_PREFIX="$PREFIX" DEV_TOOLS_UPDATE_GIT_BIN="$(command -v git)" \
     TEST_PINS="$PINS" TEST_PREFIX="$PREFIX" TEST_FIRSTMATE="$CHECKOUT" TEST_NPM_LOG="$NPM_LOG" TEST_CHECKER_LOG="$CHECKER_LOG" \
     TEST_LIFECYCLE_LOG="$LIFECYCLE_LOG" TEST_BAD_PACKAGE="${TEST_BAD_PACKAGE:-}" TEST_INVALID_CHECKER="${TEST_INVALID_CHECKER:-0}" \
+    TEST_TARGET_BODY="$TARGET_BODY" TEST_PRIOR_BODY="$PRIOR_BODY" TEST_TARGET_INTEGRITY="$TARGET_INTEGRITY" TEST_PRIOR_INTEGRITY="$PRIOR_INTEGRITY" TEST_TAMPER_PACK_PACKAGE="${TEST_TAMPER_PACK_PACKAGE:-}" \
     TEST_STALE_CHECKER_LATEST="${TEST_STALE_CHECKER_LATEST:-}" TEST_WORKER_APPEARS="${TEST_WORKER_APPEARS:-}" \
     TEST_QUOTA_CURRENT="${TEST_QUOTA_CURRENT:-}" TEST_NETWORK_TIMEOUT="${TEST_NETWORK_TIMEOUT:-15}" \
     DEV_TOOLS_UPDATE_NETWORK_TIMEOUT_SECONDS="${TEST_NETWORK_TIMEOUT:-15}" \
@@ -186,7 +209,7 @@ unset TEST_STALE_CHECKER_LATEST
 [ "$(printf '%s' "$json" | jq -r '.tiers.firstmate.status')" = applied ] || fail 'Firstmate exact update was not reported applied'
 [ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')" = applied ] || fail 'quota-axi exact pin was not applied'
 grep -Fq "view quota-axi@$QUOTA_AXI_VERSION version dist.integrity --json" "$NPM_LOG" || fail 'exact npm version and integrity were not re-verified'
-grep -Fq "install -g quota-axi@$QUOTA_AXI_VERSION" "$NPM_LOG" || fail 'stale checker latest changed the exact install target'
+grep -Eq "install -g .*/quota-axi-$QUOTA_AXI_VERSION\\.tgz$" "$NPM_LOG" || fail 'stale checker latest changed the verified install target'
 ! grep -Fq '@openai/codex' "$NPM_LOG" || fail 'checker widened the hard allowlist to Codex'
 [ ! -s "$LIFECYCLE_LOG" ] || fail 'apply invoked Herdr or no-mistakes'
 pass 'guarded apply independently verifies and converges only exact allowlisted pins'
@@ -374,6 +397,19 @@ unset TEST_BAD_PACKAGE
 pass 'independent exact-artifact mismatch fails closed'
 
 : >"$NPM_LOG"
+TEST_TAMPER_PACK_PACKAGE=quota-axi
+set +e
+json=$(run_apply --json)
+rc=$?
+set -e
+unset TEST_TAMPER_PACK_PACKAGE
+[ "$rc" -ne 0 ] || fail 'mutated publisher archive exited successfully'
+[ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')" = refused ] || fail 'mutated publisher archive was not refused'
+! grep -Fq 'install -g' "$NPM_LOG" || fail 'mutated publisher archive reached install'
+[ "$(quota_version)" = "$QUOTA_PRIOR" ] || fail 'mutated publisher archive changed the installed version'
+pass 'guarded apply refuses archive bytes that differ from selected integrity'
+
+: >"$NPM_LOG"
 SAFE_PINS=$PINS
 PINS="$TMP_ROOT/unsafe-pins.sh"
 sed "s/|$QUOTA_AXI_VERSION|/|latest|/" "$SAFE_PINS" >"$PINS"
@@ -456,7 +492,7 @@ pass 'every test suite in tests/ can be invoked directly'
 # Exercise the repository's moving policy using the same isolated mutation,
 # lane, receipt and reversal machinery as exact overrides above.
 MOVING_PINS="$TMP_ROOT/moving-pins.sh"
-sed 's/|1.2.3|sha512-ZGV0ZXJtaW5pc3RpYw==|/|latest|publisher|/g' "$PINS" >"$MOVING_PINS"
+sed "s@|1.2.3|$TARGET_INTEGRITY|@|latest|publisher|@g" "$PINS" >"$MOVING_PINS"
 PINS=$MOVING_PINS
 seed_quota_prior
 : >"$NPM_LOG"
@@ -476,7 +512,7 @@ rm "$STATE/stable-policy.meta"
 json=$(run_apply --json)
 [ "$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')" = applied ] || fail 'moving stable target was not applied'
 receipt=$(printf '%s' "$json" | jq -r '.receipt.path')
-jq -e '.tools[] | select(.name=="quota-axi") | .target == "1.2.3" and .target_evidence.integrity == "sha512-ZGV0ZXJtaW5pc3RpYw=="' "$receipt" >/dev/null || fail 'stable receipt did not bind exact artifact'
+jq -e --arg i "$TARGET_INTEGRITY" '.tools[] | select(.name=="quota-axi") | .target == "1.2.3" and .target_evidence.integrity == $i' "$receipt" >/dev/null || fail 'stable receipt did not bind exact artifact'
 : >"$NPM_LOG"
 json=$(run_apply --json)
 ! grep -q '^install ' "$NPM_LOG" || fail 'stable rerun reinstalled converged tool'

@@ -95,7 +95,7 @@ return {
     -- fuzzy-find files, live grep, open buffers - plus nicer notifications
     -- and input prompts.
     "folke/snacks.nvim",
-    version = "v2.31.0",
+    version = "*",
     priority = 1000,
     lazy = false,
     opts = {
@@ -117,7 +117,7 @@ return {
   {
     -- Oil: the file tree as an editable buffer. Replaces netrw for directory browsing.
     "stevearc/oil.nvim",
-    version = "v2.16.0",
+    version = "*",
     lazy = false,
     opts = {
       default_file_explorer = true,

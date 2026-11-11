@@ -54,8 +54,8 @@ set -eu
 # shellcheck source=/dev/null
 source "\$TEST_PINS"
 head=\$($REAL_GIT -C "\$TEST_FIRSTMATE" rev-parse HEAD)
-tools=\$(jq -cn --arg current "\$head" --arg pin "\$FIRSTMATE_REV" \\
-  '[{name:"firstmate",current:\$current,pinned:\$pin,latest_stable:\$pin,status:(if \$current==\$pin then "up_to_date" else "drifted" end)}]')
+tools=\$(jq -cn --arg current "\$head" --arg latest "\$FIRSTMATE_REV" \\
+  '[{name:"firstmate",current:\$current,pinned:"latest",latest_stable:\$latest,status:(if \$current==\$latest then "up_to_date" else "drifted" end)}]')
 for row in "\${NPM_TOOL_PINS[@]}"; do
   IFS='|' read -r name _command_name _package pinned _integrity guarded _channel <<<"\$row"
   [ "\$guarded" = yes ] || continue
@@ -174,10 +174,11 @@ pass 'a checkout already at the pin is previewed as up to date'
 # ------------------------- a checkout ahead of the pin is refused
 
 write_pins "$BASE_COMMIT"
+git_c "$SEED" push -q "file://$REMOTE" "$BASE_COMMIT:refs/heads/main" --force
 dry_run; json=$DRY_JSON
 [ "$DRY_RC" -ne 0 ] || fail 'a checkout ahead of the pin exited successfully'
 [ "$(firstmate_status "$json")" = refused ] || fail 'a checkout ahead of the pin was not refused'
-[ "$(firstmate_detail "$json")" = 'the local default branch is ahead of the exact pin' ] \
+[ "$(firstmate_detail "$json")" = 'the local default branch is ahead of upstream main' ] \
   || fail "a checkout ahead of the pin was refused for the wrong reason: $(firstmate_detail "$json")"
 [ "$(head_commit)" = "$AHEAD_COMMIT" ] || fail 'a refused preview moved the checkout'
 assert_apply_agrees 'a checkout ahead of the pin' "$AHEAD_COMMIT"
@@ -194,7 +195,7 @@ write_pins "$DIVERGED_COMMIT"
 dry_run; json=$DRY_JSON
 [ "$DRY_RC" -ne 0 ] || fail 'a diverged checkout exited successfully'
 [ "$(firstmate_status "$json")" = refused ] || fail 'a diverged checkout was not refused'
-[ "$(firstmate_detail "$json")" = 'the local default branch has diverged from the exact pin' ] \
+[ "$(firstmate_detail "$json")" = 'the local default branch has diverged from upstream main' ] \
   || fail "a diverged checkout was refused for the wrong reason: $(firstmate_detail "$json")"
 assert_apply_agrees 'a diverged checkout' "$AHEAD_COMMIT"
 pass 'a checkout diverged from the exact pin is refused identically by the preview and the apply'
@@ -207,7 +208,7 @@ write_pins "$(printf '%040d' 0 | tr 0 a)"
 dry_run; json=$DRY_JSON
 [ "$DRY_RC" -ne 0 ] || fail 'a pin absent from the remote exited successfully'
 [ "$(firstmate_status "$json")" = refused ] || fail 'a pin absent from the remote was not refused'
-[ "$(firstmate_detail "$json")" = 'the exact pin is absent from the authoritative Firstmate main branch' ] \
+[ "$(firstmate_detail "$json")" = 'the authoritative Firstmate main branch moved after selection' ] \
   || fail "an absent pin was refused for the wrong reason: $(firstmate_detail "$json")"
 assert_apply_agrees 'a pin the remote does not carry' "$AHEAD_COMMIT"
 pass 'a pin the authoritative remote does not carry is refused identically by both directions'

@@ -14,12 +14,13 @@ in
   home.packages = (with devTools; [
     checker
     pinnedInstaller
+    npmRunLatestStable
     claudeSpendPinned
     claudeSetCompactionWindow
   ]) ++ (with pkgs; [
     gh
     lazygit
-    nodejs_22
+    nodejs
     uv
     bats
     ripgrep

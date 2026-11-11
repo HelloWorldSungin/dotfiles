@@ -152,10 +152,10 @@ installed_command_version() {
 classify() {
   local current=$1 pinned=$2 latest=$3
   if [ "$latest" = unknown ] || [ "$current" = unknown ]; then printf unknown
+  elif [ "$current" = on-demand ]; then
+    if [ "$pinned" = latest ] || [ "$pinned" = "$latest" ]; then printf up_to_date; else printf pin_outdated; fi
   elif [ "$pinned" = latest ]; then
     [ "$current" = "$latest" ] && printf up_to_date || printf drifted
-  elif [ "$current" = on-demand ]; then
-    [ "$pinned" = "$latest" ] && printf up_to_date || printf pin_outdated
   elif [ "$pinned" != "$latest" ] && [ "$current" != "$pinned" ]; then printf pin_outdated_and_drifted
   elif [ "$pinned" != "$latest" ]; then printf pin_outdated
   elif [ "$current" != "$pinned" ]; then printf drifted
@@ -377,11 +377,11 @@ check_mattpocock_skills() {
 }
 
 check_git_repo() {
-  local name=$1 path=$2 repo=$3 pinned=$4 install_policy=$5 apply_policy=$6 current latest detail=
+  local name=$1 path=$2 repo=$3 install_policy=$4 apply_policy=$5 current latest detail=
   if [ -d "$path/.git" ]; then current=$($GIT_BIN -C "$path" rev-parse HEAD 2>/dev/null || printf unknown); else current=unknown; fi
-  latest=$(run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" ls-remote "$repo" HEAD 2>/dev/null | awk '$2 == "HEAD" {print $1; exit}')
-  if [ -z "$latest" ]; then latest=unknown; detail='remote HEAD could not be verified'; fi
-  tool_json "$name" git-default-branch "$current" "$pinned" "$latest" "$install_policy" "$apply_policy" "$detail"
+  latest=$(run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" ls-remote "$repo" refs/heads/main 2>/dev/null | awk '$2 == "refs/heads/main" {print $1; exit}')
+  if [ -z "$latest" ]; then latest=unknown; detail='remote main could not be verified'; fi
+  tool_json "$name" git-main "$current" latest "$latest" "$install_policy" "$apply_policy" "$detail"
 }
 
 check_baby_menu() {
@@ -394,7 +394,7 @@ check_baby_menu() {
   else latest=unknown; detail='latest stable Baby Menu release could not be verified'
   fi
   [ -n "$latest" ] || latest=unknown
-  tool_json baby-menu github-latest-release "$current" "$BABY_MENU_REV" "$latest" exact-release-commit report-only "$detail"
+  tool_json baby-menu github-latest-release "$current" latest "$latest" stable-release-commit report-only "$detail"
 }
 
 check_nix_installer() {
@@ -412,10 +412,10 @@ check_nix_installer() {
 }
 
 check_npx_tool() {
-  local name=$1 package=$2 pinned=$3 latest detail='' rc
-  latest=$(latest_npm "$package" default); rc=$?
+  local name=$1 package=$2 latest detail='' rc
+  latest=$(latest_npm "$package@latest" default); rc=$?
   case "$rc" in 0) : ;; 2) latest=unknown; detail='npm default tag resolved to a prerelease' ;; *) latest=unknown; detail='npm registry lookup failed' ;; esac
-  tool_json "$name" npm-default-dist-tag on-demand "$pinned" "$latest" exact-npx report-only "$detail"
+  tool_json "$name" npm-default-dist-tag on-demand latest "$latest" verified-latest-npx report-only "$detail"
 }
 
 check_nix_input() {
@@ -483,7 +483,9 @@ check_ci_action() {
 
 resolve_tag_commit() {
   local repo=$1 tag=$2
-  run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" ls-remote "https://github.com/$repo.git" "refs/tags/$tag" "refs/tags/$tag^{}" 2>/dev/null | awk 'END {print $1}'
+  run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" ls-remote "https://github.com/$repo.git" "refs/tags/$tag" "refs/tags/$tag^{}" 2>/dev/null |
+    awk -v direct="refs/tags/$tag" -v peeled="refs/tags/$tag^{}" \
+      '$2 == direct {tag_object=$1} $2 == peeled {commit=$1} END {if (commit) print commit; else if (tag_object) print tag_object}'
 }
 
 check_nvim_plugin() {
@@ -501,6 +503,9 @@ check_nvim_plugin() {
     elif [ "$rc" -eq 2 ]; then latest=unknown; detail='latest release tag is prerelease-like'
     else latest=unknown; detail='latest stable plugin release could not be verified'
     fi
+  elif [ "$policy" = stable-tag ] && [ "$recorded_ref" = stable ]; then
+    latest=$(resolve_tag_commit "$repo" "$recorded_ref")
+    detail='publisher stable tag'
   elif [ "$policy" = head ] && [ "$recorded_ref" = HEAD ]; then
     latest=$(run_timed "$NETWORK_TIMEOUT" "$GIT_BIN" ls-remote "https://github.com/$repo.git" HEAD 2>/dev/null | awk '$2 == "HEAD" {print $1; exit}')
     detail='upstream publishes no release feed; exact default-branch commit is the documented exception'
@@ -539,16 +544,16 @@ collect() {
   done
   append_tool "$(check_antigravity)"
   append_tool "$(check_cursor)"
-  append_tool "$(check_git_repo firstmate "$FIRSTMATE_PATH" https://github.com/kunchenguid/firstmate.git "$FIRSTMATE_REV" exact-commit guarded-exact)"
+  append_tool "$(check_git_repo firstmate "$FIRSTMATE_PATH" https://github.com/kunchenguid/firstmate.git stable-main guarded-exact)"
   append_tool "$(check_baby_menu)"
   append_tool "$(check_kun_loader)"
   append_tool "$(check_mattpocock_skills)"
   append_tool "$(check_nix_installer)"
   append_tool "$(check_nix_input nixpkgs-input https://github.com/NixOS/nixpkgs.git "refs/heads/nixos-${NIXPKGS_CHANNEL}" "$NIXPKGS_REV" nixpkgs)"
   append_tool "$(check_nix_input home-manager-input https://github.com/nix-community/home-manager.git "refs/heads/release-${HOME_MANAGER_CHANNEL}" "$HOME_MANAGER_REV" home-manager)"
-  append_tool "$(check_npx_tool opencode-acp opencode-ai "$OPENCODE_ACP_VERSION")"
-  append_tool "$(check_npx_tool omp-acp omp-acp "$OMP_ACP_VERSION")"
-  append_tool "$(check_npx_tool claude-spend claude-spend "$CLAUDE_SPEND_VERSION")"
+  append_tool "$(check_npx_tool opencode-acp opencode-ai)"
+  append_tool "$(check_npx_tool omp-acp omp-acp)"
+  append_tool "$(check_npx_tool claude-spend claude-spend)"
   for row in "${NIX_PACKAGE_PINS[@]}"; do
     IFS='|' read -r package command_name version evidence <<<"$row"
     append_tool "$(check_nix_package "$package" "$command_name" "$version" "$evidence")"

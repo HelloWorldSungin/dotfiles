@@ -1,12 +1,11 @@
 # Developer and agent tool version ownership
 
 `config/dev-tools-versions.sh` is the machine-readable owner for external tool
-pins and stable source policies. `flake.lock` owns the immutable Nix input revisions, and
-`config/nvim/lazy-lock.json` owns Neovim plugin commits. The pins below were
-verified on 2026-09-10 against each publisher's registry, release feed, or
-manifest. The [audit evidence](tool-updates/2026-09-10/README.md) records the
-publisher provenance, checksums, value-free contract comparisons, and pending
-live convergence.
+selectors and audited pins. `flake.lock` owns the immutable Nix input revisions,
+and `config/nvim/lazy-lock.json` owns Neovim plugin commits. The
+[2026-09-10 audit evidence](tool-updates/2026-09-10/README.md) records the
+initial pin review, publisher provenance, checksums, and pending live
+convergence; moving selections below resolve at invocation.
 GBrain is excluded from this sweep; its report-only row remains unchanged.
 A version is stable only when the publisher's stable/default registry
 tag or a non-draft, non-prerelease release says so. Numeric tags containing
@@ -14,17 +13,17 @@ alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
 
 ## External pins and stable policies
 
-| Tool | Exact pin | Authority and stable judgment | Fresh install | Apply boundary |
+| Tool | Selection | Authority and stable judgment | Fresh install | Apply boundary |
 |---|---:|---|---|---|
-| Determinate Nix Installer | 3.22.3 | Determinate GitHub GA release, with v3.22.0 prerelease excluded | Versioned installer URL plus recorded installer SHA-256 | Report only |
+| Determinate Nix Installer | Verified 3.22.3 exception | Latest stable was 3.24.2 at review, but its installer lacks a publisher checksum | Versioned installer URL plus recorded installer SHA-256 | Report only |
 | Claude Code | Latest at invocation | npm default `latest` tag, not the `stable` dist-tag. Numeric stable only; guarded apply stays off | Resolve version and integrity, then verify the exact artifact. Install-if-absent | Report only |
 | Codex | Latest at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify the exact artifact. Install-if-absent | Report only |
 | OpenCode | Latest at invocation | npm default `latest` tag; suffixed beta and snapshot versions are refused | Resolve version and integrity, then verify the exact artifact. Install-if-absent | Report only |
 | Pi | Latest at invocation | `@earendil-works/pi-coding-agent` default tag. The retired Mario Zechner package is not the fleet distribution | Resolve version and integrity, then verify the exact artifact. Install-if-absent | Report only |
 | Antigravity CLI | Latest production manifest at invocation | Google's per-platform production manifest | Publisher asset and SHA-512 from that manifest. Install-if-absent | Report only; its own self-update remains an upstream limitation |
 | Cursor Agent | 2026.09.08-6caf4ff | Version embedded in Cursor's official moving installer | No automated install; observed snapshot only | Report only |
-| Treehouse | 2.3.0 | Latest non-draft, non-prerelease GitHub release | Exact release archive and publisher checksum | Report only |
-| no-mistakes | 1.72.0 | Latest GitHub GA release; 1.73.0 and 1.74.0 prereleases are excluded | Exact release archive and publisher checksum | Attended only |
+| Treehouse | Latest stable at invocation | Latest non-draft, non-prerelease GitHub release, resolved once per operation | Release archive verified against that release's publisher `checksums.txt`, only when absent | Report only |
+| no-mistakes | Latest stable at invocation | Latest non-draft, non-prerelease GitHub release; later prerelease tags are excluded automatically | Release archive verified against that release's publisher `checksums.txt`, only when absent | Attended only |
 | Herdr | Latest stable at invocation | `herdr.dev/latest.json` | Publisher asset and SHA-256, only when absent | Attended compatibility review; activation deferred |
 | GBrain | 0.48.5.0 | Latest non-draft, non-prerelease `garrytan/gbrain` release | Not installed here | Firstmate-owned attended migration |
 | gnhf | Latest at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify the exact artifact | Guarded exact apply with receipts |
@@ -33,11 +32,11 @@ alpha, beta, preview, nightly, snapshot, or another suffix are excluded.
 | quota-axi | Latest stable at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify exact artifact | Guarded exact apply with receipts |
 | chrome-devtools-axi | Latest stable at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify exact artifact | Guarded exact apply with receipts |
 | lavish-axi | Latest stable at invocation | npm default `latest` tag; numeric stable only | Resolve version and integrity, then verify exact artifact | Guarded exact apply with receipts |
-| OpenCode ACP invocation | 1.18.30 | npm default tag | Exact `npx` spec in `config/baby-menu/agents.json` | Report only |
-| OMP ACP invocation | 0.1.2 | npm default tag | Exact `npx` spec in `config/baby-menu/agents.json` | Report only |
-| claude-spend invocation | 1.0.6 | npm default tag | `CLAUDE_SPEND_VERSION` in `config/dev-tools-versions.sh`, read at run time by `bin/claude-spend-pinned` (the `cspend` alias) | Report only |
-| Firstmate source | `0fe226c93efd...` | Held at the existing audited commit pending fork reconciliation through Firstmate upstream-sync | Exact commit | Guarded exact fast-forward only |
-| Baby Menu source | 0.1.24 / `65eb280ea0e0...` | Latest non-prerelease `baby-menu-v0.1.24` release | Exact release commit | Report only |
+| OpenCode ACP invocation | Latest stable per launch | npm default tag; numeric version and publisher SHA-512 verified against the packed archive before local-tarball `npx` invocation | `npm-run-latest-stable` in `config/baby-menu/agents.json` | Report only |
+| OMP ACP invocation | Latest stable per launch | Same verified npm selection | `npm-run-latest-stable` in `config/baby-menu/agents.json` | Report only |
+| claude-spend invocation | Latest stable per launch | Same verified npm selection | The `cspend` alias delegates to `npm-run-latest-stable` | Report only |
+| Firstmate source | Current upstream `main` | Authoritative default branch commit resolved once and verified after clone or fetch | Exact resolved commit on `main` | Guarded fast-forward with receipt |
+| Baby Menu source | Latest stable release | Latest non-draft, non-prerelease `baby-menu-v` release resolved to a commit | Exact resolved release commit in a detached checkout | Report only |
 | actions/checkout | v7.0.1 / `3d3c42e5aac5...` | Latest GitHub GA action release | Exact workflow action SHA | CI only |
 | Determinate Nix Installer action | v23 / `3138316df39e...` | Latest GitHub GA action release | Exact workflow action SHA | CI only |
 | Kun loader | [KUN_LOADER_REV and KUN_LOADER_SHA256](../config/dev-tools-versions.sh) | Exact `skills/kun/SKILL.md` from `kunchenguid/kun`; living ENTRY/TOOLS/OPINIONS/VOICE files are not this pin | Repository copy via Home Manager | Reviewed `skill-reviewed-updates` adopt; never live skill stores |
@@ -101,7 +100,8 @@ Firstmate npm tools select the publisher default tag at invocation:
 `claude`, `codex`, `opencode`, `pi`, `gnhf`, `gh-axi`, `tasks-axi`,
 `quota-axi`, `chrome-devtools-axi`, and `lavish-axi`. The `latest|publisher`
 rows reject prereleases, a non-default channel, or missing integrity, then
-re-query the resolved exact version before installation. Receipts still bind
+re-query the resolved exact version and verify its packed archive against that
+integrity before installing the local tarball. Receipts still bind
 that exact version and integrity. `dev-tools-install-pinned` retains its
 command name and install-if-absent behavior: an existing command is skipped
 before discovery, including one outside the configured install prefix. A
@@ -115,15 +115,31 @@ is left in place. Herdr keeps its publisher stable manifest and attended
 boundary. Cursor remains the beta-only exception below.
 
 `dev-tools-apply-updates` independently resolves each moving npm target and
-requires it to match the checker's stable result. It then uses the existing
-exact integrity verification, active-worker protection, prefix observation,
+requires it to match the checker's stable result. It verifies the packed
+archive before previewing or installing from that local file, then uses the
+active-worker protection, prefix observation,
 prior-artifact evidence and mode-0600 receipt path. Receipts bind exact versions
 and integrity for rollback even after the tag moves. A newer numeric installed
 version is left alone; this policy does not automatically downgrade it. No
 background apply timer is added. Busy lanes defer the current invocation; a
 later manual invocation retries. There is no durable retry queue, automatic
 retry hook, cross-session usage authority or admission protocol. no-mistakes
-remains pinned and attended-only.
+stays attended-only.
+
+Treehouse and no-mistakes select the latest non-draft, non-prerelease GitHub
+release (`latest|latest-archive` rows). The installer resolves that release once
+per operation, fetches the same release's publisher `checksums.txt`, requires
+exactly one SHA-256 entry for the platform archive, verifies the downloaded
+archive against it, and requires the archive's own binary to report the resolved
+version before anything is installed. A missing or ambiguous checksum entry, a
+mismatch, a draft, a prerelease, a non-numeric tag or a version mismatch installs
+nothing. Existing commands are never replaced or upgraded by bootstrap, and this
+policy never starts, stops or restarts the no-mistakes daemon. Treehouse 3.x
+reads the 2.x pool format and keeps every lease, but `treehouse status` rewrites
+the pool state to version 4 and its dirty return and interactive exit paths now
+exit 3 instead of 0 (Firstmate's machine callers use `get --lease` and
+`return --force`, which are unaffected); activating it on a live pool is an
+attended step, not part of this policy.
 
 Herdr uses the top-level version, platform asset URL and SHA-256 from the
 [publisher stable manifest](https://herdr.dev/latest.json), never its preview
@@ -145,21 +161,39 @@ cask versions or an unverified direct download. Review any existing external
 pin or nightly installation before that separate operation; dotfiles does not
 alter it or terminate open terminals. No WezTerm installer is added here.
 
-## Remaining exact selections
+## Selection and application boundaries
 
-An exact pin stays only for a compatibility or safety reason, and each one
-names the condition that removes it. Official latest stable is the default
-for the Firstmate tools above.
+Firstmate selects the current upstream `main` commit. The guarded updater
+independently fetches and compares that commit, requires a clean local `main`
+that can fast-forward, refuses active worker lanes, and records exact prior and
+target commits before mutation. Baby Menu selects the latest stable release
+for a fresh checkout and leaves an existing checkout untouched. Kun and Matt
+skills continue through reviewed adoption; Matt's live plugin bytes remain
+owned by Claude marketplace autoUpdate.
 
-| Selection | Reason | Removal condition |
-|---|---|---|
-| Cursor Agent | Beta only. Upstream publishes a moving installer and auto-update, with no stable or exact-version selector and no publisher checksum. The checker records the observed snapshot and never runs the installer. | Remove when Cursor publishes a stable exact-version artifact and a publisher checksum the existing checker can verify. |
-| Firstmate source | Exact audited commit. Guarded apply fast-forwards only to that commit after proving it is on authoritative `main`. A checkout that is ahead, diverged, or dirty is refused. Latest selection does not reset, rebase, or discard local commits. | Remove when that checkout is a clean fast-forward of upstream `main` and no local commits remain. Until then the target stays the audited commit. |
-| Treehouse and no-mistakes | GitHub latest does not publish a checksum the existing archive installer can bind. Recorded release SHA-256 stays the verification receipt, so it also stays the selection. no-mistakes stays attended-only; this policy never starts or restarts its daemon. | Remove a tool's exact archive pin when its non-prerelease latest release publishes a checksum this installer already knows how to verify. no-mistakes also stays attended while its daemon can still be serving a live validation. |
-| GBrain | Excluded. No upgrade, patch, or dream path is selected here. The report-only row stays at its recorded release. | Remove only through Firstmate's own migration procedure, not through this updater. |
-| Baby Menu, Kun loader, Matt Pocock skills | Baby Menu is a detached release checkout and an existing repository is never moved. Kun and Matt stay on the reviewed adopt path; Matt live bytes belong to Claude marketplace autoUpdate. | Remove when that existing adopt path can resolve a non-prerelease latest and verify it without writing live skill stores or moving a checkout that already exists. |
-| OpenCode ACP, OMP ACP, claude-spend | Launch and wrapper specs. `npx` has no integrity re-check in this repository, so those specs stay exact while the OpenCode CLI install resolves latest. | Remove when the launch path re-verifies registry integrity the way `dev-tools-install-pinned` does. |
-| Nixpkgs, Home Manager, Nix installer, CI action SHAs, Neovim plugins | OS and base packages, workflow action commits, and editor plugins. Not Firstmate developer-tool selection. `flake.lock` is unchanged. Model defaults are unchanged. | Remove only in a change whose scope is that lock, workflow, or package set. This policy does not edit them. |
+Firstmate's GitHub `releases/latest` endpoint returned 404 on 2026-11-11; it
+does not offer a GA version selector. The current upstream `main` commit is
+the available source target, and the fast-forward and active-lane checks keep
+that selection from discarding unlanded work.
+
+The Nix update path selects the current `nixos-26.05` and matching Home Manager
+stable branches with `nix flake update`. `flake.lock` and the package versions
+in the manifest record that selected dependency graph for reproducible builds;
+they are refreshed together during an attended update. Neovim release-bearing
+plugins use lazy.nvim's latest stable version selector, while
+`config/nvim/lazy-lock.json` records the chosen commits. Plugins without a
+release feed use the upstream default branch. CI actions resolve stable
+releases to exact commit SHAs before workflow adoption.
+
+Cursor publishes only a moving beta installer, so this repository has no
+verifiable stable selection for it and never runs the installer. The Determinate
+Nix installer is a temporary named exception: 3.22.3 remains the last verified
+script while upstream's latest stable release was 3.24.2 at this review. Its
+versioned installer has no published per-tag checksum (the checked `v3.22.3`
+checksum URL returned 404 on 2026-11-11), so the recorded SHA-256 remains the
+safe receipt until a publisher-verifiable stable update path exists.
+GBrain remains outside dotfiles activation and follows Firstmate's attended
+migration procedure.
 
 Source inspection on 2026-09-15 confirmed the Herdr manifest schema and
 WezTerm stable cask instructions. npm documents its default `latest` lookup in
@@ -177,7 +211,7 @@ deprecated 25.11 channel. The lock file carries the content hashes.
 | Package | Version | Package | Version |
 |---|---:|---|---:|
 | gh | 2.100.0 | lazygit | 0.61.1 |
-| nodejs_22 | 22.23.2 | uv | 0.11.21 |
+| nodejs | 24.19.0 | uv | 0.11.21 |
 | bats | 1.12.0 | ripgrep | 15.1.0 |
 | fd | 10.4.2 | fzf | 0.72.0 |
 | jq | 1.8.2 | tree | 2.3.2 |
@@ -209,28 +243,27 @@ a manifest that is absent, unreadable, malformed, does not bind the package, or
 binds a path without a runnable version command reports `unknown` and says which
 of those it was. So a repository-checkout run - the script rather than the
 packaged wrapper - reports every `closure` row as `unknown` instead of measuring
-the wrong binary. `git`, `jq`, and `nodejs_22` are wrapper inputs too, but they
+the wrong binary. `git`, `jq`, and `nodejs` are wrapper inputs too, but they
 are also in the user environment, so they stay `user-env`: an operator whose
 `node` resolves to another build still sees that drift. Home Manager modules also own home-manager,
 Neovim, zsh, Starship, fzf, and Git. Neovim's fourteen plugin commits remain
 independently exact in `config/nvim/lazy-lock.json`; the initial lazy.nvim clone
-uses the exact v11.17.5 GA tag instead of the moving `stable` alias, and the lock
-then enforces its audited commit.
+checks out that recorded commit. Intentional updates select upstream's `stable`
+tag and record its commit in the lock.
 
 ## Neovim plugin pins
 
-Plugins with a GitHub release feed use the latest non-draft, non-prerelease
-release. Projects without releases are pinned to the audited default-branch
-commit and are marked as an explicit limitation rather than described as a
-release. The checker compares the installed checkout, lock-file commit, and
-current authoritative release or branch commit.
+Plugins with a GitHub release feed select the latest stable version on update.
+Projects without releases select their default branch. The checker compares
+the installed checkout, recorded lock-file commit, and current authoritative
+release or branch commit.
 
 | Plugin | Stable source | Exact commit |
 |---|---|---|
 | codewindow.nvim | No releases; default branch at audit time | `a8e175043ce3baaa89e0a6b5171bcd920aab3dad` |
 | diffview.nvim | No releases; default branch at audit time | `4516612fe98ff56ae0415a259ff6361a89419b0a` |
 | gitsigns.nvim | v2.1.0 GA | `a462f416e2ce4744531c6256252dee99a7d34a83` |
-| lazy.nvim | v11.17.5 GA | `85c7ff3711b730b4030d03144f6db6375044ae82` |
+| lazy.nvim | Publisher `stable` tag | `85c7ff3711b730b4030d03144f6db6375044ae82` |
 | neogit | v2.0.0 GA | `43fa47fb61773b0d90a78ebc2521ea8faaeebd86` |
 | nvim-treesitter | No releases; default branch at audit time | `d4d59cb369da46b95699bd2200efbcffc6dadb3b` |
 | nvim-autopairs | 0.10.0 GA tag | `23320e75953ac82e559c610bec5a90d9c6dfa743` |
@@ -301,8 +334,8 @@ Bootstrap invokes it after the exact Nix and Home Manager bootstrap.
 
 `dev-tools-apply-updates` has only two mutation scopes:
 
-1. Fast-forward Firstmate's `main` branch to the exact recorded commit, after
-   proving the commit belongs to the freshly read remote branch.
+1. Fast-forward Firstmate's `main` branch to the latest upstream commit, after
+   independently proving it matches the freshly fetched remote branch.
 2. Install the five axi tools and gnhf at resolved stable versions, after
    independently verifying each exact artifact and integrity. Harness CLIs
    are not in this scope.
@@ -327,9 +360,9 @@ selection the apply path uses.
 
 Both directions then run one shared comparison, so a preview's status and exit
 code are the apply's: `up_to_date` only on equality, `would_apply` only on a
-proven local ancestor of the pin, and a refusal - non-zero, never a quiet
-`skipped` - when the pin is absent from or not contained in the authoritative
-branch, or when the checkout is ahead of or diverged from it. The apply path
+proven local ancestor of the selected upstream commit, and a refusal - non-zero,
+never a quiet `skipped` - when the selected commit differs from the authoritative
+remote branch, or when the checkout is ahead of or diverged from it. The apply path
 repeats its own fresh `ls-remote`, fetch, and remote-movement check before
 running that comparison against the real checkout, and never trusts a dry-run
 result. Anything the preview cannot prove - an unreachable remote, a remote that
@@ -376,7 +409,7 @@ tarball at `$DEV_TOOLS_APPLY_PRIOR_ARTIFACT_DIR/<package>-<version>.tgz`
 package at that version - the filename alone is never trusted, because
 `npm install -g <tarball>` takes its target from the contents - and its checksum
 then becomes the recorded prior evidence, pinning the bytes whose identity was
-verified. A reversal reinstalls that file after re-verifying the checksum,
+verified. A reversal reinstalls a private verified copy of that file,
 refusing if it has moved or changed. The installed version must also have a
 shape a reversal could restore (`X.Y.Z`, optionally with a fourth component); a
 prerelease or two-component version is refused rather than recorded as
@@ -438,7 +471,9 @@ and the tier never ends up half reverted.
 
 Reversal is then `git reset --hard <prior commit>` - never a force, and never a
 discard of local changes - and an npm reinstall of only the exact prior version
-the receipt records. Each re-proves its whole tier precondition immediately before
+the receipt records. Registry backed reversals verify the packed prior archive
+against the receipt's SHA-512 and install that local file; operator artifacts
+are copied and verified before installation. Each re-proves its whole tier precondition immediately before
 mutating, not only at preflight time: observed state, the worker lane, the branch
 and clean checkout with verified ancestry for Firstmate, and the recorded prior
 artifact evidence for npm. Bounded registry time separates the preflight from the
@@ -461,20 +496,25 @@ both directions.
 
 ## Attended runtime upgrade sequence
 
-1. Land and fast-forward the pin change before running any repository script.
+1. Land and fast-forward the repository change before running any repository
+   script.
 2. Wait until all Firstmate worker lanes and no-mistakes validation runs are
    clear. Record the checker output and take any tool-specific backup first.
 3. Preview the two safe scopes with `dev-tools-apply-updates --dry-run`, then run
    the guarded apply if its independently verified exact versions are correct.
    Keep the receipt path it prints; reversing either tier is attended and starts
    from `dev-tools-apply-updates --rollback <receipt>`.
-4. Upgrade no-mistakes separately in an attended window. Confirm there is no
+4. Upgrade Treehouse separately in an attended window. Inventory the pool slots
+   and durable leases before and after the upgrade, without pruning or returning
+   slots or discarding unlanded work. Bootstrap and guarded apply leave an
+   existing Treehouse binary in place.
+5. Upgrade no-mistakes separately in an attended window. Confirm there is no
    active shared-daemon work before touching its binary or daemon, then validate
-   the installed version against the pin.
-5. Upgrade Herdr separately in an attended window using its publisher-owned
+   the installed version against the checker's latest stable result.
+6. Upgrade Herdr separately in an attended window using its publisher-owned
    update flow. Review client/server compatibility and release notes first, and
    verify the live fleet is clear before any server lifecycle action.
-6. Upgrade GBrain only through Firstmate's documented backup, baseline,
+7. Upgrade GBrain only through Firstmate's documented backup, baseline,
    compatibility, migration, smoke-test, evaluation, and rollback procedure.
-7. Re-run the read-only checker. Any unknown source, version mismatch, or
+8. Re-run the read-only checker. Any unknown source, version mismatch, or
    prerelease result is a refusal to declare convergence.

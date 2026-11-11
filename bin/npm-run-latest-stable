@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+NPM_BIN=${DEV_TOOLS_NPM_BIN:-npm}
+NPX_BIN=${DEV_TOOLS_NPX_BIN:-npx}
+SELF_DIR=$(cd "$(dirname "$0")" && pwd)
+NPM_PACK_BIN=${DEV_TOOLS_NPM_PACK_BIN:-$SELF_DIR/npm-pack-verified}
+
+[ "$#" -ge 1 ] || { printf 'npm-run-latest-stable: package required\n' >&2; exit 2; }
+package=$1
+shift
+case "$package" in
+  opencode-ai) command_name=opencode ;;
+  omp-acp) command_name=omp-acp ;;
+  claude-spend) command_name=claude-spend ;;
+  *) printf 'npm-run-latest-stable: unsupported package: %s\n' "$package" >&2; exit 2 ;;
+esac
+
+latest=$($NPM_BIN view "$package@latest" version dist.integrity --json)
+version=$(printf '%s' "$latest" | jq -er '.version | strings')
+integrity=$(printf '%s' "$latest" | jq -er '."dist.integrity" // .dist.integrity | strings')
+printf '%s\n' "$version" | grep -Eq '^[0-9]+(\.[0-9]+){2,3}$' || { printf 'npm-run-latest-stable: unstable version\n' >&2; exit 1; }
+printf '%s\n' "$integrity" | grep -Eq '^sha512-[A-Za-z0-9+/]+={0,2}$' || { printf 'npm-run-latest-stable: publisher integrity missing\n' >&2; exit 1; }
+
+exact=$($NPM_BIN view "$package@$version" version dist.integrity --json)
+exact_version=$(printf '%s' "$exact" | jq -er '.version | strings')
+exact_integrity=$(printf '%s' "$exact" | jq -er '."dist.integrity" // .dist.integrity | strings')
+[ "$exact_version" = "$version" ] && [ "$exact_integrity" = "$integrity" ] || {
+  printf 'npm-run-latest-stable: resolved artifact changed\n' >&2
+  exit 1
+}
+
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/npm-latest-stable.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+archive=$("$NPM_PACK_BIN" "$NPM_BIN" "$package" "$version" "$integrity" "$tmp") || {
+  printf 'npm-run-latest-stable: packed artifact could not be verified\n' >&2
+  exit 1
+}
+
+"$NPX_BIN" --yes --package="$archive" "$command_name" "$@"

@@ -103,9 +103,9 @@ pass "invalid settings.json is refused and left untouched"
 
 # ------------------------------------------ Pi resolves the rendered default
 command -v node >/dev/null 2>&1 || fail "missing test dependency: node"
-PI_PKG="${NPM_CONFIG_PREFIX:-$HOME/.npm-global}/lib/node_modules/@earendil-works/pi-coding-agent"
-jq -e '.name == "@earendil-works/pi-coding-agent"' "$PI_PKG/package.json" >/dev/null \
-  || fail "missing or invalid test dependency: $PI_PKG"
+pi_command=$(command -v pi) || fail "missing test dependency: pi"
+PI_PKG=$(node "$ROOT/tests/pi-installed-package.mjs" "$pi_command") \
+  || fail "missing or invalid installed Pi package"
 
 agent_dir="$TMP_ROOT/existing/agent"
 resolved=$(PI_CODING_AGENT_DIR="$agent_dir" PI_OFFLINE=1 node --input-type=module - "$PI_PKG" "$agent_dir" <<'NODE'

@@ -41,7 +41,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
      debugging cycle.
   2. A `home-manager switch` never installs or refreshes the agent CLIs
      (`claude`, `codex`, `opencode`, `pi`, ...). `bootstrap.sh` delegates their
-     exact install-if-absent path to `bin/dev-tools-install-pinned`, deliberately
+     install-if-absent path to `bin/dev-tools-install-pinned`, deliberately
      outside Nix (`docs/dev-tool-versions.md` owns the complete inventory).
      `bootstrap.sh` is the superset - it runs the switch itself as step 2/6 - but
      it is install-if-missing, so it never upgrades a CLI that is already present.
@@ -61,9 +61,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `common.nix` and `sungin-ct110.nix` consume them through the `devTools` module
   argument, so the host module owns only its timer and zsh startup wiring.
 - `bin/dev-tools-apply-updates` is the guarded, opt-in companion that applies only
-  the two safe tiers the checker tracks (Firstmate exact fast-forward plus six
-  allowlisted npm-global tools); it delegates detection to the checker, independently
-  re-verifies exact artifacts, refuses when any
+  the two safe tiers the checker tracks (fast-forward to Firstmate's latest main
+  commit plus six allowlisted npm-global tools); it delegates detection to the
+  checker, independently re-verifies exact artifacts, refuses when any
   Firstmate worker lane is in flight (a `state/*.meta` file, mirroring
   `firstmate/bin/fm-supervision-lib.sh`), and is packaged on PATH with no timer.
   `--dry-run` verifies the Firstmate tier against the real remote in a private

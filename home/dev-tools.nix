@@ -23,8 +23,7 @@ let
     inherit (pkgs) coreutils curl diffutils gawk gnugrep gnused gnutar gzip python3;
   };
   userEnvInputs = {
-    inherit (pkgs) git jq;
-    nodejs_22 = pkgs.nodejs_22;
+    inherit (pkgs) git jq nodejs;
   };
   runtimeInputsByName = closureOnlyInputs // userEnvInputs;
   pick = names: map (name: runtimeInputsByName.${name}) names;
@@ -50,25 +49,38 @@ let
       ${builtins.readFile ../bin/dev-tools-check-updates}
     '';
     bashOptions = [ ]; # The checker deliberately handles source failures itself.
-    runtimeInputs = pick [ "coreutils" "curl" "gawk" "git" "gnugrep" "gnused" "jq" "nodejs_22" ];
+    runtimeInputs = pick [ "coreutils" "curl" "gawk" "git" "gnugrep" "gnused" "jq" "nodejs" ];
+  };
+
+  npmPackVerified = pkgs.writeShellApplication {
+    name = "npm-pack-verified";
+    text = builtins.readFile ../bin/npm-pack-verified;
+    runtimeInputs = pick [ "coreutils" "gnugrep" "jq" "nodejs" ];
   };
 
   pinnedInstaller = pkgs.writeShellApplication {
     name = "dev-tools-install-pinned";
     text = ''
       export DEV_TOOLS_PINS_FILE=${pins}
+      export DEV_TOOLS_NPM_PACK_BIN=${npmPackVerified}/bin/npm-pack-verified
       ${builtins.readFile ../bin/dev-tools-install-pinned}
     '';
-    runtimeInputs = pick [ "coreutils" "curl" "gawk" "git" "gnugrep" "gnutar" "gzip" "jq" "nodejs_22" ];
+    runtimeInputs = pick [ "coreutils" "curl" "gawk" "git" "gnugrep" "gnutar" "gzip" "jq" "nodejs" ] ++ [ npmPackVerified ];
+  };
+
+  npmRunLatestStable = pkgs.writeShellApplication {
+    name = "npm-run-latest-stable";
+    text = ''
+      export DEV_TOOLS_NPM_PACK_BIN=${npmPackVerified}/bin/npm-pack-verified
+      ${builtins.readFile ../bin/npm-run-latest-stable}
+    '';
+    runtimeInputs = pick [ "coreutils" "gnugrep" "jq" "nodejs" ] ++ [ npmPackVerified ];
   };
 
   claudeSpendPinned = pkgs.writeShellApplication {
     name = "claude-spend-pinned";
-    text = ''
-      export DEV_TOOLS_PINS_FILE=${pins}
-      ${builtins.readFile ../bin/claude-spend-pinned}
-    '';
-    runtimeInputs = pick [ "coreutils" "gnugrep" "nodejs_22" ];
+    text = builtins.readFile ../bin/claude-spend-pinned;
+    runtimeInputs = [ npmRunLatestStable ];
   };
 
   claudeSetCompactionWindow = pkgs.writeShellApplication {
@@ -118,11 +130,12 @@ let
     name = "dev-tools-apply-updates";
     text = ''
       export DEV_TOOLS_PINS_FILE=${pins}
+      export DEV_TOOLS_NPM_PACK_BIN=${npmPackVerified}/bin/npm-pack-verified
       ${builtins.readFile ../bin/dev-tools-apply-updates}
     '';
     bashOptions = [ ]; # Applies each tier independently and handles failures itself.
-    runtimeInputs = pick [ "coreutils" "gawk" "git" "gnugrep" "gnused" "gnutar" "gzip" "jq" "nodejs_22" ]
-      ++ [ checker ];
+    runtimeInputs = pick [ "coreutils" "gawk" "git" "gnugrep" "gnused" "gnutar" "gzip" "jq" "nodejs" ]
+      ++ [ checker npmPackVerified ];
   };
 
   # Opt-in reviewed adoption for the Kun loader and Matt skills pins. Installed
@@ -144,7 +157,7 @@ in
   _module.args.devTools = {
     inherit
       closureOnlyInputs userEnvInputs closureManifest pins flakeLock nvimPluginLock
-      checker pinnedInstaller claudeSpendPinned claudeSetCompactionWindow codexSetContextWindow codexSetModelDefaults piSetModelDefaults piSetCompactionReserve noMistakesSetAgentPolicy applyUpdates
+      checker npmPackVerified pinnedInstaller npmRunLatestStable claudeSpendPinned claudeSetCompactionWindow codexSetContextWindow codexSetModelDefaults piSetModelDefaults piSetCompactionReserve noMistakesSetAgentPolicy applyUpdates
       skillReviewedUpdates;
   };
 }

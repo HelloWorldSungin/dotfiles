@@ -92,7 +92,7 @@ SCRATCH="$TMP_ROOT/repo"
 mkdir -p "$SCRATCH"
 tar -C "$ROOT" --exclude=./.git -cf - . | tar -C "$SCRATCH" -xf -
 # Adds one package to the checker's declared runtime closure and nothing else.
-CHECKER_ONLY_INPUT='"coreutils" "curl" "gawk" "git" "gnugrep" "gnused" "jq" "nodejs_22"'
+CHECKER_ONLY_INPUT='"coreutils" "curl" "gawk" "git" "gnugrep" "gnused" "jq" "nodejs"'
 [ "$(grep -cF "$CHECKER_ONLY_INPUT" "$SCRATCH/home/dev-tools.nix")" -eq 1 ] \
   || fail 'the mutation fixture no longer targets exactly the checker closure'
 python3 - "$SCRATCH/home/dev-tools.nix" "$CHECKER_ONLY_INPUT" <<'MUTATE'
@@ -128,11 +128,15 @@ APPLY_BIN="$PACKAGED/bin/dev-tools-apply-updates"
 # shellcheck source=../config/dev-tools-versions.sh
 # shellcheck disable=SC1091
 source "$ROOT/config/dev-tools-versions.sh"
+TARGET_BODY='target archive'
+PRIOR_BODY='prior archive'
+TARGET_INTEGRITY=$(node -e 'process.stdout.write("sha512-" + require("node:crypto").createHash("sha512").update(process.argv[1]).digest("base64"))' "$TARGET_BODY")
+PRIOR_INTEGRITY=$(node -e 'process.stdout.write("sha512-" + require("node:crypto").createHash("sha512").update(process.argv[1]).digest("base64"))' "$PRIOR_BODY")
 for row in "${NPM_TOOL_PINS[@]}"; do
   IFS='|' read -r name command_name _package version integrity guarded _channel <<<"$row"
   [ "$name" = quota-axi ] || continue
   QUOTA_COMMAND=$command_name; QUOTA_VERSION=$version; QUOTA_INTEGRITY=$integrity
-  if [ "$version" = latest ]; then QUOTA_VERSION=1.2.3; QUOTA_INTEGRITY=sha512-ZGV0ZXJtaW5pc3RpYw==; fi
+  if [ "$version" = latest ]; then QUOTA_VERSION=1.2.3; QUOTA_INTEGRITY=$TARGET_INTEGRITY; fi
   [ "$guarded" = yes ] || fail 'quota-axi is no longer a guarded pin'
 done
 : "${QUOTA_VERSION:?quota-axi pin missing}"
@@ -154,10 +158,10 @@ mkdir -p "$STUBS" "$PREFIX/bin" "$STATE" "$TMP_ROOT/home"
 printf '#!%s\nprintf "%s 0.0.1\\n"\n' "$BASH_BIN" "$QUOTA_COMMAND" >"$PREFIX/bin/$QUOTA_COMMAND"
 chmod +x "$PREFIX/bin/$QUOTA_COMMAND"
 
-DETECTION=$(jq -cn --arg pin "$FIRSTMATE_REV" --arg head "$(git -C "$CHECKOUT" rev-parse HEAD)" \
+DETECTION=$(jq -cn --arg latest aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --arg head "$(git -C "$CHECKOUT" rev-parse HEAD)" \
   --arg quota "$QUOTA_VERSION" \
   '{schema_version:4,tools:[
-      {name:"firstmate",current:$head,pinned:$pin,latest_stable:$pin,status:"drifted"},
+      {name:"firstmate",current:$head,pinned:"latest",latest_stable:$latest,status:"drifted"},
       {name:"quota-axi",current:"0.0.1",pinned:$quota,latest_stable:$quota,status:"drifted"}
     ]}')
 cat >"$STUBS/checker" <<SH
@@ -170,12 +174,23 @@ if [ "\$1" = view ]; then
   version=\${2##*@}
   [ "\$version" = latest ] && version='$QUOTA_VERSION'
   if [ "\$version" = '$QUOTA_VERSION' ]; then integrity='$QUOTA_INTEGRITY'
-  else integrity="sha512-prior-\$version"
+  else integrity='$PRIOR_INTEGRITY'
   fi
   printf '{"version":"%s","dist.integrity":"%s"}\n' "\$version" "\$integrity"
   exit 0
 fi
+if [ "\$1" = pack ]; then
+  package=\${2%@*}
+  version=\${2##*@}
+  [ "\$3" = --json ] && [ "\$4" = --pack-destination ] || exit 1
+  filename="\$package-\$version.tgz"
+  if [ "\$version" = '$QUOTA_VERSION' ]; then body='$TARGET_BODY'; else body='$PRIOR_BODY'; fi
+  printf '%s' "\$body" >"\$5/\$filename"
+  printf '[{"name":"%s","version":"%s","filename":"%s"}]\n' "\$package" "\$version" "\$filename"
+  exit 0
+fi
 if [ "\$1" = install ]; then
+  [ -f "\$3" ] || exit 1
   mkdir -p "\$NPM_CONFIG_PREFIX/bin"
   printf '#!$BASH_BIN\nprintf "%s %s\\\\n"\n' '$QUOTA_COMMAND' '$QUOTA_VERSION' >"\$NPM_CONFIG_PREFIX/bin/$QUOTA_COMMAND"
   chmod +x "\$NPM_CONFIG_PREFIX/bin/$QUOTA_COMMAND"
@@ -203,11 +218,11 @@ set -e
 [ -n "$json" ] || fail 'the packaged updater produced no result from its own closure'
 firstmate_status=$(printf '%s' "$json" | jq -r '.tiers.firstmate.status')
 firstmate_detail=$(printf '%s' "$json" | jq -r '.tiers.firstmate.detail')
-[ "$firstmate_detail" != 'unsafe Firstmate commit pin' ] \
+[ "$firstmate_detail" != 'unsafe latest Firstmate commit' ] \
   || fail 'a stripped PATH made the packaged updater reject its own well-formed commit pin'
 # awk is the only thing that turns `git ls-remote` output into the remote head;
 # without it the run stops one step earlier, at a different refusal.
-[ "$firstmate_detail" = 'the exact pin is absent from the authoritative Firstmate main branch' ] \
+[ "$firstmate_detail" = 'the authoritative Firstmate main branch moved after selection' ] \
   || fail "the packaged updater did not re-verify the authoritative remote: $firstmate_status - $firstmate_detail"
 quota_status=$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .status')
 quota_detail=$(printf '%s' "$json" | jq -r '.tiers.npm_global.packages[] | select(.name=="quota-axi") | .detail')
@@ -229,7 +244,7 @@ pass 'the packaged updater runs entirely from its declared closure'
 # config/dev-tools-versions.sh states that its Nix rows cover the runtime inputs
 # of the repository-owned wrappers, so the deployed closure and the manifest have
 # to agree. The comparison is by store path, not by name: an attribute whose
-# store name differs from it (nodejs_22 -> nodejs-22.23.2) would otherwise look
+# store name differs from it (nodejs -> nodejs-24.19.0) would otherwise look
 # like a miss. Scope is the four wrappers on PATH.
 # shellcheck source=../config/dev-tools-versions.sh
 # shellcheck disable=SC1091
@@ -265,7 +280,7 @@ wrapper_text() { # wrapper name -> its generated script
          else throw \"expected exactly one $1 package\""
 }
 
-for wrapper in dev-tools-check-updates dev-tools-install-pinned claude-spend-pinned dev-tools-apply-updates skill-reviewed-updates; do
+for wrapper in dev-tools-check-updates dev-tools-install-pinned npm-run-latest-stable claude-spend-pinned dev-tools-apply-updates skill-reviewed-updates; do
   text=$(wrapper_text "$wrapper") || fail "the generation does not ship exactly one $wrapper"
   path_line=$(grep -m1 '^export PATH=' <<<"$text") || fail "$wrapper declares no runtime closure"
   path_line=${path_line#export PATH=\"}
@@ -275,7 +290,7 @@ for wrapper in dev-tools-check-updates dev-tools-install-pinned claude-spend-pin
     store_path=${entry%/bin}
     # A wrapper may depend on a sibling wrapper; those are not nixpkgs packages.
     case "$store_path" in
-      *-dev-tools-check-updates|*-dev-tools-versions.sh|*-skill-reviewed-updates) continue ;;
+      *-dev-tools-check-updates|*-dev-tools-versions.sh|*-skill-reviewed-updates|*-npm-run-latest-stable|*-npm-pack-verified) continue ;;
     esac
     printf '%s\n' "$PINNED_PATHS" | grep -Fqx "$store_path" \
       || fail "$wrapper depends on ${store_path##*/} but no NIX_PACKAGE_PINS row names it"
@@ -332,14 +347,14 @@ done
 
 # Nothing a wrapper carries may be unmeasurable: each input is either in the
 # manifest, or user-facing and therefore honestly measured through PATH.
-for wrapper in dev-tools-check-updates dev-tools-install-pinned claude-spend-pinned dev-tools-apply-updates skill-reviewed-updates; do
+for wrapper in dev-tools-check-updates dev-tools-install-pinned npm-run-latest-stable claude-spend-pinned dev-tools-apply-updates skill-reviewed-updates; do
   text=$(wrapper_text "$wrapper") || fail "the generation does not ship exactly one $wrapper"
   path_line=$(grep -m1 '^export PATH=' <<<"$text") || fail "$wrapper declares no runtime closure"
   while IFS= read -r entry; do
     case "$entry" in /nix/store/*) : ;; *) continue ;; esac
     store_path=${entry%/bin}
     case "$store_path" in
-      *-dev-tools-check-updates|*-dev-tools-versions.sh|*-skill-reviewed-updates) continue ;;
+      *-dev-tools-check-updates|*-dev-tools-versions.sh|*-skill-reviewed-updates|*-npm-run-latest-stable|*-npm-pack-verified) continue ;;
     esac
     printf '%s' "$MANIFEST" | jq -e --arg p "$store_path" 'any(.[]; .store_path == $p)' >/dev/null && continue
     attr=$(awk -v p="$store_path" '$2 == p {print $1}' <<<"$PINNED_ROWS")

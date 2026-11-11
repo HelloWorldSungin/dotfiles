@@ -15,6 +15,14 @@ FAKEBIN="$FIXTURE/bin"
 mkdir -p "$FAKEBIN" "$FIXTURE/home/firstmate/.git" "$FIXTURE/home/baby-menu/.git" "$FIXTURE/nvim/lazy"
 PINS="$FIXTURE/pins.sh"
 cp "$ROOT/config/dev-tools-versions.sh" "$PINS"
+cat >>"$PINS" <<'PINS'
+FIRSTMATE_REV=0fe226c93efdd12a38f1c3936d758571e40111b7
+BABY_MENU_VERSION=0.1.24
+BABY_MENU_REV=65eb280ea0e05c17677f10b56afc75e91f899f65
+OPENCODE_ACP_VERSION=1.18.30
+OMP_ACP_VERSION=0.1.2
+CLAUDE_SPEND_VERSION=1.0.6
+PINS
 CURSOR_BODY="download=https://downloads.cursor.com/versions/2026.09.08-6caf4ff/cursor-agent/linux/x64/cursor-agent"
 CURSOR_HASH=$(printf '%s\n' "$CURSOR_BODY" | sha256sum | awk '{print $1}')
 printf '\nCURSOR_INSTALLER_SHA256=%s\n' "$CURSOR_HASH" >>"$PINS"
@@ -48,6 +56,32 @@ package=${spec%@latest}
 field=$3
 # shellcheck source=/dev/null
 source "$TEST_PINS"
+if [ "$1" = pack ]; then
+  [ "$3" = --json ] && [ "$4" = --pack-destination ] || exit 1
+  package=${2%@*}
+  version=${2##*@}
+  filename="$package-$version.tgz"
+  body="artifact:$package@$version"
+  [ "$package" = "${TEST_ACP_TAMPERED_PACKAGE:-}" ] && body="$body:tampered"
+  printf '%s' "$body" >"$5/$filename"
+  jq -cn --arg name "$package" --arg v "$version" --arg f "$filename" '[{name:$name,version:$v,filename:$f}]'
+  exit 0
+fi
+if [ "${4:-}" = dist.integrity ]; then
+  package=${2%@*}
+  version=${2##*@}
+  case "$package" in
+    opencode-ai) expected=${TEST_OPENCODE_ACP_RELEASE:-$OPENCODE_ACP_VERSION} ;;
+    omp-acp) expected=${TEST_OMP_ACP_RELEASE:-$OMP_ACP_VERSION} ;;
+    claude-spend) expected=$CLAUDE_SPEND_VERSION ;;
+    *) exit 1 ;;
+  esac
+  [ "$version" = latest ] && version=$expected
+  body="artifact:$package@$version"
+  integrity=$(node -e 'process.stdout.write("sha512-" + require("node:crypto").createHash("sha512").update(process.argv[1]).digest("base64"))' "$body")
+  jq -cn --arg v "$version" --arg i "$integrity" '{version:$v,"dist.integrity":$i}'
+  exit 0
+fi
 version=
 for row in "${NPM_TOOL_PINS[@]}"; do
   IFS='|' read -r _name _command candidate candidate_version _integrity _guarded _channel <<<"$row"
@@ -55,9 +89,9 @@ for row in "${NPM_TOOL_PINS[@]}"; do
 done
 # npx specs are separate from a moving CLI row for the same package name.
 case "$spec" in
-  opencode-ai) version=$OPENCODE_ACP_VERSION ;;
-  omp-acp) version=$OMP_ACP_VERSION ;;
-  claude-spend) version=$CLAUDE_SPEND_VERSION ;;
+  opencode-ai@latest) version=${TEST_OPENCODE_ACP_RELEASE:-$OPENCODE_ACP_VERSION} ;;
+  omp-acp@latest) version=${TEST_OMP_ACP_RELEASE:-$OMP_ACP_VERSION} ;;
+  claude-spend@latest) version=$CLAUDE_SPEND_VERSION ;;
 esac
 [ "$package" = "${TEST_NPM_PRERELEASE_PACKAGE:-}" ] && version=9.0.0-beta.1
 [ "$version" = latest ] && version=0.9.0
@@ -65,6 +99,17 @@ esac
 # A retired dist-tag: the registry answers successfully with no value at all.
 if [ "$field" = dist-tags.stable ] && [ "$package" = "${TEST_NPM_NO_STABLE_TAG:-}" ]; then exit 0; fi
 if [ "$field" = dist-tags.stable ] || [ "$field" = version ]; then jq -cn --arg v "$version" '$v'; else exit 1; fi
+SH
+
+cat >"$FAKEBIN/npx" <<'SH'
+#!/usr/bin/env bash
+[ "$1" = --yes ] || exit 1
+case "$2" in --package=*) archive=${2#--package=} ;; *) exit 1 ;; esac
+[ -f "$archive" ] || exit 1
+case "$3" in opencode|omp-acp) : ;; *) exit 1 ;; esac
+body=$(cat "$archive")
+shift 3
+printf '%s|%s\n' "$body" "$*" >>"$TEST_NPX_LOG"
 SH
 
 cat >"$FAKEBIN/curl" <<'SH'
@@ -113,6 +158,7 @@ case "$url" in
     tag=
     for row in "${GITHUB_TOOL_PINS[@]}"; do
       IFS='|' read -r name _command candidate version _install _apply <<<"$row"
+      [ "$version" = latest ] && version=0.9.0
       [ "$candidate" = "$repo" ] && [ "$name" != herdr ] && tag="v$version"
     done
     for row in "${NEOVIM_PLUGIN_PINS[@]}"; do
@@ -167,7 +213,7 @@ ref=${3:-HEAD}
 case "$repo|$ref" in
   *NixOS/nixpkgs.git*refs/heads/nixos-*) printf '%s\t%s\n' "$NIXPKGS_REV" "$ref"; exit 0 ;;
   *nix-community/home-manager.git*refs/heads/release-*) printf '%s\t%s\n' "$HOME_MANAGER_REV" "$ref"; exit 0 ;;
-  *kunchenguid/firstmate.git*HEAD) printf '%s\tHEAD\n' "$FIRSTMATE_REV"; exit 0 ;;
+  *kunchenguid/firstmate.git*refs/heads/main) printf '%s\trefs/heads/main\n' "$FIRSTMATE_REV"; exit 0 ;;
   *kunchenguid/baby-menu.git*HEAD) printf '%s\tHEAD\n' "$BABY_MENU_REV"; exit 0 ;;
   *kunchenguid/baby-menu.git*refs/tags/baby-menu-v*) printf '%s\t%s^{}\n' "$BABY_MENU_REV" "$ref"; exit 0 ;;
 esac
@@ -176,6 +222,9 @@ for row in "${NEOVIM_PLUGIN_PINS[@]}"; do
   IFS='|' read -r _name candidate _policy tag commit <<<"$row"
   [ "$candidate" = "$clean" ] || continue
   if [ "$ref" = HEAD ]; then printf '%s\tHEAD\n' "$commit"
+  elif [ "$tag" = stable ]; then
+    printf '%s\trefs/tags/stable\n' 332b4cbc8bf61589b6ff58ce42fca80173154669
+    printf '%s\trefs/tags/stable^{}\n' "${TEST_LAZY_STABLE_COMMIT:-$commit}"
   else printf '%s\trefs/tags/%s^{}\n' "$commit" "$tag"
   fi
   exit 0
@@ -199,6 +248,7 @@ printf '%s %s\n' "$command_name" "$*" >>"$TEST_CALL_LOG"
 for row in "${NPM_TOOL_PINS[@]}"; do
   IFS='|' read -r _name candidate _package version _integrity _guarded _channel <<<"$row"
   [ "$version" = latest ] && version=0.9.0
+  [ "$candidate" = opencode ] && version=$OPENCODE_ACP_VERSION
   [ "$candidate" = "$command_name" ] && { printf '%s %s\n' "$command_name" "$version"; exit 0; }
 done
 for row in "${GITHUB_TOOL_PINS[@]}"; do
@@ -286,14 +336,6 @@ for job in (workflow.get("jobs") or {}).values():
 PARSE_WORKFLOW
 }
 
-acp_launch_version() {
-  jq -r --arg agent "$2" --arg package "$3" '
-    .[] | select(.name == $agent) | .launchCommand | split(" ")
-    | map(select(startswith($package + "@"))) | first // ""
-    | ltrimstr($package + "@")
-  ' "$1"
-}
-
 run_checker() {
   env HOME="$FIXTURE/home" PATH="${TEST_PATH:-$PATH}" DEV_TOOLS_PINS_FILE="${TEST_PINS_FILE:-$PINS}" DEV_TOOLS_NVIM_LOCK_FILE="$ROOT/config/nvim/lazy-lock.json" \
     DEV_TOOLS_FLAKE_LOCK_FILE="${TEST_FLAKE_LOCK_FILE:-$ROOT/flake.lock}" \
@@ -306,7 +348,7 @@ run_checker() {
     TEST_NPM_PRERELEASE_PACKAGE="${TEST_NPM_PRERELEASE_PACKAGE:-}" TEST_PRERELEASE_REPO="${TEST_PRERELEASE_REPO:-}" \
     TEST_NPM_NO_STABLE_TAG="${TEST_NPM_NO_STABLE_TAG:-}" \
     TEST_HERDR_LATEST_VERSION="${TEST_HERDR_LATEST_VERSION:-}" TEST_ANTIGRAVITY_LATEST_VERSION="${TEST_ANTIGRAVITY_LATEST_VERSION:-}" \
-    TEST_KUN_LOADER="${TEST_KUN_LOADER:-$ROOT/skills/kun/SKILL.md}" \
+    TEST_KUN_LOADER="${TEST_KUN_LOADER:-$ROOT/skills/kun/SKILL.md}" TEST_LAZY_STABLE_COMMIT="${TEST_LAZY_STABLE_COMMIT:-}" \
     TEST_CHROME_ARGS="${TEST_CHROME_ARGS:---no-sandbox --disable-dev-shm-usage --disable-gpu}" "$CHECKER" "$@"
 }
 
@@ -318,7 +360,10 @@ expected=0
 for _row in "${NPM_TOOL_PINS[@]}" "${GITHUB_TOOL_PINS[@]}" "${NIX_PACKAGE_PINS[@]}" "${NEOVIM_PLUGIN_PINS[@]}" "${CI_ACTION_PINS[@]}"; do expected=$((expected + 1)); done
 expected=$((expected + 12)) # antigravity, Cursor, two repos, installer, two inputs, three npx tools, kun-loader, mattpocock-skills
 [ "$(printf '%s' "$json" | jq '.tools | length')" -eq "$expected" ] || fail 'complete manifest inventory was not emitted'
-[ "$(printf '%s' "$json" | jq '[.tools[] | select(.status != "up_to_date")] | length')" -eq 0 ] || fail 'matching installed, pinned, and latest values were not current'
+[ "$(printf '%s' "$json" | jq '[.tools[] | select(.status != "up_to_date")] | length')" -eq 0 ] || {
+  printf '%s' "$json" | jq -c '.tools[] | select(.status != "up_to_date") | {name,current,pinned,latest_stable,status,detail}' >&2
+  fail 'matching installed, pinned, and latest values were not current'
+}
 [ "$(printf '%s' "$json" | jq '.intentionally_unmanaged | length')" -ge 8 ] || fail 'unmanaged documented dependencies were not explicit'
 action_refs=$(workflow_action_refs "$ROOT/.github/workflows/build.yml")
 [ -n "$action_refs" ] || fail 'the workflow model exposed no action steps to check'
@@ -329,8 +374,42 @@ done
 if printf '%s\n' "$action_refs" | grep -Evq '@[0-9a-f]{40}$'; then
   fail 'a workflow action step resolves to a moving ref instead of an exact commit'
 fi
-[ "$(acp_launch_version "$ROOT/config/baby-menu/agents.json" opencode opencode-ai)" = "$OPENCODE_ACP_VERSION" ] || fail 'the OpenCode agent launches a different opencode-ai version than the manifest'
-[ "$(acp_launch_version "$ROOT/config/baby-menu/agents.json" omp omp-acp)" = "$OMP_ACP_VERSION" ] || fail 'the OMP agent launches a different omp-acp version than the manifest'
+NPX_LOG="$FIXTURE/npx.log"
+: >"$NPX_LOG"
+for agent in opencode omp; do
+  launch=$(jq -er --arg name "$agent" '.[] | select(.name == $name) | .launchCommand' "$ROOT/config/baby-menu/agents.json")
+  env PATH="$ROOT/bin:$PATH" TEST_PINS="$PINS" TEST_CALL_LOG="$CALL_LOG" TEST_NPX_LOG="$NPX_LOG" \
+    DEV_TOOLS_NPM_BIN="$FAKEBIN/npm" DEV_TOOLS_NPX_BIN="$FAKEBIN/npx" bash -c "$launch"
+done
+grep -Fxq -- "artifact:opencode-ai@$OPENCODE_ACP_VERSION|acp" "$NPX_LOG" || fail 'OpenCode ACP did not execute the resolved stable archive'
+grep -Fxq -- "artifact:omp-acp@$OMP_ACP_VERSION|" "$NPX_LOG" || fail 'OMP ACP did not execute the resolved stable archive'
+: >"$NPX_LOG"
+export TEST_OPENCODE_ACP_RELEASE=7.8.9 TEST_OMP_ACP_RELEASE=8.9.10
+for agent in opencode omp; do
+  launch=$(jq -er --arg name "$agent" '.[] | select(.name == $name) | .launchCommand' "$ROOT/config/baby-menu/agents.json")
+  env PATH="$ROOT/bin:$PATH" TEST_PINS="$PINS" TEST_CALL_LOG="$CALL_LOG" TEST_NPX_LOG="$NPX_LOG" \
+    DEV_TOOLS_NPM_BIN="$FAKEBIN/npm" DEV_TOOLS_NPX_BIN="$FAKEBIN/npx" bash -c "$launch"
+done
+unset TEST_OPENCODE_ACP_RELEASE TEST_OMP_ACP_RELEASE
+[ "$(wc -l <"$NPX_LOG")" -eq 2 ] || fail 'ACP launch count changed after registry updates'
+grep -Fxq -- 'artifact:opencode-ai@7.8.9|acp' "$NPX_LOG" || fail 'OpenCode ACP ignored the newer stable release'
+grep -Fxq -- 'artifact:omp-acp@8.9.10|' "$NPX_LOG" || fail 'OMP ACP ignored the newer stable release'
+for agent in opencode omp; do
+  case "$agent" in opencode) export TEST_ACP_TAMPERED_PACKAGE=opencode-ai ;; omp) export TEST_ACP_TAMPERED_PACKAGE=omp-acp ;; esac
+  : >"$NPX_LOG"
+  launch=$(jq -er --arg name "$agent" '.[] | select(.name == $name) | .launchCommand' "$ROOT/config/baby-menu/agents.json")
+  if env PATH="$ROOT/bin:$PATH" TEST_PINS="$PINS" TEST_CALL_LOG="$CALL_LOG" TEST_NPX_LOG="$NPX_LOG" \
+    DEV_TOOLS_NPM_BIN="$FAKEBIN/npm" DEV_TOOLS_NPX_BIN="$FAKEBIN/npx" bash -c "$launch" >/dev/null 2>&1; then
+    fail "$agent accepted an archive whose bytes differ from selected integrity"
+  fi
+  [ ! -s "$NPX_LOG" ] || fail "$agent executed a mismatched archive"
+  unset TEST_ACP_TAMPERED_PACKAGE
+done
+export TEST_LAZY_STABLE_COMMIT=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+stable_json=$(run_checker --json --force --no-cache)
+unset TEST_LAZY_STABLE_COMMIT
+printf '%s' "$stable_json" | jq -e '.tools[] | select(.name == "nvim:lazy.nvim") | .latest_stable == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" and .status == "pin_outdated"' >/dev/null \
+  || fail 'lazy.nvim checker ignored a newer publisher stable tag commit'
 grep -Fq 'npm view @anthropic-ai/claude-code@latest version --json' "$CALL_LOG" || fail 'Claude did not use the npm default version field'
 ! grep -Fq 'npm view @anthropic-ai/claude-code dist-tags.stable --json' "$CALL_LOG" || fail 'Claude was compared with the stable dist-tag'
 grep -Fq 'herdr --version' "$CALL_LOG" || fail 'Herdr installed version was not surveyed'
@@ -520,7 +599,7 @@ rm -f "$FAKEBIN/node"
 printf '#!%s\nprintf "v20.0.0\\n"\n' "$BASH_BIN" >"$FAKEBIN/node"
 chmod +x "$FAKEBIN/node"
 json=$(run_checker --json --force --no-cache)
-node_entry=$(printf '%s' "$json" | jq -ce '.tools[] | select(.name == "nix:nodejs_22")')
+node_entry=$(printf '%s' "$json" | jq -ce '.tools[] | select(.name == "nix:nodejs")')
 [ "$(printf '%s' "$node_entry" | jq -r '.current')" = 20.0.0 ] \
   || fail 'a user-environment Nix row was not measured from the command the operator runs'
 [ "$(printf '%s' "$node_entry" | jq -r '.status')" = drifted ] || fail 'user-environment drift was not reported'
@@ -540,7 +619,7 @@ for row in "${CLOSURE_ROWS[@]}"; do
   printf '%s' "$entry" | jq -e '.detail | test("no closure measurement manifest is bound")' >/dev/null \
     || fail "nix:$package did not say why it could not be measured"
 done
-[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name == "nix:nodejs_22") | .current')" != unknown ] \
+[ "$(printf '%s' "$json" | jq -r '.tools[] | select(.name == "nix:nodejs") | .current')" != unknown ] \
   || fail 'the missing manifest also suppressed a user-environment measurement'
 pass 'a run with no closure manifest reports every closure row unknown instead of measuring the wrong binary'
 

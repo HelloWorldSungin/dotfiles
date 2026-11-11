@@ -8,6 +8,7 @@ ROOT=$(cd "$SELF_DIR/.." && pwd)
 PINS_FILE=${DEV_TOOLS_PINS_FILE:-$ROOT/config/dev-tools-versions.sh}
 CURL_BIN=${DEV_TOOLS_INSTALL_CURL_BIN:-curl}
 NPM_BIN=${DEV_TOOLS_INSTALL_NPM_BIN:-npm}
+NPM_PACK_BIN=${DEV_TOOLS_NPM_PACK_BIN:-$SELF_DIR/npm-pack-verified}
 GIT_BIN=${DEV_TOOLS_INSTALL_GIT_BIN:-git}
 SHA256_BIN=${DEV_TOOLS_INSTALL_SHA256_BIN:-$(command -v sha256sum >/dev/null 2>&1 && printf sha256sum || printf 'shasum -a 256')}
 SHA512_BIN=${DEV_TOOLS_INSTALL_SHA512_BIN:-$(command -v sha512sum >/dev/null 2>&1 && printf sha512sum || printf 'shasum -a 512')}
@@ -30,8 +31,10 @@ versions are re-verified against their recorded registry integrity before npm
 installs them. Firstmate npm tools marked latest|publisher resolve the default
 tag and its integrity first, rejecting prereleases and a non-default channel.
 Herdr resolves its stable manifest asset and checksum. Antigravity resolves
-Google's production manifest and SHA-512. Other release archives retain
-recorded publisher checksums. Herdr and no-mistakes are install-if-absent
+Google's production manifest and SHA-512. Treehouse and no-mistakes resolve the
+latest non-draft, non-prerelease GitHub release once, then verify that release's
+archive against its own publisher checksums.txt and the installed version
+against the resolved tag. Herdr and no-mistakes are install-if-absent
 only; this command never starts, stops, restarts, reloads, updates, or runs
 setup hooks for either service. An existing Firstmate checkout is left in
 place, including one with local commits.
@@ -75,7 +78,7 @@ installed_version() {
 }
 
 install_npm_pin() {
-  local name=$1 command_name=$2 package=$3 version=$4 integrity=$5 _guarded=$6 _channel=$7 actual registry_json registry_version registry_integrity
+  local name=$1 command_name=$2 package=$3 version=$4 integrity=$5 _guarded=$6 _channel=$7 actual registry_json registry_version registry_integrity tmp archive
   selected "$name" || return 0
   if command -v "$command_name" >/dev/null 2>&1; then
     actual=$(installed_version "$command_name" || printf unknown)
@@ -104,10 +107,18 @@ install_npm_pin() {
     say "refuse $name: registry version or integrity differs from the recorded pin" >&2
     return 1
   fi
-  NPM_CONFIG_PREFIX="$NPM_PREFIX" "$NPM_BIN" install -g "$package@$version"
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/dev-tool-npm-install.XXXXXX")
+  trap 'rm -rf "$tmp"' RETURN
+  archive=$("$NPM_PACK_BIN" "$NPM_BIN" "$package" "$version" "$integrity" "$tmp") || {
+    say "refuse $name: publisher archive integrity differs from the selected version" >&2
+    return 1
+  }
+  NPM_CONFIG_PREFIX="$NPM_PREFIX" "$NPM_BIN" install -g "$archive"
   actual=$(installed_version "$command_name" || true)
   [ "$actual" = "$version" ] || { say "refuse $name: installed version '${actual:-unknown}' != pin $version" >&2; return 1; }
   say "installed $name $version"
+  trap - RETURN
+  rm -rf "$tmp"
 }
 
 platform() {
@@ -115,17 +126,6 @@ platform() {
   case "$(uname -s)" in Darwin) os=darwin ;; Linux) os=linux ;; *) return 1 ;; esac
   case "$(uname -m)" in x86_64|amd64) arch=amd64 ;; arm64|aarch64) arch=arm64 ;; *) return 1 ;; esac
   printf '%s-%s\n' "$os" "$arch"
-}
-
-sha_for() {
-  local wanted=$1 row key tree_sha nm_sha
-  for row in "${RELEASE_SHA256_PINS[@]}"; do
-    IFS='|' read -r key tree_sha nm_sha <<<"$row"
-    [ "$key" = "$PLATFORM" ] || continue
-    case "$wanted" in treehouse) printf '%s\n' "$tree_sha" ;; no-mistakes) printf '%s\n' "$nm_sha" ;; esac
-    return 0
-  done
-  return 1
 }
 
 fetch() {
@@ -144,37 +144,60 @@ verify_sha512() {
   [ "$actual" = "$expected" ]
 }
 
+# Resolve a GitHub repository's latest non-draft, non-prerelease release exactly
+# once and print its numeric version. Every later URL and the checksum lookup are
+# derived from that one result, so a release published mid-run cannot be mixed in.
+resolve_latest_release() {
+  local repo=$1 json tag
+  json=$($CURL_BIN -fsSL --connect-timeout 10 --max-time 120 -H 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/$repo/releases/latest") || return 1
+  tag=$(printf '%s' "$json" | jq -er 'select(.draft == false and .prerelease == false) | .tag_name | strings') || return 1
+  case "$tag" in v*) ;; *) return 1 ;; esac
+  safe_version "${tag#v}" || return 1
+  printf '%s\n' "${tag#v}"
+}
+
+# Print the SHA-256 the publisher's checksums.txt lists for exactly one file.
+checksum_for() {
+  local sums=$1 filename=$2 digest
+  digest=$(awk -v f="$filename" '$2 == f || $2 == "*" f { print $1; n++ } END { exit n == 1 ? 0 : 1 }' "$sums") || return 1
+  printf '%s\n' "$digest" | grep -Eq '^[0-9a-f]{64}$' || return 1
+  printf '%s\n' "$digest"
+}
+
 install_release_tool() {
-  local name=$1 version=$2 expected filename url tmp binary
+  local name=$1 repo=$2 version filename base url sums_url expected tmp binary actual
   selected "$name" || return 0
-  safe_version "$version" || { say "refuse $name: unsafe stable version '$version'" >&2; return 1; }
   if command -v "$name" >/dev/null 2>&1; then
-    say "skip $name: installed $(installed_version "$name" || printf unknown) (pin $version; report-only)"
+    say "skip $name: installed $(installed_version "$name" || printf unknown) (latest stable policy; report-only)"
     return 0
   fi
-  expected=$(sha_for "$name") || { say "refuse $name: unsupported platform $PLATFORM" >&2; return 1; }
-  case "$name" in
-    treehouse)
-      filename="treehouse-v${version}-${PLATFORM}.tar.gz"
-      url="https://github.com/kunchenguid/treehouse/releases/download/v${version}/${filename}"
-      ;;
-    no-mistakes)
-      filename="no-mistakes-v${version}-${PLATFORM}.tar.gz"
-      url="https://github.com/kunchenguid/no-mistakes/releases/download/v${version}/${filename}"
-      ;;
-    *) return 2 ;;
-  esac
+  version=$(resolve_latest_release "$repo") || {
+    say "refuse $name: no latest non-draft, non-prerelease release with a numeric tag could be resolved" >&2; return 1;
+  }
+  filename="${name}-v${version}-${PLATFORM}.tar.gz"
+  base="https://github.com/${repo}/releases/download/v${version}"
+  url="$base/$filename"
+  sums_url="$base/checksums.txt"
   if [ "$DRY_RUN" -eq 1 ]; then
-    say "would install $name $version from $url (sha256 $expected)"
+    say "would install $name $version from $url (sha256 from the release's publisher $sums_url)"
     return 0
   fi
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/dev-tool-install.XXXXXX")
   trap 'rm -rf "$tmp"' RETURN
+  fetch "$sums_url" "$tmp/checksums.txt" || { say "refuse $name: release $version publishes no checksums.txt" >&2; return 1; }
+  expected=$(checksum_for "$tmp/checksums.txt" "$filename") || {
+    say "refuse $name: release $version has no usable checksum for $filename" >&2; return 1;
+  }
   fetch "$url" "$tmp/$filename"
   verify_sha256 "$tmp/$filename" "$expected" || { say "refuse $name: publisher checksum mismatch" >&2; return 1; }
   $TAR_BIN -xzf "$tmp/$filename" -C "$tmp"
   binary="$tmp/$name"
   [ -f "$binary" ] || { say "refuse $name: archive has no expected binary" >&2; return 1; }
+  # The archive's own binary must report the resolved release before it is
+  # installed, so a mislabeled archive never replaces anything.
+  actual=$(env NO_UPDATE_NOTIFIER=1 "$binary" --version 2>/dev/null | grep -Eo '[0-9]+(\.[0-9]+){2,3}' | head -1 || true)
+  [ "$actual" = "$version" ] || { say "refuse $name: archive reports version '${actual:-unknown}' != resolved release $version" >&2; return 1; }
   mkdir -p "$LOCAL_BIN"
   $INSTALL_BIN -m 0755 "$binary" "$LOCAL_BIN/$name"
   say "installed $name $version"
@@ -277,19 +300,27 @@ install_cursor_unavailable() {
 }
 
 install_repo_pin() {
-  local name=$1 repo=$2 path=$3 rev=$4 checkout_mode=$5 parent tmp checkout
+  local name=$1 repo=$2 path=$3 checkout_mode=$4 parent tmp checkout rev json tag
   selected "$name" || return 0
-  safe_commit "$rev" || { say "refuse $name: unsafe exact commit '$rev'" >&2; return 1; }
   if [ -d "$path/.git" ]; then
-    say "skip $name: repository exists (compare its HEAD with pin $rev)"
+    say "skip $name: repository exists"
     return 0
   fi
   if [ -e "$path" ]; then
     say "refuse $name: target exists but is not a Git checkout: $path" >&2
     return 1
   fi
+  if [ "$checkout_mode" = main ]; then
+    rev=$($GIT_BIN ls-remote "$repo" refs/heads/main | awk '$2 == "refs/heads/main" {print $1; exit}')
+  else
+    json=$($CURL_BIN -fsSL --connect-timeout 10 --max-time 120 -H 'Accept: application/vnd.github+json' \
+      'https://api.github.com/repos/kunchenguid/baby-menu/releases/latest') || return 1
+    tag=$(printf '%s' "$json" | jq -er 'select(.draft == false and .prerelease == false) | .tag_name | select(type == "string" and test("^baby-menu-v[0-9]+(\\.[0-9]+){2,3}$"))') || return 1
+    rev=$($GIT_BIN ls-remote "$repo" "refs/tags/$tag" "refs/tags/$tag^{}" | awk '$2 ~ /\^\{\}$/ {deref=$1} $2 !~ /\^\{\}$/ {direct=$1} END {print deref ? deref : direct}')
+  fi
+  safe_commit "$rev" || { say "refuse $name: latest stable commit unavailable" >&2; return 1; }
   if [ "$DRY_RUN" -eq 1 ]; then
-    say "would clone $repo and check out exact commit $rev into $path"
+    say "would clone $repo and check out latest stable commit $rev into $path"
     return 0
   fi
   parent=${path%/*}; [ "$parent" != "$path" ] || parent=.
@@ -299,9 +330,11 @@ install_repo_pin() {
   trap 'rm -rf "$tmp"' RETURN
   $GIT_BIN clone --quiet --filter=blob:none --no-checkout "$repo" "$checkout"
   if [ "$checkout_mode" = main ]; then
+    [ "$($GIT_BIN -C "$checkout" rev-parse origin/main)" = "$rev" ] || { say "refuse $name: upstream main moved during clone" >&2; return 1; }
     $GIT_BIN -C "$checkout" checkout --quiet -B main "$rev"
     $GIT_BIN -C "$checkout" branch --set-upstream-to=origin/main main >/dev/null 2>&1 || true
   else
+    [ "$($GIT_BIN -C "$checkout" rev-parse "${tag}^{}")" = "$rev" ] || { say "refuse $name: stable release moved during clone" >&2; return 1; }
     $GIT_BIN -C "$checkout" checkout --quiet --detach "$rev"
   fi
   [ "$($GIT_BIN -C "$checkout" rev-parse HEAD)" = "$rev" ] || { say "refuse $name: checked-out revision does not match pin" >&2; return 1; }
@@ -322,15 +355,15 @@ done
 for name in treehouse no-mistakes; do
   selected "$name" && matched=1
   case "$name" in
-    treehouse) install_release_tool "$name" "$TREEHOUSE_VERSION" ;;
-    no-mistakes) install_release_tool "$name" "$NO_MISTAKES_VERSION" ;;
+    treehouse) install_release_tool "$name" kunchenguid/treehouse ;;
+    no-mistakes) install_release_tool "$name" kunchenguid/no-mistakes ;;
   esac
 done
 selected herdr && matched=1; install_herdr
 (selected agy || selected antigravity) && matched=1; install_antigravity
 selected cursor-agent && matched=1; install_cursor_unavailable
-selected firstmate && matched=1; install_repo_pin firstmate https://github.com/kunchenguid/firstmate.git "${DEV_TOOLS_FIRSTMATE_PATH:-$HOME/firstmate}" "$FIRSTMATE_REV" main
-selected baby-menu && matched=1; install_repo_pin baby-menu https://github.com/kunchenguid/baby-menu.git "${DEV_TOOLS_BABY_MENU_PATH:-$HOME/baby-menu}" "$BABY_MENU_REV" detached
+selected firstmate && matched=1; install_repo_pin firstmate https://github.com/kunchenguid/firstmate.git "${DEV_TOOLS_FIRSTMATE_PATH:-$HOME/firstmate}" main
+selected baby-menu && matched=1; install_repo_pin baby-menu https://github.com/kunchenguid/baby-menu.git "${DEV_TOOLS_BABY_MENU_PATH:-$HOME/baby-menu}" detached
 
 if [ -n "$ONLY" ] && [ "$matched" -eq 0 ]; then
   say "dev-tools-install-pinned: unknown tool: $ONLY" >&2

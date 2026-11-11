@@ -13,7 +13,7 @@ return {
   {
     -- Render Markdown: pretty-view markdown files in Neovim instead of raw text.
     "MeanderingProgrammer/render-markdown.nvim",
-    version = "v8.13.0",
+    version = "*",
     ft = { "markdown" },
     dependencies = { "nvim-treesitter/nvim-treesitter" },
     opts = {

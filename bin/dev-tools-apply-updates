@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# dev-tools-apply-updates - guarded convergence to repository-owned exact pins.
+# dev-tools-apply-updates - guarded convergence to verified stable targets.
 #
-# The only mutable tiers are Firstmate's pinned commit and six explicitly
+# The only mutable tiers are Firstmate's latest upstream main and six explicitly
 # allowlisted npm tools. The checker finds drift, but this command rereads the
-# repository pin and independently verifies the exact remote artifact before
+# selected target and independently verifies the exact remote artifact before
 # applying it. Allowlisted npm tools marked latest|publisher, including gnhf
 # and the axi tools, resolve latest stable to a verified exact artifact.
-# Firstmate advances by fast-forward ONLY to its audited commit - never a
+# Firstmate advances by fast-forward ONLY to the verified upstream commit - never a
 # merge commit, rebase, force, or discard of local commits.
 #
 # Herdr and no-mistakes are attended-only runtime-hosting tools. This command
@@ -32,7 +32,7 @@
 # that version - a file is never trusted on its name alone, because
 # `npm install -g <tarball>` takes its target from the contents - and its
 # checksum is then the recorded evidence, pinning the bytes whose identity was
-# verified. That file is what a reversal reinstalls. Without one of the two the
+# verified. A private verified copy is what a reversal reinstalls. Without one of the two the
 # tool is refused rather than installed: a recorded mutation that cannot be
 # undone is worse than a refused one, and there is deliberately no override that
 # skips the requirement. The installed version must also have a shape a reversal
@@ -104,6 +104,7 @@ FIRSTMATE_REPO=${DEV_TOOLS_FIRSTMATE_REPO:-https://github.com/kunchenguid/firstm
 STATE_DIR=${DEV_TOOLS_FIRSTMATE_STATE_DIR:-$FIRSTMATE_PATH/state}
 GIT_BIN=${DEV_TOOLS_UPDATE_GIT_BIN:-git}
 NPM_BIN=${DEV_TOOLS_UPDATE_NPM_BIN:-npm}
+NPM_PACK_BIN=${DEV_TOOLS_NPM_PACK_BIN:-$SELF_DIR/npm-pack-verified}
 NPM_PREFIX=${DEV_TOOLS_UPDATE_NPM_PREFIX:-${HOME:-.}/.npm-global}
 PRIOR_ARTIFACT_DIR=${DEV_TOOLS_APPLY_PRIOR_ARTIFACT_DIR:-}
 TAR_BIN=${DEV_TOOLS_APPLY_TAR_BIN:-tar}
@@ -141,7 +142,6 @@ fi
 # shellcheck source=../config/dev-tools-versions.sh
 # shellcheck disable=SC1091
 source "$PINS_FILE"
-FIRSTMATE_PIN=${FIRSTMATE_REV:?Firstmate pin missing}
 ALLOWLIST_NPM_JSON='["chrome-devtools-axi","gh-axi","gnhf","lavish-axi","quota-axi","tasks-axi"]'
 # The one npm version shape this tool can reason about, used by the pin check,
 # the reversal-path gate, the rollback preflight, and the installed-version
@@ -341,20 +341,20 @@ CMP_DETAIL=
 firstmate_compare() {
   local pinned=$1 local_commit=$2 remote_commit=$3
   shift 3
+  [ "$pinned" = "$remote_commit" ] ||
+    { CMP_STATUS=refused; CMP_DETAIL='the authoritative Firstmate main branch moved after selection'; return; }
   $GIT_BIN "$@" cat-file -e "$pinned^{commit}" 2>/dev/null ||
-    { CMP_STATUS=refused; CMP_DETAIL='the exact pin is absent from the authoritative Firstmate main branch'; return; }
-  $GIT_BIN "$@" merge-base --is-ancestor "$pinned" "$remote_commit" 2>/dev/null ||
-    { CMP_STATUS=refused; CMP_DETAIL='the exact pin is not contained in the authoritative Firstmate main branch'; return; }
+    { CMP_STATUS=refused; CMP_DETAIL='the selected Firstmate commit is unavailable'; return; }
   if [ "$local_commit" = "$pinned" ]; then
-    CMP_STATUS=up_to_date; CMP_DETAIL="already at pinned commit $pinned"; return
+    CMP_STATUS=up_to_date; CMP_DETAIL="already at latest main commit $pinned"; return
   fi
   if $GIT_BIN "$@" merge-base --is-ancestor "$local_commit" "$pinned" 2>/dev/null; then
-    CMP_STATUS=would_apply; CMP_DETAIL="would fast-forward main to exact pin $pinned"; return
+    CMP_STATUS=would_apply; CMP_DETAIL="would fast-forward main to latest commit $pinned"; return
   fi
   if $GIT_BIN "$@" merge-base --is-ancestor "$pinned" "$local_commit" 2>/dev/null; then
-    CMP_STATUS=refused; CMP_DETAIL='the local default branch is ahead of the exact pin'; return
+    CMP_STATUS=refused; CMP_DETAIL='the local default branch is ahead of upstream main'; return
   fi
-  CMP_STATUS=refused; CMP_DETAIL='the local default branch has diverged from the exact pin'
+  CMP_STATUS=refused; CMP_DETAIL='the local default branch has diverged from upstream main'
 }
 
 firstmate_dry_run_probe() {
@@ -396,7 +396,7 @@ npm_prior_evidence() {
   registry_json=$(run_timed "$NETWORK_TIMEOUT" "$NPM_BIN" view "$package@$version" version dist.integrity --json 2>/dev/null || true)
   registry_version=$(printf '%s' "$registry_json" | jq -r '.version // ""' 2>/dev/null || true)
   registry_integrity=$(printf '%s' "$registry_json" | jq -r '."dist.integrity" // .dist.integrity // ""' 2>/dev/null || true)
-  if [ "$registry_version" = "$version" ] && [ -n "$registry_integrity" ]; then
+  if [ "$registry_version" = "$version" ] && printf '%s\n' "$registry_integrity" | grep -Eq '^sha512-[A-Za-z0-9+/]+={0,2}$'; then
     jq -cn --arg pkg "$package" --arg v "$version" --arg i "$registry_integrity" \
       '{kind:"npm-registry",package:$pkg,version:$v,integrity:$i,available:true}'
     return
@@ -441,13 +441,12 @@ apply_firstmate() {
   row=$(printf '%s' "$detection" | jq -ce '.tools[] | select(.name == "firstmate")' 2>/dev/null || true)
   if [ -z "$row" ]; then set_tier refused 'checker did not return the allowlisted Firstmate source'; return; fi
   current=$(printf '%s' "$row" | jq -r '.current // "unknown"')
-  pinned=$(printf '%s' "$row" | jq -r '.pinned // ""')
+  [ "$(printf '%s' "$row" | jq -r '.pinned // ""')" = latest ] || { set_tier refused 'checker did not select latest Firstmate source'; return; }
   latest=$(printf '%s' "$row" | jq -r '.latest_stable // "unknown"')
-  [ "$pinned" = "$FIRSTMATE_PIN" ] || { set_tier refused 'checker pin disagrees with repository pin'; return; }
-  printf '%s\n' "$pinned" | grep -Eq '^[0-9a-f]{40}$' || { set_tier refused 'unsafe Firstmate commit pin'; return; }
+  pinned=$latest
+  printf '%s\n' "$pinned" | grep -Eq '^[0-9a-f]{40}$' || { set_tier refused 'unsafe latest Firstmate commit'; return; }
   [ -d "$FIRSTMATE_PATH/.git" ] || { set_tier skipped 'Firstmate checkout unavailable'; return; }
   current=$($GIT_BIN -C "$FIRSTMATE_PATH" rev-parse HEAD 2>/dev/null || printf unknown)
-  if [ "$current" = "$pinned" ]; then set_tier up_to_date "already at pinned commit $pinned" "$(jq -cn --arg p "$pinned" --arg l "$latest" '{pinned:$p,latest:$l}')"; return; fi
   branch=$($GIT_BIN -C "$FIRSTMATE_PATH" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
   [ "$branch" = main ] || { set_tier skipped "Firstmate must be on main, found '${branch:-detached}'"; return; }
   if ! $GIT_BIN -C "$FIRSTMATE_PATH" diff --quiet --ignore-submodules -- 2>/dev/null ||
@@ -488,16 +487,16 @@ apply_firstmate() {
   receipt_put "$entry" || { set_tier refused 'could not write the mutation receipt; refusing to mutate'; return; }
   if run_timed "$TIMEOUT_SECONDS" "$GIT_BIN" -C "$FIRSTMATE_PATH" merge --ff-only "$pinned" >/dev/null 2>&1; then
     receipt_settle "$entry" applied
-    set_tier applied "fast-forwarded main to exact pin $pinned" "$(jq -cn --arg p "$pinned" '{pinned:$p}')"
+    set_tier applied "fast-forwarded main to latest commit $pinned" "$(jq -cn --arg p "$pinned" '{pinned:$p}')"
   else
     receipt_settle "$entry" failed
-    set_tier failed 'git merge --ff-only refused the exact pin'
+    set_tier failed 'git merge --ff-only refused the latest commit'
   fi
 }
 
 apply_npm() {
   local detection=$1 results='[]' name spec command_name package pinned integrity registry_json verified_version verified_integrity
-  local current observed installed item any=0 failed=0 refused=0 deferred=0 prior_evidence entry
+  local current observed installed item any=0 failed=0 refused=0 deferred=0 prior_evidence entry tmp archive
   for name in $(printf '%s' "$ALLOWLIST_NPM_JSON" | jq -r '.[]'); do
     spec=$(pin_for_npm "$name" || true)
     if [ -z "$spec" ]; then
@@ -578,7 +577,19 @@ apply_npm() {
       item=$(tier_json refused "could not verify the installed version $observed against the registry or an operator-supplied artifact; refusing a mutation it could not reverse" "$(jq -cn --arg n "$name" --arg p "$pinned" --arg c "$observed" '{name:$n,pinned:$p,prior:$c}')")
       results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); refused=1; continue
     fi
+    tmp=$(mktemp -d "${TMPDIR:-/tmp}/dev-tools-apply-npm.XXXXXX" 2>/dev/null || true)
+    if [ -z "$tmp" ]; then
+      item=$(tier_json refused 'could not create private state for publisher archive verification' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')"); refused=1
+      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); continue
+    fi
+    archive=$(run_timed "$TIMEOUT_SECONDS" "$NPM_PACK_BIN" "$NPM_BIN" "$package" "$pinned" "$integrity" "$tmp" 2>/dev/null || true)
+    if [ -z "$archive" ]; then
+      rm -rf "$tmp"
+      item=$(tier_json refused 'publisher archive differs from selected integrity' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')"); refused=1
+      results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); continue
+    fi
     if [ "$DRY_RUN" -eq 1 ]; then
+      rm -rf "$tmp"
       if receipt_location_usable; then
         item=$(tier_json would_apply "would install $package@$pinned" "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')")
       else
@@ -588,6 +599,7 @@ apply_npm() {
     fi
     detect_workers
     if [ "$WG_STATUS" = active ]; then
+      rm -rf "$tmp"
       item=$(tier_json deferred 'workers appeared during re-verification' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')"); deferred=1
       results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]'); continue
     fi
@@ -599,7 +611,7 @@ apply_npm() {
         status:"pending"}')
     if ! receipt_put "$entry"; then
       item=$(tier_json refused 'could not write the mutation receipt; refusing to mutate' "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')"); refused=1
-    elif run_timed "$TIMEOUT_SECONDS" env NPM_CONFIG_PREFIX="$NPM_PREFIX" "$NPM_BIN" install -g "$package@$pinned" >/dev/null 2>&1; then
+    elif run_timed "$TIMEOUT_SECONDS" env NPM_CONFIG_PREFIX="$NPM_PREFIX" "$NPM_BIN" install -g "$archive" >/dev/null 2>&1; then
       observe_npm "$command_name"
       installed=$NPM_OBSERVED
       if [ "$installed" = "$pinned" ]; then
@@ -613,6 +625,7 @@ apply_npm() {
       receipt_settle "$entry" failed
       item=$(tier_json failed "npm install failed for $package@$pinned" "$(jq -cn --arg n "$name" --arg p "$pinned" '{name:$n,pinned:$p}')"); failed=1
     fi
+    rm -rf "$tmp"
     results=$(jq -cn --argjson a "$results" --argjson i "$item" '$a + [$i]')
   done
   local status detail
@@ -766,16 +779,18 @@ rollback_firstmate() {
 }
 
 rollback_npm() {
-  local entry=$1 command_name package prior target source installed refusal
+  local entry=$1 command_name package prior target source display_source installed refusal tmp recorded kind
   command_name=$(printf '%s' "$entry" | jq -r '.command // ""')
   package=$(printf '%s' "$entry" | jq -r '.package // ""')
   prior=$(printf '%s' "$entry" | jq -r '.prior')
   target=$(printf '%s' "$entry" | jq -r '.target')
-  if [ "$(printf '%s' "$entry" | jq -r '.prior_evidence.kind // ""')" = operator-artifact ]; then
+  kind=$(printf '%s' "$entry" | jq -r '.prior_evidence.kind // ""')
+  if [ "$kind" = operator-artifact ]; then
     source=$(printf '%s' "$entry" | jq -r '.prior_evidence.path // ""')
   else
     source="$package@$prior"
   fi
+  display_source=$source
   if [ "$ATTENDED" -eq 0 ]; then set_tier ready "attended reinstall of $package@$prior from $source would restore the recorded prior version"; return; fi
   detect_workers
   [ "$WG_STATUS" = clear ] || { set_tier refused 'a Firstmate worker lane appeared during the preflight'; return; }
@@ -787,12 +802,39 @@ rollback_npm() {
   [ "$NPM_OBSERVED" = "$target" ] || { set_tier refused 'the installed version left the recorded applied version during the preflight'; return; }
   refusal=$(preflight_npm_refusal "$entry")
   [ -z "$refusal" ] || { set_tier refused "$refusal"; return; }
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/dev-tools-rollback-npm.XXXXXX" 2>/dev/null || true)
+  [ -n "$tmp" ] || { set_tier refused 'could not create private state for prior archive verification'; return; }
+  if [ "$kind" = npm-registry ]; then
+    recorded=$(printf '%s' "$entry" | jq -r '.prior_evidence.integrity // ""')
+    source=$(run_timed "$TIMEOUT_SECONDS" "$NPM_PACK_BIN" "$NPM_BIN" "$package" "$prior" "$recorded" "$tmp" 2>/dev/null || true)
+    if [ -z "$source" ]; then
+      rm -rf "$tmp"
+      set_tier refused 'recorded prior archive differs from registry integrity'
+      return
+    fi
+  else
+    recorded=$(printf '%s' "$entry" | jq -r '.prior_evidence.checksum // ""')
+    source="$tmp/${source##*/}"
+    if ! cp "$display_source" "$source" 2>/dev/null ||
+       [ "$(file_checksum "$source" || true)" != "$recorded" ] ||
+       [ "$(npm_artifact_identity "$source")" != "$package $prior" ]; then
+      rm -rf "$tmp"
+      set_tier refused 'recorded prior artifact changed before reinstall'
+      return
+    fi
+  fi
+  detect_workers
+  if [ "$WG_STATUS" = active ]; then
+    rm -rf "$tmp"
+    set_tier refused 'a Firstmate worker lane appeared during prior archive verification'
+    return
+  fi
   if run_timed "$TIMEOUT_SECONDS" env NPM_CONFIG_PREFIX="$NPM_PREFIX" "$NPM_BIN" install -g "$source" >/dev/null 2>&1; then
     observe_npm "$command_name"
     installed=$NPM_OBSERVED
     if [ "$installed" = "$prior" ]; then
       receipt_reconcile "$entry" "$prior" at_target rolled_back
-      set_tier rolled_back "reinstalled $package@$prior from $source"
+      set_tier rolled_back "reinstalled $package@$prior from $display_source"
     else
       receipt_reconcile "$entry" "$installed" at_target rollback_failed
       set_tier failed "reinstalled command did not report the recorded prior version $prior${NPM_OBSERVE_REASON:+; $NPM_OBSERVE_REASON}"
@@ -802,6 +844,7 @@ rollback_npm() {
     receipt_reconcile "$entry" "$NPM_OBSERVED" at_target rollback_failed
     set_tier failed "npm install failed for $source"
   fi
+  rm -rf "$tmp"
 }
 
 # One preflight for the whole receipt: observe every affected tool, reconcile it
